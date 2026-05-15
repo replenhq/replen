@@ -4,7 +4,7 @@ import { resolveGithubFromText, stripHtml } from "./resolve-github";
 
 // Threads fetcher.
 //
-// We tried direct HTML scraping in May 2026 — threads.com no longer
+// We tried direct HTML scraping in May 2026 - threads.com no longer
 // server-renders post bodies, so a plain curl only gets profile metadata.
 // RSSHub's /threads/:user route has its own scrape implementation that still
 // works, so we depend on a running RSSHub instance pointed to by RSSHUB_BASE.

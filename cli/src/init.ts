@@ -5,7 +5,7 @@ import { platform } from "node:os";
 import { writeConfig, configPath } from "./config.js";
 import { setupMcp } from "./mcp-setup.js";
 
-// Default web app URL — override with REPLEN_BASE for self-host.
+// Default web app URL. Override with REPLEN_BASE for self-host.
 const DEFAULT_BASE = process.env.REPLEN_BASE || "https://app.replen.dev";
 
 // Range for the local callback listener. Anything in 1024-65535 works.
@@ -21,15 +21,15 @@ function openBrowser(url: string): void {
     platform() === "darwin" ? "open"
     : platform() === "win32" ? "start"
     : "xdg-open";
-  // Detach — we don't care about its exit.
+  // Detach. We don't care about its exit.
   const proc = spawn(cmd, [url], { stdio: "ignore", detached: true });
   proc.on("error", () => {
-    // Fail silently — we print the URL anyway as fallback.
+    // Fail silently. We print the URL anyway as fallback.
   });
   proc.unref();
 }
 
-type CallbackResult = { token: string; base: string };
+type CallbackResult = { code: string };
 
 function waitForCallback(port: number, expectedState: string): Promise<CallbackResult> {
   return new Promise((resolve, reject) => {
@@ -40,12 +40,11 @@ function waitForCallback(port: number, expectedState: string): Promise<CallbackR
         res.end("not found");
         return;
       }
-      const token = url.searchParams.get("token");
+      const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
-      const base = url.searchParams.get("base") ?? DEFAULT_BASE;
-      if (!token || !state) {
+      if (!code || !state) {
         res.writeHead(400, { "content-type": "text/plain" });
-        res.end("missing token/state");
+        res.end("missing code/state");
         return;
       }
       if (state !== expectedState) {
@@ -57,7 +56,7 @@ function waitForCallback(port: number, expectedState: string): Promise<CallbackR
       res.end(SUCCESS_HTML);
       // Give the response a tick to flush before we shut down the listener.
       setTimeout(() => server.close(), 100);
-      resolve({ token, base });
+      resolve({ code });
     });
     server.on("error", reject);
     server.listen(port, "127.0.0.1");
@@ -71,8 +70,21 @@ function waitForCallback(port: number, expectedState: string): Promise<CallbackR
   });
 }
 
+async function exchangeCode(base: string, code: string, state: string): Promise<{ token: string; base: string }> {
+  const res = await fetch(`${base}/api/cli-auth/exchange`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, state }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; token?: string; base?: string; error?: string };
+  if (!res.ok || !body.ok || !body.token) {
+    throw new Error(`Exchange failed: ${body.error ?? `HTTP ${res.status}`}`);
+  }
+  return { token: body.token, base: body.base || base };
+}
+
 const SUCCESS_HTML = `<!doctype html>
-<html><head><meta charset="utf-8"><title>replen — authorized</title>
+<html><head><meta charset="utf-8"><title>replen: authorized</title>
 <style>
   body { font: 15px system-ui, -apple-system, sans-serif; max-width: 480px;
          margin: 80px auto; padding: 0 24px; color: #111; line-height: 1.55; }
@@ -83,7 +95,7 @@ const SUCCESS_HTML = `<!doctype html>
 <body>
   <h1><span class="ok">✓</span> Authorized</h1>
   <p>The replen CLI is now connected to your account.</p>
-  <p>You can close this tab and head back to your terminal — the CLI is finishing setup.</p>
+  <p>You can close this tab and head back to your terminal. The CLI is finishing setup.</p>
 </body></html>`;
 
 export async function runInit(): Promise<void> {
@@ -103,28 +115,36 @@ export async function runInit(): Promise<void> {
 
   openBrowser(authUrl);
 
-  let result: CallbackResult;
+  let cb: CallbackResult;
   try {
-    result = await waitForCallback(port, state);
-  } catch (e: any) {
-    console.error("  ✗ " + (e?.message ?? String(e)));
+    cb = await waitForCallback(port, state);
+  } catch (e: unknown) {
+    console.error("  ✗ " + ((e as Error)?.message ?? String(e)));
+    process.exit(1);
+  }
+
+  let exchange: { token: string; base: string };
+  try {
+    exchange = await exchangeCode(base, cb.code, state);
+  } catch (e: unknown) {
+    console.error("  ✗ " + ((e as Error)?.message ?? String(e)));
     process.exit(1);
   }
 
   await writeConfig({
-    token: result.token,
-    base: result.base,
+    token: exchange.token,
+    base: exchange.base,
     savedAt: new Date().toISOString(),
   });
   console.log(`  ✓ Saved auth to ${configPath()}`);
 
-  await setupMcp(result.token, result.base);
+  await setupMcp(exchange.token, exchange.base);
 
   console.log("");
   console.log("  All set. Restart Claude Code (or Codex) and try:");
-  console.log("    /replen-triage      — runs the morning triage protocol");
-  console.log("    use replen to digest_today — pulls today's matches");
+  console.log("    /replen-triage      → runs the morning triage protocol");
+  console.log("    use replen to digest_today → pulls today's matches");
   console.log("");
-  console.log(`  Dashboard: ${result.base}`);
+  console.log(`  Dashboard: ${exchange.base}`);
   console.log("");
 }

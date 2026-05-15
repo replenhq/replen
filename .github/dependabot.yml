@@ -30,7 +30,7 @@ updates:
           - "patch"
           - "minor"
     # Critical/high CVE advisories always open a dedicated PR (Dependabot
-    # security updates — enabled at the repo settings level, not here).
+    # security updates - enabled at the repo settings level, not here).
     labels:
       - "deps"
 

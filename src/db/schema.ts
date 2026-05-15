@@ -21,6 +21,14 @@ export const users = sqliteTable(
     // Most recent visit to / (dashboard). Used to mark matches as "new since
     // your last visit" with a clear-all button.
     lastViewedAt: integer("last_viewed_at", { mode: "timestamp" }),
+    // Per-user Data Encryption Key (DEK): a random 32-byte AES key, itself
+    // encrypted under the master Key Encryption Key (ENCRYPTION_KEY) and
+    // stored here as `enc:v1:<iv>:<tag>:<ct>`. All this user's secrets in
+    // user_settings are then encrypted under their DEK as `enc:v2:<userId>:<iv>:<tag>:<ct>`.
+    // Benefits over a single global key: deleting a user's row destroys
+    // access to their secrets (forward secrecy on delete); a leak of one
+    // user's secrets doesn't expose another's.
+    dekCiphertext: text("dek_ciphertext"),
   },
   (t) => ({
     uniqUid: uniqueIndex("uniq_user_firebase_uid").on(t.firebaseUid),
@@ -33,7 +41,7 @@ export const userSettings = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    // Per-user secrets (user's own tokens — never mine)
+    // Per-user secrets (user's own tokens - never mine)
     githubToken: text("github_token"),
     // Write-scoped GitHub PAT, kept separate so the read-only one used by the
     // pipeline can stay narrowly scoped. Required only for the "create handoff PR" feature.
@@ -44,12 +52,12 @@ export const userSettings = sqliteTable(
     threadsHandles: text("threads_handles"), // comma-separated
     redditSubs: text("reddit_subs"), // comma-separated
     tiktokHandles: text("tiktok_handles"), // comma-separated
-    // Email destination (where their digest goes — sender is shared via SES domain)
+    // Email destination (where their digest goes - sender is shared via SES domain)
     emailToAddress: text("email_to_address"),
     // Run prefs
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     cronHourUtc: integer("cron_hour_utc").notNull().default(6),
-    // Soft cost cap — if the user's runs in the last 24h totalled more than
+    // Soft cost cap - if the user's runs in the last 24h totalled more than
     // this many USD, the next run is skipped with a `paused_reason` of
     // 'cost-cap'. 0 disables the cap. Default $5/day.
     dailyCostCapUsd: real("daily_cost_cap_usd").notNull().default(5.0),
@@ -57,20 +65,26 @@ export const userSettings = sqliteTable(
     // payload (Slack/Discord compatible) at the end of each run.
     webhookUrl: text("webhook_url"),
     webhookKind: text("webhook_kind").notNull().default("generic"), // 'slack' | 'discord' | 'generic'
-    // Personal token for the /api/ingest endpoint. Lets a user POST a URL
-    // from a bookmarklet / browser extension into their candidate queue
-    // without going through full Firebase auth.
+    // Personal token for the /api/ingest endpoint (and MCP /api/mcp/*). Lets
+    // a user POST from a bookmarklet / browser extension / MCP server into
+    // their account without going through full Firebase auth. The plaintext
+    // is shown to the user once at generation/rotation and never persisted;
+    // only the sha256 hash is stored for lookup. The plaintext column below
+    // is retained as nullable during the backfill window (drops in a later
+    // migration) - any value present is migrated on db boot.
     ingestToken: text("ingest_token"),
+    ingestTokenHash: text("ingest_token_hash"),
     // Comma-separated primary languages auto-detected from the user's own
     // repos when they save a PAT (e.g. "TypeScript,Python,Go"). Used by the
     // gh-trending fetcher to pull language-specific trending pages instead
-    // of a hardcoded list — most content creators are just repackaging
+    // of a hardcoded list - most content creators are just repackaging
     // gh-trending, so widening that lens is high-leverage.
     detectedLanguages: text("detected_languages"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({
     uniqUser: uniqueIndex("uniq_settings_user").on(t.userId),
+    uniqIngestHash: uniqueIndex("uniq_settings_ingest_hash").on(t.ingestTokenHash),
   })
 );
 
@@ -227,7 +241,7 @@ export const matches = sqliteTable(
     // Cached PR state polled from GitHub: 'open' | 'closed' | 'merged'.
     handoffPrStatus: text("handoff_pr_status"),
     handoffPrCheckedAt: integer("handoff_pr_checked_at", { mode: "timestamp" }),
-    // Set when the handoff PR is merged — marks this OSS as actually integrated.
+    // Set when the handoff PR is merged - marks this OSS as actually integrated.
     integratedAt: integer("integrated_at", { mode: "timestamp" }),
     // Free-form personal note (used mostly on _general matches as "revisit if
     // I ever build X").
@@ -240,7 +254,7 @@ export const matches = sqliteTable(
     // shown. Denormalised onto the row so per-source feedback aggregation
     // stays cheap (no join through candidates needed).
     sourceKind: text("source_kind"),
-    // Soft-delete timestamp — set by aging policy on old hidden matches so
+    // Soft-delete timestamp - set by aging policy on old hidden matches so
     // the dashboard skips them without losing the history outright.
     archivedAt: integer("archived_at", { mode: "timestamp" }),
   },
@@ -268,6 +282,27 @@ export const creatorAliases = sqliteTable(
   (t) => ({
     uniqKindValue: uniqueIndex("uniq_creator_alias_kind_value").on(t.kind, t.value),
     idxCreator: index("idx_creator_alias_creator").on(t.creatorKey),
+  })
+);
+
+// Forensic log of every at-rest secret decryption. Records who/what/when/why.
+// Lets you spot abuse (settings page reading the PAT three times per visit
+// when it only needs to mask it, or a single user generating decrypt traffic
+// orders of magnitude beyond peers).
+export const secretAccessLog = sqliteTable(
+  "secret_access_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    column: text("column").notNull(),    // 'githubToken' | 'deepseekApiKey' | 'anthropicApiKey' | 'dekCiphertext'
+    reason: text("reason").notNull(),    // 'pipeline-run' | 'mcp-handoff' | 'settings-view' | 'migration' | 'auto-detect' | other
+    success: integer("success", { mode: "boolean" }).notNull().default(true),
+    errorMessage: text("error_message"),
+    accessedAt: integer("accessed_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserTime: index("idx_secret_access_user_time").on(t.userId, t.accessedAt),
+    idxReasonTime: index("idx_secret_access_reason_time").on(t.reason, t.accessedAt),
   })
 );
 

@@ -88,32 +88,32 @@ PARAGRAPH BREAKS ARE REQUIRED. The intro, the bridge sentence, each numbered plu
 
 Structure your note like this:
 
-(paragraph 1) Open with 1–2 sentences on what the repo actually is — what it does, the tech split (e.g. hardware vs software, Rust core vs Python bindings), license, and any obvious constraints.
+(paragraph 1) Open with 1-2 sentences on what the repo actually is - what it does, the tech split (e.g. hardware vs software, Rust core vs Python bindings), license, and any obvious constraints.
 
 (paragraph 2) Bridge into project fit. Use the literal phrasing:
 "For <PROJECT_NAME> specifically, there are N concrete plug points where it earns its place. Listed in increasing ambition:"
 …where N is between 1 and 5, depending on how well it fits.
 
-(numbered list) For each plug point, write a short imperative title (e.g. "1. New Tier-A sensor source.") followed by 2–5 sentences of concrete how-to. NAME THE SUBSYSTEM in <PROJECT_NAME> where it'd slot in — refer to the actual module, file path, or service the project already has. Be specific about behaviour gained.
+(numbered list) For each plug point, write a short imperative title (e.g. "1. New Tier-A sensor source.") followed by 2-5 sentences of concrete how-to. NAME THE SUBSYSTEM in <PROJECT_NAME> where it'd slot in - refer to the actual module, file path, or service the project already has. Be specific about behaviour gained.
 
-(closing paragraph) Scoping. Identify the smallest viable first slice — which plug point is fastest, what does it depend on, rough time estimate (hours/days). If items build on each other, say so.
+(closing paragraph) Scoping. Identify the smallest viable first slice - which plug point is fastest, what does it depend on, rough time estimate (hours/days). If items build on each other, say so.
 
 Cardinal rules:
-- Reference the user's project's actual components by name (services, modules, files) — pull these from their CLAUDE.md or README context provided. If you don't have specifics, use generic-but-grounded references (e.g. "your image-processing layer") rather than empty filler.
+- Reference the user's project's actual components by name (services, modules, files) - pull these from their CLAUDE.md or README context provided. If you don't have specifics, use generic-but-grounded references (e.g. "your image-processing layer") rather than empty filler.
 - No filler phrases like "could be useful for", "interesting potential", "worth exploring". Every sentence must carry concrete information.
 - License / star count / risk goes in the metadata fields, NOT in the writeup body.
-- 400–900 words. Aim for substance not length.
+- 400-900 words. Aim for substance not length.
 
-If you genuinely can't justify even one concrete plug point, do not write a writeup — set relevance="general-awareness" and write a short 80–150 word note on why the repo is broadly interesting but not project-specific.
+If you genuinely can't justify even one concrete plug point, do not write a writeup - set relevance="general-awareness" and write a short 80-150 word note on why the repo is broadly interesting but not project-specific.
 
 Also fill the structured fields:
 - relevance: "high" (would integrate this week), "medium" (real fit, needs work), or "general-awareness" (worth knowing only)
-- relevanceScore 0–100 (be conservative; reserve >80 for high-conviction)
+- relevanceScore 0-100 (be conservative; reserve >80 for high-conviction)
 - summary: 1 sentence on what the repo is (the "what" only, no fit assessment)
 - whyUseful: 1 sentence naming the single most important plug point in <PROJECT_NAME>
-- suggestedUse: 1 sentence — the concrete first action (file to create, function to replace, etc.)
+- suggestedUse: 1 sentence - the concrete first action (file to create, function to replace, etc.)
 - integrationApproach: cherry-pick | vendor | cleanroom-rebuild | depend-on-it | n/a
-- risks: 1 sentence — license issues, abandoned, single maintainer, weird hooks, recent star spike, anything to actually worry about
+- risks: 1 sentence - license issues, abandoned, single maintainer, weird hooks, recent star spike, anything to actually worry about
 
 Output JSON ONLY:
 {
@@ -131,7 +131,7 @@ async function deepWriteup(safety: SafetyReport, project: LocalProject | null, o
   const isGeneral = !project;
   const projectName = project?.name ?? "_general";
 
-  // The user's OWN project README/CLAUDE.md is trusted by them — but still
+  // The user's OWN project README/CLAUDE.md is trusted by them - but still
   // wrap it so the model never confuses it with system instructions.
   const projectBlock = project
     ? `## Project: ${project.name} (slug: ${project.slug})
@@ -139,10 +139,10 @@ async function deepWriteup(safety: SafetyReport, project: LocalProject | null, o
 ${sanitizeUntrusted((project.readmeMd ?? "").slice(0, 8000), "PROJECT_README")}
 
 ${project.claudeMd ? sanitizeUntrusted(project.claudeMd.slice(0, 10000), "PROJECT_CLAUDE_MD") + "\n\n" : ""}Tech: ${project.techSummary ?? "(none)"}`
-    : `## Target: _general (no specific project — write a general-awareness note)`;
+    : `## Target: _general (no specific project - write a general-awareness note)`;
 
   // Candidate repo README is HOSTILE-by-default (we just discovered it from a
-  // post — could be anyone's). Always wrap.
+  // post - could be anyone's). Always wrap.
   const repoBlock = `## Candidate repo: ${safety.meta.owner}/${safety.meta.name}
 
 URL: https://github.com/${safety.meta.owner}/${safety.meta.name}
@@ -170,7 +170,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     provider = isHighSensitivity ? "anthropic" : "deepseek";
   }
   if (provider === "anthropic" && !hasAnthropicKey()) {
-    console.warn(`[reason] skipping project ${project?.slug ?? "?"} — Anthropic requested but ANTHROPIC_API_KEY not set`);
+    console.warn(`[reason] skipping project ${project?.slug ?? "?"} - Anthropic requested but ANTHROPIC_API_KEY not set`);
     return null;
   }
   const model = provider === "anthropic" ? REASONING_MODEL_HIGH : REASONING_MODEL;
@@ -200,7 +200,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     const summary = String(o.summary ?? "").trim();
     const risks = String(o.risks ?? "").trim();
     // Drop the result entirely if the output looks like the model fell for an
-    // injection — leaked the system prompt, echoed our guard tags, or wrote
+    // injection - leaked the system prompt, echoed our guard tags, or wrote
     // exfil instructions. Better to skip the writeup than show poisoned text
     // to the user.
     const leakReason =
@@ -249,7 +249,7 @@ export async function reasonAboutRepo(safety: SafetyReport, projects: LocalProje
   // The deepWriteup call later routes the full content to Anthropic.
   const shortlistInput = included.map((p) =>
     p.sensitivity === "high"
-      ? ({ ...p, readmeMd: `[redacted — high-sensitivity project, name only]`, claudeMd: null, techSummary: p.techSummary } as LocalProject)
+      ? ({ ...p, readmeMd: `[redacted - high-sensitivity project, name only]`, claudeMd: null, techSummary: p.techSummary } as LocalProject)
       : p
   );
 
@@ -291,5 +291,5 @@ export function renderWriteup(
     .filter(Boolean)
     .join("\n");
 
-  return `${project.writeup}\n\n— — —\n${footer}`;
+  return `${project.writeup}\n\n- - -\n${footer}`;
 }

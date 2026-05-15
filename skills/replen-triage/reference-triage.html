@@ -122,7 +122,7 @@
       <span class="meta">12.4k★ · Rust · MIT · pushed 1d ago</span>
     </div>
     <div class="why">
-      Rust-native JS/TS toolchain — parser, linter, formatter. Could shave 60-70% off my-webapp's CI lint+typecheck step
+      Rust-native JS/TS toolchain - parser, linter, formatter. Could shave 60-70% off my-webapp's CI lint+typecheck step
       (currently 90s on Vercel). Risk: still pre-1.0, breaking changes between minors. Worth a feature-flagged experiment.
     </div>
     <div class="actions">
@@ -140,7 +140,7 @@
       <span class="meta">8.4k★ · TypeScript · MIT · pushed 4d ago</span>
     </div>
     <div class="why">
-      Text humanisation library. Strong fit for my-webapp's blog/CMS content layer — but that surface doesn't exist yet,
+      Text humanisation library. Strong fit for my-webapp's blog/CMS content layer - but that surface doesn't exist yet,
       so park it. <b>Project's <code>githubFullName</code> not set</b>; can't auto-handoff until you set it on /projects.
     </div>
     <div class="actions">
@@ -150,7 +150,7 @@
 </section>
 
 <section id="worth-glance">
-  <h2>Worth a glance <span class="count">· 5 · score 60–74, no deep dive</span></h2>
+  <h2>Worth a glance <span class="count">· 5 · score 60-74, no deep dive</span></h2>
   <div class="compact"><a href="https://github.com/cartesiancs/map3d">cartesiancs/map3d</a><span class="meta">→ my-webapp · 68</span><span class="meta">2.1k★</span><span class="meta">TS</span></div>
   <div class="compact"><a href="https://github.com/runablehq/mini-browser">runablehq/mini-browser</a><span class="meta">→ my-cv-project · 65</span><span class="meta">890★</span><span class="meta">Py</span></div>
   <div class="compact"><a href="https://github.com/glouw/nibble">glouw/nibble</a><span class="meta">→ _general · 64</span><span class="meta">540★</span><span class="meta">C</span></div>
@@ -178,7 +178,7 @@
 <footer>
   <p>
     Next triage: tomorrow morning. Run again any time with <code>/replen-triage</code> or "triage my digest".<br>
-    Source weights are updated when you 👍/👎 — chronically-bad sources sink in candidate ranking.
+    Source weights are updated when you 👍/👎 - chronically-bad sources sink in candidate ranking.
   </p>
 </footer>
 
@@ -187,7 +187,7 @@
 <script>
   // Two-way interaction: every action button copies a Claude-Code prompt to the
   // clipboard. The user then pastes back into Claude to actually act. The HTML
-  // never calls our API directly — it stays a pure local artifact.
+  // never calls our API directly - it stays a pure local artifact.
   function showToast(msg) {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -202,10 +202,10 @@
         const orig = btn.textContent;
         btn.classList.add('done');
         btn.textContent = '✓ Copied · paste into Claude';
-        showToast('Prompt copied — paste into Claude Code');
+        showToast('Prompt copied - paste into Claude Code');
         setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 2200);
       } catch (e) {
-        showToast('Copy failed — see console');
+        showToast('Copy failed - see console');
         console.error(e);
       }
     });

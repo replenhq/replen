@@ -2,7 +2,7 @@ import { db, schema } from "../db/client";
 import { and, eq, isNull, lt } from "drizzle-orm";
 
 // Cron-side aging: soft-archive hidden matches older than `days` for every
-// active user. Soft because we want recoverability — the dashboard filters
+// active user. Soft because we want recoverability - the dashboard filters
 // out archived rows but they stay in the DB. Run nightly via the scheduler.
 //
 // Symmetric with the per-user `archiveOldHidden` server action on /settings.

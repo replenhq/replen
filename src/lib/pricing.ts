@@ -1,5 +1,5 @@
 // Per-model token pricing in USD per 1,000,000 tokens.
-// Approximate rates — review against https://artificialanalysis.ai/leaderboards/models
+// Approximate rates - review against https://artificialanalysis.ai/leaderboards/models
 // and the provider's own pricing page periodically.
 //
 // Cost = (inputTokens * inputPer1M + outputTokens * outputPer1M) / 1_000_000.
@@ -7,10 +7,10 @@
 export type ModelPrice = { inputPer1M: number; outputPer1M: number };
 
 export const MODEL_PRICING: Record<string, ModelPrice> = {
-  // DeepSeek — discount tier; flash is what we use for triage + low-sensitivity reasoning.
+  // DeepSeek - discount tier; flash is what we use for triage + low-sensitivity reasoning.
   "deepseek-v4-flash": { inputPer1M: 0.07, outputPer1M: 1.10 },
   "deepseek-v4-pro":   { inputPer1M: 0.27, outputPer1M: 1.10 },
-  // Anthropic Claude Opus — used for high-sensitivity projects.
+  // Anthropic Claude Opus - used for high-sensitivity projects.
   "claude-opus-4-7":   { inputPer1M: 15.00, outputPer1M: 75.00 },
   "claude-sonnet-4-6": { inputPer1M: 3.00, outputPer1M: 15.00 },
 };

@@ -144,7 +144,7 @@ async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number;
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const retries = opts.retries ?? 2;
 
-  // Split system messages out — Anthropic takes them as a top-level field, not in messages.
+  // Split system messages out - Anthropic takes them as a top-level field, not in messages.
   const systemMsgs = req.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const userAssistant = req.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
 

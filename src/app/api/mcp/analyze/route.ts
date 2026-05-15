@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
-import { decryptSecret } from "@/lib/crypto";
+import { readUserSecret } from "@/lib/user-secrets";
 import { authenticate, corsHeaders } from "../_auth";
 
 // POST /api/mcp/analyze
 //   body: { owner, name }
 //
 // Returns raw signals so the *caller's* Claude can judge fit against their
-// open codebase. Deliberately does NOT run our triage/reason pipeline — the
+// open codebase. Deliberately does NOT run our triage/reason pipeline - the
 // whole point of MCP is that the analysis happens with the user's project
 // in context, not against a stale snapshot of project_profiles.
 //
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   }
 
   const tokenStored = auth.settings.githubToken ?? auth.settings.githubWriteToken;
-  const token = tokenStored ? safeDec(tokenStored) : null;
+  const token = tokenStored ? await safeDec(auth.userId, "githubToken", tokenStored) : null;
   if (!token) return NextResponse.json({ error: "no GitHub PAT on file" }, { status: 400, headers: corsHeaders });
 
   const ghHeaders = {
@@ -74,14 +74,17 @@ export async function POST(req: Request) {
     .select({ m: schema.matches, p: schema.projectProfiles })
     .from(schema.matches)
     .innerJoin(schema.repos, eq(schema.matches.repoId, schema.repos.id))
-    .leftJoin(schema.projectProfiles, eq(schema.matches.projectId, schema.projectProfiles.id))
+    .leftJoin(schema.projectProfiles, and(
+      eq(schema.matches.projectId, schema.projectProfiles.id),
+      eq(schema.projectProfiles.userId, auth.userId),
+    ))
     .where(and(
       eq(schema.matches.userId, auth.userId),
       eq(schema.repos.owner, owner),
       eq(schema.repos.name, name),
     ));
 
-  // User's project profiles — Claude needs these to know what fits where.
+  // User's project profiles - Claude needs these to know what fits where.
   const projects = await db
     .select({
       slug: schema.projectProfiles.slug,
@@ -127,7 +130,7 @@ export async function POST(req: Request) {
       project: p?.slug ?? "_general",
       relevance: m.relevance,
       relevanceScore: m.relevanceScore,
-      writeup: ((m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "").slice(0, 1500),
+      writeup: ((m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "").slice(0, 1500),
       starred: m.userStatus === "starred",
       handoffPrUrl: m.handoffPrUrl,
     })),
@@ -136,6 +139,6 @@ export async function POST(req: Request) {
 
 export async function OPTIONS() { return new NextResponse(null, { status: 204, headers: corsHeaders }); }
 
-function safeDec(stored: string): string | null {
-  try { return decryptSecret(stored); } catch { return null; }
+async function safeDec(userId: number, column: string, stored: string): Promise<string | null> {
+  try { return await readUserSecret(userId, column, stored, "mcp-analyze"); } catch { return null; }
 }

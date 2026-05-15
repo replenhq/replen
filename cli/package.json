@@ -1,7 +1,7 @@
 {
   "name": "replen",
-  "version": "0.1.0",
-  "description": "Smart AI Development workflows. The AI that asks 'can we do this better?' — replen reads your codebase against the live ecosystem every morning, surfaces drop-in libraries, ideas to port, and patterns to learn from. A proactive layer for your AI coding workflow. One-command setup: opens a browser to sign in, then wires the MCP server into Claude Code / Codex.",
+  "version": "0.1.1",
+  "description": "Smart AI Development workflows. The AI that asks 'can we do this better?' - replen reads your codebase against the live ecosystem every morning, surfaces drop-in libraries, ideas to port, and patterns to learn from. A proactive layer for your AI coding workflow. One-command setup: opens a browser to sign in, then wires the MCP server into Claude Code / Codex.",
   "type": "module",
   "bin": {
     "replen": "dist/index.js"

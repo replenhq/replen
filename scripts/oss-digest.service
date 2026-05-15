@@ -1,5 +1,5 @@
 [Unit]
-Description=OSS Digest — Next.js dashboard
+Description=OSS Digest - Next.js dashboard
 After=network-online.target
 Wants=network-online.target
 

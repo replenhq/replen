@@ -24,7 +24,7 @@ function langToSlug(lang: string): string {
 const FALLBACK_LANGS = ["typescript", "python", "rust", "go"];
 // Cap per language so trending doesn't dominate the run.
 const PER_LANG_CAP = parseInt(process.env.GH_TRENDING_PER_LANG ?? "8", 10);
-// Hard ceiling on language slices — without this a polyglot user could
+// Hard ceiling on language slices - without this a polyglot user could
 // trigger 10+ trending fetches per run.
 const MAX_LANGS = 5;
 
@@ -70,7 +70,7 @@ export const ghTrendingFetcher: Fetcher = {
         out.push({
           source: lang ? `gh-trending:${lang}` : "gh-trending:all",
           sourceItemId: `${owner}/${name}`,
-          title: `${owner}/${name} — ${desc}`,
+          title: `${owner}/${name} - ${desc}`,
           url: `https://github.com/${owner}/${name}`,
           githubUrl: `https://github.com/${owner}/${name}`,
           author: owner,

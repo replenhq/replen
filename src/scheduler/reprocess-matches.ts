@@ -177,7 +177,7 @@ export async function reprocessForUser(userId: number, opts: ReprocessOpts = {})
   return { fixed, skipped };
 }
 
-// CLI entry — only runs when invoked directly, never on import.
+// CLI entry - only runs when invoked directly, never on import.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cliUserId = process.argv[2] ? Number(process.argv[2]) : null;
   const opts: ReprocessOpts = {

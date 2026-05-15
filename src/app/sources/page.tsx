@@ -186,7 +186,7 @@ async function AdminCreatorAliases() {
       <p className="meta">
         Link a TikTok handle to its Threads / Reddit counterpart so the same person posting on both
         platforms is treated as one creator. The dashboard ranks{" "}
-        <b>tiktok &gt; threads &gt; reddit &gt; hn &gt; gh-trending</b> — if a project is found via both,
+        <b>tiktok &gt; threads &gt; reddit &gt; hn &gt; gh-trending</b>. If a project is found via both,
         the higher-ranked source's post (with video) is shown.
       </p>
       <form action={addAlias} style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0", maxWidth: 720 }}>
@@ -264,19 +264,19 @@ function EffectiveLists({
         <span style={{ background: "#fff3cd", color: "#1a1a1a", padding: "1px 6px", borderRadius: 4 }}>yellow</span> = your private addition
       </p>
       <div style={{ marginTop: 8 }}>
-        <b>Threads</b> ({threads.length}){threads.length === 0 && <span className="meta"> — none yet</span>}
+        <b>Threads</b> ({threads.length}){threads.length === 0 && <span className="meta"> · none yet</span>}
         <div style={{ marginTop: 4 }}>
           {threads.map(({ v, mine }) => <Pill key={v} kind="threads" val={v} mine={mine} />)}
         </div>
       </div>
       <div style={{ marginTop: 12 }}>
-        <b>TikTok</b> ({tiktok.length}){tiktok.length === 0 && <span className="meta"> — none yet</span>}
+        <b>TikTok</b> ({tiktok.length}){tiktok.length === 0 && <span className="meta"> · none yet</span>}
         <div style={{ marginTop: 4 }}>
           {tiktok.map(({ v, mine }) => <Pill key={v} kind="tiktok" val={v} mine={mine} />)}
         </div>
       </div>
       <div style={{ marginTop: 12 }}>
-        <b>Reddit</b> ({reddit.length}){reddit.length === 0 && <span className="meta"> — none yet</span>}
+        <b>Reddit</b> ({reddit.length}){reddit.length === 0 && <span className="meta"> · none yet</span>}
         <div style={{ marginTop: 4 }}>
           {reddit.map(({ v, mine }) => <Pill key={v} kind="reddit" val={v} mine={mine} />)}
         </div>
@@ -395,7 +395,7 @@ async function AdminAllSources() {
               return (
                 <tr key={s.email}>
                   <td>{s.email}</td>
-                  <td>{s.enabled ? "✓" : "—"}</td>
+                  <td>{s.enabled ? "✓" : "-"}</td>
                   <td>{handles.length === 0 ? <span className="meta">none</span> : handles.map((h) => <code key={h} style={{ marginRight: 6 }}>@{h}</code>)}</td>
                   <td>{tiks.length === 0 ? <span className="meta">none</span> : tiks.map((t) => <code key={t} style={{ marginRight: 6 }}>@{t}</code>)}</td>
                   <td>{subs.length === 0 ? <span className="meta">none</span> : subs.map((r) => <code key={r} style={{ marginRight: 6 }}>r/{r}</code>)}</td>

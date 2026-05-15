@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 // search input. Skipped when the user is typing in an input/textarea.
 //
 // Implementation: cycles through elements with `.match` class. Each row's
-// existing star/hide buttons are kept untouched — we just .click() them when
+// existing star/hide buttons are kept untouched - we just .click() them when
 // the corresponding key fires, so server-action plumbing stays single-source.
 export function KeyboardShortcuts() {
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -35,7 +35,7 @@ export function KeyboardShortcuts() {
       if (focusIdx < 0 || focusIdx >= rows.length) return null;
       const row = rows[focusIdx];
       const buttons = Array.from(row.querySelectorAll<HTMLButtonElement>("button"));
-      // Match by visible text — star uses ★/☆, hide uses "hide".
+      // Match by visible text - star uses ★/☆, hide uses "hide".
       if (label === "star") return buttons.find((b) => /★|☆/.test(b.textContent ?? "")) ?? null;
       if (label === "hide") return buttons.find((b) => /^hide$/i.test(b.textContent ?? "")) ?? null;
       return null;

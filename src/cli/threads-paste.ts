@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 // Manual ingest for Threads posts you've copy-pasted from the browser.
-// Useful when GraphQL pagination is broken (which it usually is — Meta's
+// Useful when GraphQL pagination is broken (which it usually is - Meta's
 // signed-request layer rotates constantly).
 //
 // Splits the paste on DD/MM/YYYY date lines, treats each chunk as one post,
@@ -56,7 +56,7 @@ if (lastDate !== null) {
 }
 
 if (splits.length === 0) {
-  console.error("no posts found — expected lines with DD/MM/YYYY date markers");
+  console.error("no posts found - expected lines with DD/MM/YYYY date markers");
   process.exit(1);
 }
 
@@ -74,7 +74,7 @@ for (const { date, body } of splits) {
 
   const text = stripHtml(cleanBody);
 
-  // Detect github URL — first try direct, then the LLM resolver.
+  // Detect github URL - first try direct, then the LLM resolver.
   let githubUrl: string | null = null;
   const direct = text.match(/https?:\/\/github\.com\/[\w.-]+\/[\w.-]+/i);
   if (direct) {

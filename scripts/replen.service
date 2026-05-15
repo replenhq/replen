@@ -1,5 +1,5 @@
 [Unit]
-Description=replen — Next.js dashboard
+Description=replen - Next.js dashboard
 After=network-online.target
 Wants=network-online.target
 

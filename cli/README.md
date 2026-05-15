@@ -1,6 +1,6 @@
 # replen
 
-**Smart AI Development workflows.** One-command setup for [replen](https://replen.dev) — the AI that asks *"can we do this better?"* on your codebase, every morning.
+**Smart AI Development workflows.** One-command setup for [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase, every morning.
 
 ```bash
 npx replen
@@ -50,4 +50,4 @@ Rotate the ingest token on the [/settings](https://app.replen.dev/settings) page
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT - see [LICENSE](./LICENSE).

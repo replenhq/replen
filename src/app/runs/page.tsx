@@ -9,7 +9,7 @@ import { sourceKind } from "@/lib/source-rank";
 export const dynamic = "force-dynamic";
 
 // Minimum gap between user-initiated runs. Prevents a malicious or buggy client
-// from rapid-firing the "Run pipeline now" button to burn LLM budget — the
+// from rapid-firing the "Run pipeline now" button to burn LLM budget - the
 // front-end disables the button visually but the action endpoint is the
 // authoritative gate.
 const MIN_RUN_GAP_MS = 60_000;
@@ -44,7 +44,7 @@ async function runNow() {
 
 function fmtTokens(n: number | null | undefined): string {
   const v = Number(n ?? 0);
-  if (v === 0) return "—";
+  if (v === 0) return "-";
   if (v < 1_000) return String(v);
   if (v < 1_000_000) return `${(v / 1_000).toFixed(1)}k`;
   return `${(v / 1_000_000).toFixed(2)}M`;
@@ -52,7 +52,7 @@ function fmtTokens(n: number | null | undefined): string {
 
 function fmtCost(usd: number | null | undefined): string {
   const v = Number(usd ?? 0);
-  if (v === 0) return "—";
+  if (v === 0) return "-";
   if (v < 0.01) return `<$0.01`;
   return `$${v.toFixed(v < 1 ? 3 : 2)}`;
 }
@@ -68,7 +68,7 @@ function Card({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 function fmtDuration(start: Date, end: Date | null | undefined): string {
-  if (!end) return "—";
+  if (!end) return "-";
   const ms = +end - +start;
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
   return `${(ms / 60_000).toFixed(1)}m`;
@@ -102,7 +102,7 @@ export default async function Runs() {
   const dsOut = sum(last30, "deepseekOutputTokens");
   const anIn = sum(last30, "anthropicInputTokens");
   const anOut = sum(last30, "anthropicOutputTokens");
-  // Rough provider cost split — proportional to (tokens × $/Mtok) from local
+  // Rough provider cost split - proportional to (tokens × $/Mtok) from local
   // pricing table. Approximate since the canonical figure is each run's
   // pre-summed costUsd; here we just want to show DeepSeek-vs-Anthropic share.
   const dsCost = (dsIn / 1_000_000) * 0.27 + (dsOut / 1_000_000) * 1.10;
@@ -112,7 +112,7 @@ export default async function Runs() {
 
   // Per-source breakdown over the last 30d. Candidates + matches joined by
   // source/sourceKind so we can compute "how many candidates this source
-  // produced and how many of those became matches" — the conversion rate
+  // produced and how many of those became matches" - the conversion rate
   // tells us which sources actually earn their keep.
   const thirty = new Date(Date.now() - 30 * 86400_000);
   const candBySource = await db
@@ -150,8 +150,8 @@ export default async function Runs() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, margin: "12px 0 20px" }}>
         <Card label="last 7 days" value={fmtCost(cost7)} sub={`${last7.length} runs`} />
         <Card label="last 30 days" value={fmtCost(cost30)} sub={`${last30.length} runs · ${matches30} matches`} />
-        <Card label="avg / match" value={avgPerMatch > 0 ? fmtCost(avgPerMatch) : "—"} sub="over 30d" />
-        <Card label="provider mix (30d)" value={providerTotal > 0 ? `${dsShare}% DS · ${100 - dsShare}% AN` : "—"} sub={fmtCost(providerTotal)} />
+        <Card label="avg / match" value={avgPerMatch > 0 ? fmtCost(avgPerMatch) : "-"} sub="over 30d" />
+        <Card label="provider mix (30d)" value={providerTotal > 0 ? `${dsShare}% DS · ${100 - dsShare}% AN` : "-"} sub={fmtCost(providerTotal)} />
       </div>
 
       {sourceRows.length > 0 && (
@@ -175,7 +175,7 @@ export default async function Runs() {
                     <td>{s.kind}</td>
                     <td style={{ textAlign: "right" }}>{s.candidates}</td>
                     <td style={{ textAlign: "right" }}>{s.matches}</td>
-                    <td style={{ textAlign: "right", color: rate > 5 ? "#1f8a4c" : rate < 1 ? "#a96" : undefined }}>{s.candidates > 0 ? `${rate}%` : "—"}</td>
+                    <td style={{ textAlign: "right", color: rate > 5 ? "#1f8a4c" : rate < 1 ? "#a96" : undefined }}>{s.candidates > 0 ? `${rate}%` : "-"}</td>
                     <td style={{ textAlign: "right", color: s.net > 0 ? "#1f8a4c" : s.net < 0 ? "#c00" : "#888" }}>{s.net > 0 ? `+${s.net}` : s.net}</td>
                   </tr>
                 );
@@ -193,7 +193,7 @@ export default async function Runs() {
         <button type="submit" disabled={!!inFlight}>
           {inFlight ? `running (started ${inFlight.startedAt.toISOString().slice(11, 16)})…` : "Run pipeline now"}
         </button>
-        {!inFlight && <span className="meta" style={{ marginLeft: 8 }}>fetches new candidates, analyzes, sends digest email · 5–10 min</span>}
+        {!inFlight && <span className="meta" style={{ marginLeft: 8 }}>fetches new candidates, analyzes, sends digest email · 5-10 min</span>}
       </form>
       <table>
         <thead>
@@ -220,7 +220,7 @@ export default async function Runs() {
               <td style={{ textAlign: "right" }}>{r.candidatesFound ?? 0}</td>
               <td style={{ textAlign: "right" }}>{r.reposAnalyzed ?? 0}</td>
               <td style={{ textAlign: "right" }}>{r.matchesCreated ?? 0}</td>
-              <td style={{ textAlign: "center" }}>{r.emailSent ? "✓" : "—"}</td>
+              <td style={{ textAlign: "center" }}>{r.emailSent ? "✓" : "-"}</td>
               <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
                 {fmtTokens(r.deepseekInputTokens)} / {fmtTokens(r.deepseekOutputTokens)}
               </td>
@@ -228,7 +228,7 @@ export default async function Runs() {
                 {fmtTokens(r.anthropicInputTokens)} / {fmtTokens(r.anthropicOutputTokens)}
               </td>
               <td style={{ textAlign: "right" }}>{fmtCost(r.costUsd)}</td>
-              <td className="meta">{r.errorLog ? "yes" : "—"}</td>
+              <td className="meta">{r.errorLog ? "yes" : "-"}</td>
             </tr>
           ))}
         </tbody>

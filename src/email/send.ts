@@ -68,7 +68,7 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
   await transport.sendMail({
     from: `"${fromName}" <${fromAddr}>`,
     to,
-    subject: `OSS digest — ${today} — ${matchesForRun.length} matches`,
+    subject: `OSS digest - ${today} - ${matchesForRun.length} matches`,
     html,
     text,
   });
@@ -76,7 +76,7 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
 }
 
 function writeupBody(m: Match): string {
-  return (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+  return (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
 }
 
 function relevanceColor(rel: string): { bg: string; fg: string } {
@@ -97,7 +97,7 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
     grouped.get(key)!.push(m);
   }
   // Project-specific groups first (ranked by best score); _general / _unknown
-  // always pinned to the bottom — awareness, not project-fit.
+  // always pinned to the bottom; awareness, not project-fit.
   const ordered = [...grouped.entries()].sort((a, b) => {
     const aGen = a[0] === "_general" || a[0] === "_unknown";
     const bGen = b[0] === "_general" || b[0] === "_unknown";
@@ -114,10 +114,10 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
   const awarenessCount = matches.filter((m) => m.relevance === "general-awareness").length;
   const dashboard = process.env.PUBLIC_BASE_URL ?? "http://localhost:3030";
 
-  // Quick-scan TOC at the top — anchors jump down to each project section.
+  // Quick-scan TOC at the top; anchors jump down to each project section.
   const toc = ordered.map(([slug, list]) => {
     const best = Math.max(...list.map((m) => m.relevanceScore ?? 0));
-    return `<li style="margin:2px 0"><a href="#${escapeAttr(slug)}" style="color:#1f3a8a;text-decoration:none">${escapeHtml(slug)}</a> <span style="color:#888;font-size:12px">— ${list.length} (best ${best})</span></li>`;
+    return `<li style="margin:2px 0"><a href="#${escapeAttr(slug)}" style="color:#1f3a8a;text-decoration:none">${escapeHtml(slug)}</a> <span style="color:#888;font-size:12px">· ${list.length} (best ${best})</span></li>`;
   }).join("");
 
   let body = "";
@@ -135,7 +135,7 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
       body += `
         <div style="margin:16px 0;padding:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">
           <div style="display:block;margin-bottom:6px">
-            <a href="${escapeAttr(r.url)}" style="font-size:15px;font-weight:600;color:#1f3a8a;text-decoration:none">${escapeHtml(r.owner)}/${escapeHtml(r.name)}</a>
+            <a href="${escapeHref(r.url)}" style="font-size:15px;font-weight:600;color:#1f3a8a;text-decoration:none">${escapeHtml(r.owner)}/${escapeHtml(r.name)}</a>
             <span style="display:inline-block;background:${c.bg};color:${c.fg};border-radius:3px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px">${escapeHtml(m.relevance)} ${m.relevanceScore ?? ""}</span>
             ${srcChip}
           </div>
@@ -160,7 +160,7 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
 
   const footer = `
     <div style="margin-top:36px;padding-top:18px;border-top:1px solid #e5e7eb;color:#888;font-size:12px;line-height:1.6">
-      Open the <a href="${escapeAttr(dashboard)}" style="color:#1f3a8a">dashboard</a> to star, hide, or open a handoff PR. Reply to this email and nothing happens — we don't read replies.
+      Open the <a href="${escapeHref(dashboard)}" style="color:#1f3a8a">dashboard</a> to star, hide, or open a handoff PR. Reply to this email and nothing happens; we don't read replies.
     </div>
   `;
 
@@ -171,6 +171,22 @@ function escapeAttr(s: string) {
   return escapeHtml(s).replace(/`/g, "&#96;");
 }
 
+// Stricter helper for href values. Only http(s) and in-page fragments are
+// allowed; anything else (javascript:, data:, vbscript:, file:) collapses to
+// an inert `#`. Use this for every `<a href="${...}">` rendered from
+// user-controlled or LLM-touched data.
+function escapeHref(s: string) {
+  const t = String(s ?? "").trim();
+  if (t.startsWith("#")) return escapeAttr(t);
+  try {
+    const u = new URL(t);
+    if (u.protocol === "http:" || u.protocol === "https:") return escapeAttr(u.toString());
+  } catch {
+    // fall through
+  }
+  return "#";
+}
+
 function renderText(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>) {
   return matches
     .map((m) => {
@@ -178,7 +194,7 @@ function renderText(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
       const p = m.projectId ? projects.get(m.projectId)?.slug ?? "_unknown" : "_general";
       return `[${p}] ${r?.owner}/${r?.name} (${m.relevance} ${m.relevanceScore ?? ""}, ${r?.stars ?? 0}★, ${r?.license ?? "no license"})\n${r?.url}\n\n${writeupBody(m)}`;
     })
-    .join("\n\n— — —\n\n");
+    .join("\n\n- - -\n\n");
 }
 
 function escapeHtml(s: string) {

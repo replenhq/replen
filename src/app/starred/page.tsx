@@ -6,15 +6,15 @@ import { BulkBar, RowCheck } from "./BulkBar";
 
 export const dynamic = "force-dynamic";
 
-// Standalone "starred" view — everything the user has flagged, partitioned by
+// Standalone "starred" view - everything the user has flagged, partitioned by
 // where it is in the handoff lifecycle. Useful because the dashboard's day-
 // window filter hides older stars, but the user often wants to come back to a
 // pile of "things I starred but haven't actioned yet".
 //
 // Buckets:
-//   1. Awaiting handoff  — starred, no PR opened yet
-//   2. Open / under review — PR opened but not merged
-//   3. Integrated        — PR merged (integratedAt set)
+//   1. Awaiting handoff  - starred, no PR opened yet
+//   2. Open / under review - PR opened but not merged
+//   3. Integrated        - PR merged (integratedAt set)
 export default async function Starred() {
   const user = await requireUser();
 
@@ -33,7 +33,11 @@ export default async function Starred() {
   }
   const projectMap = new Map<number, typeof schema.projectProfiles.$inferSelect>();
   if (projectIds.length > 0) {
-    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    const ps = await db.select().from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, user.id),
+        inArray(schema.projectProfiles.id, projectIds),
+      ));
     for (const p of ps) projectMap.set(p.id, p);
   }
 
@@ -83,7 +87,7 @@ function Section({ title, list, repoMap, projectMap, bucket }: {
         const repo = repoMap.get(m.repoId);
         if (!repo) return null;
         const project = m.projectId ? projectMap.get(m.projectId) : null;
-        const writeup = (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+        const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
         return (
           <div className="match" key={m.id}>
             <div className="match-head">
@@ -104,7 +108,7 @@ function Section({ title, list, repoMap, projectMap, bucket }: {
               )}
               {bucket === "awaiting" && !project?.githubFullName && (
                 <span className="meta" style={{ color: "#a96" }}>
-                  {project ? <>(set <code>github_full_name</code> on <a href="/projects">/projects</a>)</> : "_general — no project repo"}
+                  {project ? <>(set <code>github_full_name</code> on <a href="/projects">/projects</a>)</> : "_general · no project repo"}
                 </span>
               )}
               {m.handoffPrUrl && (

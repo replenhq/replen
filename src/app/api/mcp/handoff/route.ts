@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
-import { decryptSecret } from "@/lib/crypto";
+import { readUserSecret } from "@/lib/user-secrets";
 import { createHandoffPR } from "@/lib/github-pr";
-import { handoffBranchName, handoffFilePath, renderHandoff } from "@/lib/handoff-template";
+import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
 import { authenticate, corsHeaders } from "../_auth";
 
 // POST /api/mcp/handoff  body: { matchId }
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   if (!repo) return NextResponse.json({ error: "repo missing" }, { status: 500, headers: corsHeaders });
 
   const tokenStored = auth.settings.githubToken ?? auth.settings.githubWriteToken;
-  const writeToken = tokenStored ? safeDec(tokenStored) : null;
+  const writeToken = tokenStored ? await safeDec(auth.userId, "githubToken", tokenStored) : null;
   if (!writeToken) return NextResponse.json({ error: "no GitHub PAT on file" }, { status: 400, headers: corsHeaders });
 
   const filePath = handoffFilePath(repo.owner, repo.name);
@@ -48,13 +48,18 @@ export async function POST(req: Request) {
     project.slug,
     filePath,
   );
-  const prTitle = `Handoff: ${repo.owner}/${repo.name}`;
+  const prTitle = sanitizePrTitle(`Handoff: ${repo.owner}/${repo.name}`);
+  const safeOwner = repo.owner.replace(/[`\n]/g, "");
+  const safeName = repo.name.replace(/[`\n]/g, "");
+  const safeSlug = project.slug.replace(/[`\n]/g, "");
+  const safeFile = filePath.replace(/[`\n]/g, "");
+  const safeRelevance = String(match.relevance).replace(/[`\n]/g, "");
   const prBody = `Automated handoff from replen (via MCP).
 
-This PR adds \`${filePath}\` describing why \`${repo.owner}/${repo.name}\` surfaced as a potential fit for \`${project.slug}\`, plus a prompt for Claude Code / Codex to re-evaluate it with knowledge of this codebase.
+This PR adds \`${safeFile}\` describing why \`${safeOwner}/${safeName}\` surfaced as a potential fit for \`${safeSlug}\`, plus a prompt for Claude Code / Codex to re-evaluate it with knowledge of this codebase.
 
 Source: ${repo.url}
-Match relevance: ${match.relevance}${match.relevanceScore != null ? ` (${match.relevanceScore})` : ""}`;
+Match relevance: ${safeRelevance}${match.relevanceScore != null ? ` (${match.relevanceScore})` : ""}`;
 
   let result;
   try {
@@ -71,7 +76,7 @@ Match relevance: ${match.relevance}${match.relevanceScore != null ? ` (${match.r
     return NextResponse.json({ error: (e as Error).message }, { status: 502, headers: corsHeaders });
   }
   if (result.skipped === "file_exists") {
-    return NextResponse.json({ error: `${filePath} already exists on default branch — skipped` }, { status: 409, headers: corsHeaders });
+    return NextResponse.json({ error: `${filePath} already exists on default branch - skipped` }, { status: 409, headers: corsHeaders });
   }
 
   await db.update(schema.matches).set({ handoffPrUrl: result.prUrl, handoffCreatedAt: new Date() }).where(eq(schema.matches.id, matchId));
@@ -80,6 +85,6 @@ Match relevance: ${match.relevance}${match.relevanceScore != null ? ` (${match.r
 
 export async function OPTIONS() { return new NextResponse(null, { status: 204, headers: corsHeaders }); }
 
-function safeDec(stored: string): string | null {
-  try { return decryptSecret(stored); } catch { return null; }
+async function safeDec(userId: number, column: string, stored: string): Promise<string | null> {
+  try { return await readUserSecret(userId, column, stored, "mcp-handoff"); } catch { return null; }
 }

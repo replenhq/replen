@@ -33,7 +33,7 @@ table form.inline button { padding: 2px 8px; font-size: 12px; line-height: 1.4; 
 td.path { color: #888; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; max-width: 280px; }
 
 /* ──────────────────────────────────────────────────────────────
-   Mobile — phones in portrait. Single-column header, tighter
+   Mobile - phones in portrait. Single-column header, tighter
    padding, wrap match-head onto multiple rows, scroll wide tables.
    ────────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
@@ -64,13 +64,13 @@ td.path { color: #888; font-size: 11px; font-family: ui-monospace, SFMono-Regula
   /* Inline forms: stretch a touch so taps don't miss. */
   button { padding: 4px 10px; font-size: 13px; }
 
-  /* Tables — let them scroll horizontally rather than overflow the
+  /* Tables - let them scroll horizontally rather than overflow the
      viewport. Wrap in .scroll-x or just allow body horizontal scroll
      in the table wrapper itself. */
   table { font-size: 12px; display: block; overflow-x: auto; white-space: nowrap; }
   table th, table td { padding: 5px 6px; }
 
-  /* Source embeds — let the iframe shrink to the viewport. The desktop
+  /* Source embeds - let the iframe shrink to the viewport. The desktop
      max-width values are still respected when there's more room. */
   iframe { max-width: 100% !important; }
 
@@ -78,7 +78,7 @@ td.path { color: #888; font-size: 11px; font-family: ui-monospace, SFMono-Regula
   pre { font-size: 12px; }
 }
 
-/* Very narrow phones — push padding down further. */
+/* Very narrow phones - push padding down further. */
 @media (max-width: 380px) {
   body { padding: 8px; }
   header a { margin-right: 6px; }

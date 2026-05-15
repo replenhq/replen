@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rsync the replen.dev marketing site and the replen-docs docs site to the
 # VPS, where nginx serves them on 127.0.0.1:8080 behind the Cloudflare
-# Tunnel (Host-header-routed). No build step — both are static.
+# Tunnel (Host-header-routed). No build step - both are static.
 #
 # Usage:
 #   bash scripts/deploy-static.sh             # both sites

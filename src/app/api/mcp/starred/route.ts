@@ -22,7 +22,11 @@ export async function GET(req: Request) {
   }
   const projectMap = new Map<number, typeof schema.projectProfiles.$inferSelect>();
   if (projectIds.length) {
-    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    const ps = await db.select().from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, auth.userId),
+        inArray(schema.projectProfiles.id, projectIds),
+      ));
     for (const p of ps) projectMap.set(p.id, p);
   }
 
@@ -41,7 +45,7 @@ export async function GET(req: Request) {
       handoffPrUrl: m.handoffPrUrl,
       handoffPrStatus: m.handoffPrStatus,
       relevance: m.relevance,
-      summary: ((m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "").slice(0, 400),
+      summary: ((m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "").slice(0, 400),
     };
   });
   return NextResponse.json({ count: out.length, matches: out }, { headers: corsHeaders });

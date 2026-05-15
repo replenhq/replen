@@ -14,62 +14,127 @@ function isPublic(pathname: string) {
 // XSS bug slips in, CSP gates what attacker scripts can do (no eval, no
 // arbitrary script src, no exfil to random origins).
 //
+// Per-request nonce strategy: a 16-byte random nonce is generated, set on
+// both the request header `x-nonce` (read by server components / next/script)
+// and the response CSP header (`script-src 'nonce-XYZ' 'strict-dynamic'`).
+// 'strict-dynamic' lets Next.js's bundled boot scripts (which inherit the
+// nonce automatically since Next 13.4+) load further chunks without
+// individually whitelisting each one.
+//
 // What's whitelisted and why:
-//  - script-src self + gstatic + apis.google.com: Firebase Auth SDK
-//  - 'unsafe-inline' on style-src: Next.js + React inline styles
-//  - 'unsafe-inline' / 'unsafe-eval' on script-src: Next.js's hydration bundle
-//    requires inline scripts. Using a nonce would be safer; revisit if any
-//    inline scripts originate from user input (today, none do).
-//  - frame-src threads.com / tiktok.com: the SourcePost video embeds.
+//  - script-src 'self' + nonce: our own scripts (+ Next bundles via nonce)
+//  - style-src 'unsafe-inline': React inline styles. Style-only XSS has very
+//    limited blast radius; the alternative is nonce-on-every-style which
+//    breaks third-party SVGs etc.
+//  - img-src https: allow any image src (GitHub avatars, etc.)
+//  - frame-src threads.com / tiktok.com: the source-post video embeds.
 //  - connect-src to firebaseapp / googleapis / securetoken: Firebase Auth.
 //  - frame-ancestors 'none': prevents anyone from iframing us (clickjacking).
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.gstatic.com https://apis.google.com https://*.firebaseapp.com",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
-  "font-src 'self' data:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com",
-  "frame-src 'self' https://www.threads.com https://www.tiktok.com",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "upgrade-insecure-requests",
-].join("; ");
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.gstatic.com https://apis.google.com https://*.firebaseapp.com`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com",
+    "frame-src 'self' https://www.threads.com https://www.tiktok.com",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join("; ");
+}
 
-function applySecurityHeaders(res: NextResponse): NextResponse {
-  res.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
+function generateNonce(): string {
+  // 16 random bytes → 22 base64 chars; well above the OWASP-recommended 128
+  // bits of entropy for a CSP nonce.
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/=+$/, "");
+}
+
+function applySecurityHeaders(res: NextResponse, nonce: string): NextResponse {
+  res.headers.set("Content-Security-Policy", buildCsp(nonce));
+  res.headers.set("x-nonce", nonce);
   // X-Frame-Options is redundant with frame-ancestors but adds coverage for
   // older browsers that don't enforce the CSP directive.
   res.headers.set("X-Frame-Options", "DENY");
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()");
-  // HSTS: only meaningful behind HTTPS — nginx already enforces TLS in front
+  // HSTS: only meaningful behind HTTPS - nginx already enforces TLS in front
   // of this app, so flag the upgrade. 6 months + preload-ready value.
   res.headers.set("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
   return res;
 }
 
+// Cloudflare-only origin enforcement. When REQUIRE_CLOUDFLARE=1, every request
+// must arrive via Cloudflare. We check both:
+//   1. CF-Connecting-IP must be present (Cloudflare always sets this on
+//      forwarded requests; clients connecting directly to the origin IP do
+//      not).
+//   2. If CF_ORIGIN_SECRET is set, the request must carry x-cf-origin-secret
+//      with the same value. Pair this with a Cloudflare Transform Rule that
+//      injects the secret on every forwarded request (Rules → Transform →
+//      Modify Request Header → Set static).
+//
+// Reject with 421 Misdirected Request, no body, no security headers (we
+// don't want to leak that this is a replen origin). Health endpoints bypass.
+function rejectIfNotCloudflare(request: NextRequest): NextResponse | null {
+  if (process.env.REQUIRE_CLOUDFLARE !== "1") return null;
+  const path = request.nextUrl.pathname;
+  // Allow local healthchecks via loopback - typically used by systemd / nginx upstream probes.
+  if (path === "/api/whoami" || path === "/api/healthz") return null;
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (!cfIp) {
+    return new NextResponse(null, { status: 421 });
+  }
+  const expected = process.env.CF_ORIGIN_SECRET;
+  if (expected) {
+    const got = request.headers.get("x-cf-origin-secret");
+    if (!got || got !== expected) {
+      return new NextResponse(null, { status: 421 });
+    }
+  }
+  return null;
+}
+
 export async function middleware(request: NextRequest) {
+  const reject = rejectIfNotCloudflare(request);
+  if (reject) return reject;
+
+  const nonce = generateNonce();
+  // Forward nonce to the app via request header so server components / next/script
+  // can pick it up via headers().get("x-nonce").
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set("x-nonce", nonce);
+
   // /api/sync still uses x-sync-token; keep public (the route checks its own auth).
   if (request.nextUrl.pathname.startsWith("/api/sync")) {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
   // /api/whoami: public diagnostic; the route itself reports session state.
   if (request.nextUrl.pathname === "/api/whoami") {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
   // /api/ingest: per-user token auth from the route; bookmarklets POST here
   // from any origin (CORS preflight is OPTIONS).
   if (request.nextUrl.pathname.startsWith("/api/ingest")) {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
   // /api/mcp/*: MCP server calls from the user's local machine. Token auth
-  // is enforced in each route; CORS is permissive on those paths.
+  // is enforced in each route.
   if (request.nextUrl.pathname.startsWith("/api/mcp/")) {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+  }
+  // /api/cli-auth/exchange: one-time exchange code redemption. Route enforces
+  // state matching and 2-min TTL; no Firebase session needed.
+  if (request.nextUrl.pathname.startsWith("/api/cli-auth/exchange")) {
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
 
   return authMiddleware(request, {
@@ -77,16 +142,18 @@ export async function middleware(request: NextRequest) {
     loginPath: "/api/login",
     logoutPath: "/api/logout",
     handleValidToken: async (_tokens, headers) => {
-      return applySecurityHeaders(NextResponse.next({ request: { headers } }));
+      const merged = new Headers(headers);
+      merged.set("x-nonce", nonce);
+      return applySecurityHeaders(NextResponse.next({ request: { headers: merged } }), nonce);
     },
-    handleInvalidToken: async (reason) => {
-      if (isPublic(request.nextUrl.pathname)) return applySecurityHeaders(NextResponse.next());
-      return applySecurityHeaders(redirectToLogin(request, { path: "/login", publicPaths: PUBLIC_PATHS }));
+    handleInvalidToken: async () => {
+      if (isPublic(request.nextUrl.pathname)) return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+      return applySecurityHeaders(redirectToLogin(request, { path: "/login", publicPaths: PUBLIC_PATHS }), nonce);
     },
     handleError: async (error) => {
       console.error("[auth middleware]", error);
-      if (isPublic(request.nextUrl.pathname)) return applySecurityHeaders(NextResponse.next());
-      return applySecurityHeaders(redirectToLogin(request, { path: "/login", publicPaths: PUBLIC_PATHS }));
+      if (isPublic(request.nextUrl.pathname)) return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+      return applySecurityHeaders(redirectToLogin(request, { path: "/login", publicPaths: PUBLIC_PATHS }), nonce);
     },
   });
 }

@@ -33,7 +33,10 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
       })
       .from(schema.matches)
       .innerJoin(schema.repos, eq(schema.matches.repoId, schema.repos.id))
-      .leftJoin(schema.projectProfiles, eq(schema.matches.projectId, schema.projectProfiles.id))
+      .leftJoin(schema.projectProfiles, and(
+        eq(schema.matches.projectId, schema.projectProfiles.id),
+        eq(schema.projectProfiles.userId, user.id),
+      ))
       .where(
         and(
           eq(schema.matches.userId, user.id),
@@ -75,7 +78,7 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
       )}
 
       {results.map(({ match: m, repo, project }) => {
-        const writeup = (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+        const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
         return (
           <div className="match" key={m.id}>
             <div className="match-head">

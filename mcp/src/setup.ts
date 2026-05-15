@@ -1,4 +1,4 @@
-// `replen-mcp setup` — one-shot installer that writes the MCP server entry
+// `replen-mcp setup`: one-shot installer that writes the MCP server entry
 // into the user's Claude Code config (~/.claude.json) without them having to
 // hand-edit JSON. Idempotent: re-running with new flags just overwrites the
 // replen block, leaves other MCP servers untouched.
@@ -56,7 +56,7 @@ export async function runSetup(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
 
   if (!args.token) {
-    console.error(`replen-mcp setup — install the MCP server entry into Claude Code config.
+    console.error(`replen-mcp setup: install the MCP server entry into Claude Code config.
 
 Usage:
   replen-mcp setup --token=<DIGEST_TOKEN> [--base=<URL>] [--config=<path>] [--name=<key>]
@@ -89,9 +89,11 @@ After running this, restart Claude Code. The "${args.name}" MCP server will be a
   console.error(`  server:  ${args.name}`);
   console.error(`  base:    ${args.base}`);
 
-  // Back up first — never overwrite Claude config without a recovery path.
+  // Back up first; never overwrite Claude config without a recovery path.
+  // Timestamped so a re-run preserves the prior backup.
   if (existsSync(args.configPath)) {
-    const backup = `${args.configPath}.bak`;
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backup = `${args.configPath}.bak.${ts}`;
     writeFileSync(backup, readFileSync(args.configPath));
     console.error(`  backup:  ${backup}`);
   }

@@ -4,11 +4,22 @@ import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
 import { randomBytes } from "crypto";
+import { hashIngestToken } from "@/lib/crypto";
+import { issueCliAuthCode } from "@/lib/cli-auth-codes";
 
 export type AuthorizeResult =
   | { ok: true; callback: string }
   | { ok: false; error: string };
 
+// Each authorize mints a NEW ingest token: we only persist the sha256 hash in
+// the DB, so reusing the same plaintext across authorizations isn't possible
+// (and is also a desirable security property — pressing Authorize rotates the
+// credential and invalidates anything the previous holder kept).
+//
+// The plaintext does NOT leave the server in the redirect URL. Instead we
+// issue a short-lived (2-min, single-use) exchange code. The browser redirect
+// carries only the code; the CLI redeems it server-to-server against
+// /api/cli-auth/exchange.
 export async function authorizeCli(port: number, state: string): Promise<AuthorizeResult> {
   const u = await requireUser();
 
@@ -19,32 +30,32 @@ export async function authorizeCli(port: number, state: string): Promise<Authori
     return { ok: false, error: "Invalid state" };
   }
 
+  const token = "ing_" + randomBytes(24).toString("base64url");
+  const hash = hashIngestToken(token);
+
   const existing = await db
-    .select()
+    .select({ id: schema.userSettings.id })
     .from(schema.userSettings)
     .where(eq(schema.userSettings.userId, u.id))
     .get();
-  let token = existing?.ingestToken ?? null;
-  if (!token) {
-    token = "ing_" + randomBytes(24).toString("base64url");
-    if (existing) {
-      await db
-        .update(schema.userSettings)
-        .set({ ingestToken: token, updatedAt: new Date() })
-        .where(eq(schema.userSettings.userId, u.id));
-    } else {
-      await db.insert(schema.userSettings).values({
-        userId: u.id,
-        ingestToken: token,
-        updatedAt: new Date(),
-      });
-    }
+  if (existing) {
+    await db
+      .update(schema.userSettings)
+      .set({ ingestTokenHash: hash, ingestToken: null, updatedAt: new Date() })
+      .where(eq(schema.userSettings.userId, u.id));
+  } else {
+    await db.insert(schema.userSettings).values({
+      userId: u.id,
+      ingestTokenHash: hash,
+      ingestToken: null,
+      updatedAt: new Date(),
+    });
   }
 
   const base = process.env.PUBLIC_BASE_URL || "https://app.replen.dev";
+  const code = issueCliAuthCode(u.id, token, base, state);
   const cb = new URL(`http://127.0.0.1:${port}/callback`);
-  cb.searchParams.set("token", token);
+  cb.searchParams.set("code", code);
   cb.searchParams.set("state", state);
-  cb.searchParams.set("base", base);
   return { ok: true, callback: cb.toString() };
 }

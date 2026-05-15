@@ -12,7 +12,7 @@ import { apiGet, apiPost, type ApiConfig } from "./api.js";
 //    is that the *caller's* Claude session has the open codebase loaded,
 //    so it'll judge fit better than our stale pipeline can.
 //  - All write operations require an explicit `matchId`. There's no "open
-//    handoff PR for the repo I just analysed" — agents should fetch the
+//    handoff PR for the repo I just analysed"; agents should fetch the
 //    match list, pick the right id, and act on that, to avoid surprises.
 
 type Tool = {
@@ -25,7 +25,7 @@ type Tool = {
 const TOOLS: Tool[] = [
   {
     name: "digest_today",
-    description: "List matches from replen — the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. Use this to answer 'what could make my project sharper today' or 'anything for <project-name> this week'.",
+    description: "List matches from replen, the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. Use this to answer 'what could make my project sharper today' or 'anything for <project-name> this week'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -76,7 +76,7 @@ const TOOLS: Tool[] = [
     description:
       "Pull raw signals (README, GitHub metadata, your project profiles) for a specific repo so you can judge fit against the codebase you have open. " +
       "Returns: repo meta, README markdown, the user's project techSummaries, plus any existing match writeup. " +
-      "Does NOT run the digest LLM pipeline — that's intentional, you have more context than it does.",
+      "Does NOT run the digest LLM pipeline; that's intentional, you have more context than it does.",
     inputSchema: {
       type: "object",
       properties: {
@@ -111,8 +111,8 @@ const TOOLS: Tool[] = [
   {
     name: "digest_feedback",
     description:
-      "Record feedback / status on a match. Actions: 'good' / 'bad' (feeds source ranking — chronically-bad sources sink), 'clear' (undo good/bad), 'star' / 'unstar' / 'hide'. " +
-      "Use 'good' when the user finds a match genuinely useful; 'bad' when it was off-topic — this trains which sources earn future LLM cycles.",
+      "Record feedback / status on a match. Actions: 'good' / 'bad' (feeds source ranking; chronically-bad sources sink), 'clear' (undo good/bad), 'star' / 'unstar' / 'hide'. " +
+      "Use 'good' when the user finds a match genuinely useful; 'bad' when it was off-topic. This trains which sources earn future LLM cycles.",
     inputSchema: {
       type: "object",
       properties: {

@@ -13,7 +13,7 @@ const DEFAULT_RELEVANCES = ["high", "medium", "general-awareness"];
 export default async function Home({ searchParams }: { searchParams: Promise<{ rel?: string; days?: string; project?: string }> }) {
   const user = await requireUser();
   // Send users without basic config to onboarding. Bypassed if they've ever
-  // run a pipeline (returning visitor) — they might have just cleared their
+  // run a pipeline (returning visitor) - they might have just cleared their
   // settings temporarily.
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
@@ -27,7 +27,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     redirect("/welcome");
   }
 
-  // Read last_viewed_at BEFORE updating it — anything newer is "new since
+  // Read last_viewed_at BEFORE updating it - anything newer is "new since
   // your last visit". Then stamp now-ish, so the next visit's banner only
   // covers what came in after this load.
   const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
@@ -57,7 +57,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   }
 
   const matches = await db.select().from(schema.matches).where(and(...conds)).orderBy(desc(schema.matches.relevanceScore));
-  // Batch-fetch repos + projects via IN(...) — avoids N+1 round-trips when a
+  // Batch-fetch repos + projects via IN(...) - avoids N+1 round-trips when a
   // run produces dozens of matches.
   const repoIds = [...new Set(matches.map((m) => m.repoId))];
   const projectIds = [...new Set(matches.map((m) => m.projectId).filter((x): x is number => !!x))];
@@ -68,14 +68,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   }
   const projectMap = new Map<number, typeof schema.projectProfiles.$inferSelect>();
   if (projectIds.length > 0) {
-    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    const ps = await db.select().from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, user.id),
+        inArray(schema.projectProfiles.id, projectIds),
+      ));
     for (const p of ps) projectMap.set(p.id, p);
   }
   // Find the source candidate for each repo so we can embed/link the original
   // post. Pick the highest-priority source per repo:
   //  tiktok > threads > reddit > hn > gh-trending.
   // Creator aliases let two handles (e.g. marc.caz on Threads, whitewhoadie on
-  // TikTok) map to the same creator — if both surface the same repo, we pick
+  // TikTok) map to the same creator - if both surface the same repo, we pick
   // the higher-ranked source's post.
   const aliasRows = await db.select().from(schema.creatorAliases);
   const aliasMap = new Map<string, string>(); // "kind:value" → creator_key
@@ -89,7 +93,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       .from(schema.candidates)
       .where(and(eq(schema.candidates.userId, user.id), inArray(schema.candidates.githubUrl, repoUrls)));
     // Sort: source-rank asc (lower = better), then postedAt desc (newer = better).
-    // Creator aliases don't change this — they're collapsed implicitly: two
+    // Creator aliases don't change this - they're collapsed implicitly: two
     // candidates from the same creator just both compete, and source-rank
     // picks the richer-media one.
     cs.sort((a, b) => {
@@ -111,7 +115,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     .groupBy(schema.matches.relevance);
   const countMap = new Map(counts.map((r) => [r.rel, Number(r.c)]));
 
-  // "N new since your last visit" banner — counts matches that arrived after
+  // "N new since your last visit" banner - counts matches that arrived after
   // the previous lastViewedAt stamp. First-time visitors skip the banner
   // (lastViewedAt is null) since "new" would mean "everything", which is
   // noise rather than a signal.
@@ -129,7 +133,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     newSinceVisit = Number(newRow?.c ?? 0);
   }
 
-  // Group matches by project slug — matches the email digest layout. Order
+  // Group matches by project slug - matches the email digest layout. Order
   // groups by max relevanceScore so the highest-conviction project goes first.
   const groups = new Map<string, typeof matches>();
   for (const m of matches) {
@@ -138,7 +142,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     groups.get(slug)!.push(m);
   }
   // Project-specific groups first, ordered by best score within the group.
-  // _general (and _unknown) always pinned to the bottom — they're awareness,
+  // _general (and _unknown) always pinned to the bottom - they're awareness,
   // not project-fit.
   const orderedGroups = [...groups.entries()].sort((a, b) => {
     const aGen = a[0] === "_general" || a[0] === "_unknown";
@@ -166,10 +170,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       {orderedGroups.map(([slug, list]) => {
         const project = list[0].projectId ? projectMap.get(list[0].projectId) : null;
         const isGeneral = slug === "_general" || slug === "_unknown";
-        // _general / _unknown rolled up into a collapsed details — these are
+        // _general / _unknown rolled up into a collapsed details - these are
         // "keep on the radar" rather than today's actionable matches, so they
         // shouldn't dominate the visual weight of the page.
-        const displaySlug = slug === "_general" ? "Future awareness — keep on the radar"
+        const displaySlug = slug === "_general" ? "Future awareness · keep on the radar"
           : slug === "_unknown" ? "Unmatched"
           : slug;
         const inner = (
@@ -186,7 +190,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
             {list.map((m) => {
               const repo = repoMap.get(m.repoId);
               if (!repo) return null;
-              const writeup = (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+              const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
               const candidate = candidateByRepoUrl.get(repo.url);
               // Source attribution: prefer the denormalised match.sourceKind
               // (set at insert time), fall back to deriving it from the picked
@@ -200,10 +204,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     {srcKind && <span className="tag" style={{ background: "#eef", color: "#225" }}>via {srcKind}</span>}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                     <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "good" ? "clear" : "good"); }}>
-                      <button title="Useful — feeds source ranking" style={{ opacity: m.userFeedback === "good" ? 1 : 0.5 }}>👍</button>
+                      <button title="Useful (feeds source ranking)" style={{ opacity: m.userFeedback === "good" ? 1 : 0.5 }}>👍</button>
                     </form>
                     <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "bad" ? "clear" : "bad"); }}>
-                      <button title="Not useful — feeds source ranking" style={{ opacity: m.userFeedback === "bad" ? 1 : 0.5 }}>👎</button>
+                      <button title="Not useful (feeds source ranking)" style={{ opacity: m.userFeedback === "bad" ? 1 : 0.5 }}>👎</button>
                     </form>
                     <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "hidden"); }}>
                       <button>hide</button>
@@ -253,7 +257,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 }
 
 function PersonalNote({ matchId, value }: { matchId: number; value: string }) {
-  // Collapsed by default unless there's already a note — pinning it open when
+  // Collapsed by default unless there's already a note - pinning it open when
   // there's content saves a click to remind yourself why you flagged it.
   return (
     <details open={!!value} style={{ marginTop: 8 }}>
@@ -283,7 +287,7 @@ function PersonalNote({ matchId, value }: { matchId: number; value: string }) {
 
 function SourcePost({ candidate }: { candidate: typeof schema.candidates.$inferSelect }) {
   const src = candidate.source;
-  // Threads embed — inline iframe.
+  // Threads embed - inline iframe.
   if (src.startsWith("threads:")) {
     const handle = src.slice("threads:".length);
     const code = candidate.url.match(/threads\.com\/(?:@[^/]+\/post|t)\/([A-Za-z0-9_-]+)/)?.[1] ?? candidate.sourceItemId;
@@ -308,7 +312,7 @@ function SourcePost({ candidate }: { candidate: typeof schema.candidates.$inferS
       </div>
     );
   }
-  // TikTok embed — same pattern, different aspect ratio (portrait video).
+  // TikTok embed - same pattern, different aspect ratio (portrait video).
   if (src.startsWith("tiktok:")) {
     const handle = src.slice("tiktok:".length);
     const videoId = candidate.url.match(/tiktok\.com\/@[^/]+\/video\/(\d+)/)?.[1] ?? candidate.sourceItemId;
@@ -330,7 +334,7 @@ function SourcePost({ candidate }: { candidate: typeof schema.candidates.$inferS
       </div>
     );
   }
-  // HN / Reddit / other — just a link.
+  // HN / Reddit / other - just a link.
   const label = src.startsWith("reddit:") ? `reddit · r/${src.slice("reddit:".length)}` : src;
   return (
     <p className="meta" style={{ marginTop: 8 }}>

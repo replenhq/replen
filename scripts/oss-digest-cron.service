@@ -1,5 +1,5 @@
 [Unit]
-Description=OSS Digest — cron scheduler (fetchers + analyzer + email)
+Description=OSS Digest - cron scheduler (fetchers + analyzer + email)
 After=network-online.target oss-digest.service
 Wants=network-online.target
 

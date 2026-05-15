@@ -35,7 +35,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
       {cards.length === 0 && <p>No matches yet.</p>}
       {cards.map(({ m, r }) => {
         if (!r) return null;
-        const writeup = (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+        const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
         return (
           <div className="match" key={m.id}>
             <div className="match-head">

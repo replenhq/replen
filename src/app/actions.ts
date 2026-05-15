@@ -4,9 +4,9 @@ import { db, schema } from "@/db/client";
 import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
-import { decryptSecret } from "@/lib/crypto";
+import { readUserSecret } from "@/lib/user-secrets";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
-import { handoffBranchName, handoffFilePath, renderHandoff } from "@/lib/handoff-template";
+import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
 
 const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred"]);
 const ALLOWED_FEEDBACK = new Set(["good", "bad", "clear"]);
@@ -78,7 +78,7 @@ export async function createHandoff(matchId: number): Promise<{ ok: boolean; prU
   // Single PAT model: prefer githubToken, fall back to githubWriteToken for
   // anyone still on the old two-field schema.
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
-  const writeToken = tokenStored ? safeDec(tokenStored) : null;
+  const writeToken = tokenStored ? await safeReadSecret(user.id, "githubToken", tokenStored, "create-handoff") : null;
   if (!writeToken) return { ok: false, reason: "add a GitHub PAT on /settings first (Contents: write + Pull requests: write)" };
 
   // 2. Render the file + PR metadata.
@@ -90,15 +90,20 @@ export async function createHandoff(matchId: number): Promise<{ ok: boolean; prU
     project.slug,
     filePath,
   );
-  const prTitle = `Handoff: ${repo.owner}/${repo.name}`;
+  const prTitle = sanitizePrTitle(`Handoff: ${repo.owner}/${repo.name}`);
+  const safeOwner = repo.owner.replace(/[`\n]/g, "");
+  const safeName = repo.name.replace(/[`\n]/g, "");
+  const safeSlug = project.slug.replace(/[`\n]/g, "");
+  const safeFile = filePath.replace(/[`\n]/g, "");
+  const safeRelevance = String(match.relevance).replace(/[`\n]/g, "");
   const prBody = `Automated handoff from replen.
 
-This PR adds \`${filePath}\` describing why \`${repo.owner}/${repo.name}\` surfaced as a potential fit for \`${project.slug}\`, plus a prompt for Claude Code / Codex to re-evaluate it with knowledge of this codebase.
+This PR adds \`${safeFile}\` describing why \`${safeOwner}/${safeName}\` surfaced as a potential fit for \`${safeSlug}\`, plus a prompt for Claude Code / Codex to re-evaluate it with knowledge of this codebase.
 
 Source: ${repo.url}
-Match relevance: ${match.relevance}${match.relevanceScore != null ? ` (${match.relevanceScore})` : ""}
+Match relevance: ${safeRelevance}${match.relevanceScore != null ? ` (${match.relevanceScore})` : ""}
 
-Merge or close — either way the next handoff goes into its own PR.`;
+Merge or close - either way the next handoff goes into its own PR.`;
 
   // 3. Open the PR.
   let result;
@@ -118,7 +123,7 @@ Merge or close — either way the next handoff goes into its own PR.`;
   }
 
   if (result.skipped === "file_exists") {
-    return { ok: false, reason: `${filePath} already exists on the default branch — skipped` };
+    return { ok: false, reason: `${filePath} already exists on the default branch - skipped` };
   }
 
   // 4. Persist the PR URL so the UI knows not to re-offer the button.
@@ -130,16 +135,25 @@ Merge or close — either way the next handoff goes into its own PR.`;
   return { ok: true, prUrl: result.prUrl };
 }
 
-function safeDec(stored: string): string | null {
-  try { return decryptSecret(stored); } catch { return null; }
+async function safeReadSecret(
+  userId: number,
+  column: string,
+  stored: string,
+  reason: Parameters<typeof readUserSecret>[3],
+): Promise<string | null> {
+  try { return await readUserSecret(userId, column, stored, reason); } catch { return null; }
 }
 
 // Aging policy: soft-delete hidden matches older than `days` for the caller.
-// Soft (sets archivedAt) so we can resurrect later if a user wants — the
-// dashboard filter ignores archived rows. Defaults to 90 days.
+// Soft (sets archivedAt) so we can resurrect later if a user wants - the
+// dashboard filter ignores archived rows. Defaults to 90 days. Floor is 30:
+// callers passing `0` or a small number must not be able to archive recently-
+// hidden matches (which could otherwise be used to wipe a tenant's history
+// via a single misuse of the form).
 export async function archiveOldHidden(days: number = 90): Promise<{ ok: boolean; archived: number }> {
   const user = await requireUser();
-  const cutoff = new Date(Date.now() - days * 86400_000);
+  const safeDays = Math.max(Number.isFinite(days) ? Math.floor(days) : 90, 30);
+  const cutoff = new Date(Date.now() - safeDays * 86400_000);
   const res = await db
     .update(schema.matches)
     .set({ archivedAt: new Date() })
@@ -154,7 +168,7 @@ export async function archiveOldHidden(days: number = 90): Promise<{ ok: boolean
   return { ok: true, archived: (res as { changes?: number }).changes ?? 0 };
 }
 
-// Bulk unstar — accepts a list of match IDs and clears userStatus on all that
+// Bulk unstar - accepts a list of match IDs and clears userStatus on all that
 // belong to the caller. Used by the "Unstar selected" button on /starred.
 export async function bulkUnstar(matchIds: number[]): Promise<{ ok: boolean; updated: number }> {
   const user = await requireUser();
@@ -173,7 +187,7 @@ export async function bulkUnstar(matchIds: number[]): Promise<{ ok: boolean; upd
   return { ok: true, updated };
 }
 
-// Bulk handoff PR — opens a PR for every starred match in the list that
+// Bulk handoff PR - opens a PR for every starred match in the list that
 // doesn't already have one. Sequential because each call talks to GitHub and
 // we'd hit the secondary-rate-limit fanning out.
 export async function bulkCreateHandoffs(matchIds: number[]): Promise<{ ok: boolean; opened: number; skipped: number; failures: string[] }> {
@@ -203,7 +217,7 @@ export async function refreshHandoffStatuses(): Promise<{ ok: boolean; checked: 
   const user = await requireUser();
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
-  const token = tokenStored ? safeDec(tokenStored) : null;
+  const token = tokenStored ? await safeReadSecret(user.id, "githubToken", tokenStored, "create-handoff") : null;
   if (!token) return { ok: false, checked: 0, merged: 0, reason: "no PAT on file" };
 
   const halfHourAgo = new Date(Date.now() - 30 * 60_000);

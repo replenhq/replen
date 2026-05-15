@@ -1,11 +1,11 @@
 // Filter for "big-company / enterprise OSS that shouldn't dominate a personal
 // discovery feed". We're looking for *new* tools we could plug into our own
-// projects — not Anthropic's product launches, not Vercel's marketing repos,
+// projects - not Anthropic's product launches, not Vercel's marketing repos,
 // not the Linux kernel.
 //
 // Two layers:
-//   1. Owner blocklist — exact GitHub org/user matches that we never want.
-//   2. Star ceiling — anything above N stars is by definition not under-the-radar.
+//   1. Owner blocklist - exact GitHub org/user matches that we never want.
+//   2. Star ceiling - anything above N stars is by definition not under-the-radar.
 
 export const BIG_CO_OWNERS = new Set<string>([
   // AI / model vendors

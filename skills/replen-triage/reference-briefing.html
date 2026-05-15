@@ -135,15 +135,15 @@
   <div class="card">
     <h3>Repo summary</h3>
     <table>
-      <tr><th>Primary use</th><td>Reusable CV utilities — annotators, dataset loaders, trackers</td></tr>
-      <tr><th>Model coupling</th><td>None — works with any detection model</td></tr>
-      <tr><th>Python support</th><td>3.8–3.12</td></tr>
+      <tr><th>Primary use</th><td>Reusable CV utilities - annotators, dataset loaders, trackers</td></tr>
+      <tr><th>Model coupling</th><td>None - works with any detection model</td></tr>
+      <tr><th>Python support</th><td>3.8-3.12</td></tr>
       <tr><th>Coverage of our use</th><td>~80% replaces both hand-rolled files</td></tr>
     </table>
   </div>
 </div>
 
-<h2>Integration sketch — data flow</h2>
+<h2>Integration sketch - data flow</h2>
 <div class="dataflow">
   <svg viewBox="0 0 720 160" width="100%" style="max-width: 720px;" aria-label="my-cv-project current vs proposed dataflow">
     <defs>
@@ -193,13 +193,13 @@
 <ul>
   <li><b>API stability:</b> supervision is on 0.25.x. Pin to a minor; their changelog flags breaking changes clearly.</li>
   <li><b>Numpy/cv2 version pin:</b> they require numpy &lt; 2.0; my-cv-project already does, no conflict.</li>
-  <li><b>Tracker handoff:</b> our ByteTrack tunings (high_thresh, match_thresh) need porting to supervision's wrapper — straightforward but test against the staging dataset before merging.</li>
+  <li><b>Tracker handoff:</b> our ByteTrack tunings (high_thresh, match_thresh) need porting to supervision's wrapper - straightforward but test against the staging dataset before merging.</li>
 </ul>
 
 <details class="readme">
   <summary>📖 README excerpt (~600 lines · click to expand)</summary>
   <div class="content">
-    <p>(README content goes here — first ~12k chars of the upstream README, rendered as plain text or simple HTML.)</p>
+    <p>(README content goes here - first ~12k chars of the upstream README, rendered as plain text or simple HTML.)</p>
     <p><b>Supervision</b> is a tool for working with computer vision models. It provides utilities for working with detection, classification, and segmentation results...</p>
   </div>
 </details>
@@ -228,7 +228,7 @@
         const orig = btn.textContent;
         btn.classList.add('done');
         btn.textContent = '✓ Copied · paste into Claude';
-        showToast('Prompt copied — paste into Claude Code');
+        showToast('Prompt copied - paste into Claude Code');
         setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 2200);
       } catch (e) { showToast('Copy failed'); console.error(e); }
     });

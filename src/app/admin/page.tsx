@@ -29,7 +29,7 @@ export default async function AdminPage() {
       })
       .onConflictDoNothing({ target: schema.users.email });
     revalidatePath("/admin");
-    // Only send the invite when the row was newly created — re-clicking "Add"
+    // Only send the invite when the row was newly created - re-clicking "Add"
     // for an existing email shouldn't spam them.
     if (result.rowsAffected > 0) {
       void sendInviteEmail(email, adminUser.email).catch((e) =>
@@ -50,7 +50,7 @@ export default async function AdminPage() {
     await requireAdmin();
     if (role !== "admin" && role !== "user") throw new Error("invalid role");
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
-    // Don't let the last admin demote themselves to "user" — locks the org out.
+    // Don't let the last admin demote themselves to "user" - locks the org out.
     // Same applies to suspending or deleting the last admin (see setStatus).
     if (role === "user") {
       const target = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
@@ -112,7 +112,7 @@ export default async function AdminPage() {
 
       <h2 style={{ marginTop: 24 }}>Add user</h2>
       <p className="meta">
-        Enter the email of someone you want to grant access. They sign in via Firebase Auth at /login — on first sign-in their row is upgraded with their Firebase UID.
+        Enter the email of someone you want to grant access. They sign in via Firebase Auth at /login; on first sign-in their row is upgraded with their Firebase UID.
       </p>
       <form action={addUser} style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <input name="email" type="email" placeholder="friend@example.com" required style={{ padding: 6, minWidth: 280 }} />
@@ -141,7 +141,7 @@ export default async function AdminPage() {
               <td>
                 <form className="inline" action={async () => { "use server"; await setSharedLlm(u.id, !u.canUseSharedLlm); }}>
                   <button style={u.canUseSharedLlm ? { background: "#a4d8a4", color: "#1a1a1a" } : undefined}>
-                    {u.canUseSharedLlm ? "✓ allowed" : "—"}
+                    {u.canUseSharedLlm ? "✓ allowed" : "-"}
                   </button>
                 </form>
               </td>

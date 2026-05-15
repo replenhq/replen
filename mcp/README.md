@@ -1,6 +1,6 @@
 # @replen/mcp
 
-**Smart AI Development workflows.** MCP server that brings [replen](https://replen.dev) — the AI that asks *"can we do this better?"* on your codebase — inside Claude Code / Codex / any MCP host.
+**Smart AI Development workflows.** MCP server that brings [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase - inside Claude Code / Codex / any MCP host.
 
 While your AI coding tool waits for prompts, replen reads your code against the ecosystem every morning. This MCP lets the agent act on the results without leaving chat:
 
@@ -15,11 +15,11 @@ While your AI coding tool waits for prompts, replen reads your code against the 
 | `digest_today` | Recent matches as JSON, filterable by days / relevance / project |
 | `digest_search` | Full-text search across your digest history |
 | `digest_starred` | Starred matches with handoff state |
-| `digest_analyze_repo` | Raw README + repo meta + your project profiles — no LLM call on our side, lets the host agent judge fit against your open codebase |
+| `digest_analyze_repo` | Raw README + repo meta + your project profiles - no LLM call on our side, lets the host agent judge fit against your open codebase |
 | `digest_create_handoff` | Opens a handoff PR in the matched project's repo |
 | `digest_feedback` | Records good / bad / star / unstar / hide |
 
-The killer tool is `digest_analyze_repo` — by returning raw signals instead of running our pipeline, the agent reasons about fit with **your actual open codebase in context**, which the digest's nightly cron doesn't have.
+The killer tool is `digest_analyze_repo` - by returning raw signals instead of running our pipeline, the agent reasons about fit with **your actual open codebase in context**, which the digest's nightly cron doesn't have.
 
 ## Install (one-liner)
 
@@ -29,14 +29,14 @@ Get your token from your replen `/settings` page → "Connect Claude Code", then
 npx -y @replen/mcp setup --token=ing_xxxxxxxx --base=https://app.replen.dev
 ```
 
-That writes the MCP entry into `~/.claude.json` (with a backup of the original) and is fully idempotent — re-run it any time you rotate the token.
+That writes the MCP entry into `~/.claude.json` (with a backup of the original) and is fully idempotent - re-run it any time you rotate the token.
 
 **Restart Claude Code** to pick up the new server.
 
 ## What it actually does under the hood
 
 - Adds `mcpServers.replen` to your Claude Code config
-- `command: "replen-mcp"` — resolved via npx on each host launch, or `npm i -g @replen/mcp` for a slightly faster startup
+- `command: "replen-mcp"` - resolved via npx on each host launch, or `npm i -g @replen/mcp` for a slightly faster startup
 - `env`: `DIGEST_BASE_URL` + `DIGEST_TOKEN`
 - Existing MCP servers (firebase, neon, etc.) are preserved untouched
 - A `.bak` of your config is saved next to it for one-step recovery
@@ -70,7 +70,7 @@ replen-mcp               # run as stdio MCP server (your host spawns this; you u
 ```
 You: anything new today for my project X?
 Agent: [calls digest_today({project: "my-project-x"})]
-       2 matches today, top one is roboflow/supervision — 38k★ — MIT —
+       2 matches today, top one is roboflow/supervision - 38k★ - MIT -
        relevance: high (85) · sourced via gh-trending.
        Want me to evaluate it against your current codebase?
 
@@ -88,12 +88,12 @@ Agent: [calls digest_create_handoff({matchId: 96})]
 
 ## Costs
 
-- **Read-only tools** (`digest_today` / `digest_search` / `digest_starred`) cost nothing — pure JSON shuttle.
+- **Read-only tools** (`digest_today` / `digest_search` / `digest_starred`) cost nothing - pure JSON shuttle.
 - **`digest_analyze_repo`** is one GitHub API call + the agent's own analysis cost (paid through your Claude subscription, not replen's).
 - **`digest_create_handoff`** is one GitHub write call. No LLM on our side.
 
-No additional replen-side cost vs the web dashboard — the MCP server queries the same API as `app.replen.dev`.
+No additional replen-side cost vs the web dashboard - the MCP server queries the same API as `app.replen.dev`.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT - see `LICENSE`.

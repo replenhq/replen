@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
 import { reprocessForUser } from "@/scheduler/reprocess-matches";
-import { decryptSecret } from "@/lib/crypto";
+import { readUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +65,7 @@ export default async function Projects() {
                 <td><a href={`/projects/${p.slug}`}>{p.name}</a></td>
                 <td>
                   <form className="inline" action={async () => { "use server"; await toggleIncluded(p.id, !p.included); }}>
-                    <button>{p.included ? "✓ in" : "—"}</button>
+                    <button>{p.included ? "✓ in" : "-"}</button>
                   </form>
                 </td>
                 <td>
@@ -91,12 +91,12 @@ export default async function Projects() {
                     </button>
                   </form>
                 </td>
-                <td style={{ textAlign: "center" }}>{p.claudeMd ? "✓" : "—"}</td>
+                <td style={{ textAlign: "center" }}>{p.claudeMd ? "✓" : "-"}</td>
                 <td style={{ textAlign: "right" }}>{matchMap.get(p.id) ?? 0}</td>
                 <td>
                   {(matchMap.get(p.id) ?? 0) > 0 && (
                     <form className="inline" action={async () => { "use server"; await reanalyzeProject(p.slug); }}>
-                      <button title={`Re-runs reasoning for all ${matchMap.get(p.id)} matches in ${p.name} using the current model setting. Background job — refresh /runs to track.`}>
+                      <button title={`Re-runs reasoning for all ${matchMap.get(p.id)} matches in ${p.name} using the current model setting. Background job; refresh /runs to track.`}>
                         re-analyze
                       </button>
                     </form>
@@ -159,7 +159,7 @@ async function reanalyzeProject(slug: string) {
   const now = Date.now();
   const last = reanalyzeLastStart.get(user.id) ?? 0;
   if (now - last < REANALYZE_COOLDOWN_MS) {
-    console.warn(`[reanalyze] user=${user.id} cooldown ${Math.round((REANALYZE_COOLDOWN_MS - (now - last)) / 1000)}s — ignoring`);
+    console.warn(`[reanalyze] user=${user.id} cooldown ${Math.round((REANALYZE_COOLDOWN_MS - (now - last)) / 1000)}s - ignoring`);
     return;
   }
   reanalyzeLastStart.set(user.id, now);
@@ -187,7 +187,7 @@ async function autoDetectGithubRepos() {
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
   if (!tokenStored) throw new Error("add a GitHub PAT on /settings first");
   let token = "";
-  try { token = decryptSecret(tokenStored) ?? ""; } catch {}
+  try { token = (await readUserSecret(user.id, "githubToken", tokenStored, "auto-detect")) ?? ""; } catch {}
   if (!token) throw new Error("could not decrypt GitHub PAT");
   await autoDetectAndStoreRepos(user.id, token);
   revalidatePath("/projects");

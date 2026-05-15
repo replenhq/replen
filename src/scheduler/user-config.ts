@@ -1,12 +1,12 @@
 // Resolves the configuration for a pipeline run for a given user.
 // - User-set values always win.
 // - Env-var fallback for LLM keys is GATED on users.canUseSharedLlm (admin grants it).
-// - GitHub token: BYO only (never shared) — leaks attribute API calls to the user.
+// - GitHub token: BYO only (never shared) - leaks attribute API calls to the user.
 // - Email destination: per-user; falls back to env so admin keeps working.
 
 import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
-import { decryptSecret } from "../lib/crypto";
+import { readUserSecret } from "../lib/user-secrets";
 
 export type UserConfig = {
   userId: number;
@@ -41,12 +41,12 @@ export async function resolveUserConfig(userId: number): Promise<UserConfig> {
 
   const canUseShared = !!user.canUseSharedLlm;
 
-  // Decrypt secrets at read time. The DB stores them as enc:v1:... (or
-  // plaintext for pre-migration rows); the pipeline downstream only sees
-  // raw values.
-  const decGithub = settings?.githubToken ? safeDec(settings.githubToken) : null;
-  const decDeepseek = settings?.deepseekApiKey ? safeDec(settings.deepseekApiKey) : null;
-  const decAnthropic = settings?.anthropicApiKey ? safeDec(settings.anthropicApiKey) : null;
+  // Decrypt secrets at read time. The DB stores them as enc:v2:<userId>:...
+  // (or enc:v1 legacy / plaintext); readUserSecret routes to the right key
+  // and writes a secret_access_log row for each call.
+  const decGithub = await safeRead(userId, "githubToken", settings?.githubToken);
+  const decDeepseek = await safeRead(userId, "deepseekApiKey", settings?.deepseekApiKey);
+  const decAnthropic = await safeRead(userId, "anthropicApiKey", settings?.anthropicApiKey);
 
   return {
     userId,
@@ -63,11 +63,12 @@ export async function resolveUserConfig(userId: number): Promise<UserConfig> {
   };
 }
 
-function safeDec(stored: string): string | null {
+async function safeRead(userId: number, column: string, stored: string | null | undefined): Promise<string | null> {
+  if (!stored) return null;
   try {
-    return decryptSecret(stored);
+    return await readUserSecret(userId, column, stored, "pipeline-run");
   } catch (e) {
-    console.error(`[user-config] decrypt failed: ${(e as any)?.message ?? e}`);
+    console.error(`[user-config] decrypt failed for user=${userId} column=${column}: ${(e as Error).message}`);
     return null;
   }
 }

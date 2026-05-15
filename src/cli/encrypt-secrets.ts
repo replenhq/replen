@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 // One-shot migration: rewrites any plaintext secrets in user_settings as
-// AES-256-GCM (enc:v1:...) using ENCRYPTION_KEY. Idempotent — already-encrypted
+// AES-256-GCM (enc:v1:...) using ENCRYPTION_KEY. Idempotent - already-encrypted
 // rows are skipped.
 //
 // Run:

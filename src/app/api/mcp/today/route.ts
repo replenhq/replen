@@ -39,14 +39,22 @@ export async function GET(req: Request) {
   }
   const projectMap = new Map<number, typeof schema.projectProfiles.$inferSelect>();
   if (projectIds.length) {
-    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    // Defence in depth: the projectIds come from this user's own matches so
+    // they are already tenant-scoped, but the redundant userId filter ensures
+    // a future bug that leaks a foreign id into the array cannot return
+    // another tenant's profile data.
+    const ps = await db.select().from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, auth.userId),
+        inArray(schema.projectProfiles.id, projectIds),
+      ));
     for (const p of ps) projectMap.set(p.id, p);
   }
 
   const out = matches.map((m) => {
     const r = repoMap.get(m.repoId);
     const p = m.projectId ? projectMap.get(m.projectId) : null;
-    const writeup = (m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "";
+    const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
     return {
       matchId: m.id,
       repo: r ? `${r.owner}/${r.name}` : null,

@@ -12,7 +12,7 @@ export async function autoDetectAndStoreRepos(userId: number, token: string): Pr
   if (!token) return { filled: 0, total: 0, languages: [] };
 
   // GitHub /user/repos returns primary `language` per repo (most-bytes
-  // language, computed server-side). That's good enough for our purpose —
+  // language, computed server-side). That's good enough for our purpose -
   // no need to call /languages per repo and burn rate-limit budget.
   // `fork` and `archived` are also returned; we drop forks and archives
   // since they bias the language mix toward whatever you pinned years ago.
@@ -35,7 +35,7 @@ export async function autoDetectAndStoreRepos(userId: number, token: string): Pr
     if (batch.length < 100) break;
   }
 
-  // Project repo matching — same as before.
+  // Project repo matching - same as before.
   const projects = await db
     .select()
     .from(schema.projectProfiles)
@@ -52,7 +52,7 @@ export async function autoDetectAndStoreRepos(userId: number, token: string): Pr
     filled++;
   }
 
-  // Language detection — count repos per primary language across the user's
+  // Language detection - count repos per primary language across the user's
   // own non-fork, non-archived repos. Repo count (not size) because a single
   // huge mono-repo with Makefile as primary would otherwise swamp the signal.
   // Also drops build / config languages that rarely produce useful trending

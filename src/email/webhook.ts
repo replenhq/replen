@@ -1,11 +1,12 @@
 import { db, schema } from "../db/client";
 import { and, eq, desc } from "drizzle-orm";
+import { resolveSafe, validateWebhookUrl } from "../lib/url-guard";
 
 // Real-time alert for high-relevance matches in a just-finished run. POSTs
 // a JSON payload that Slack and Discord both accept (text + simple blocks /
 // embeds). `generic` mode posts a plain `{ runId, matches: [...] }` JSON.
 //
-// We deliberately only ping for `relevance=high` — anything weaker is digest
+// We deliberately only ping for `relevance=high`; anything weaker is digest
 // noise and would defeat the point of a real-time channel.
 export async function sendHighRelevanceWebhook(
   runId: number,
@@ -75,13 +76,32 @@ export async function sendHighRelevanceWebhook(
     body = { runId, matches: lines };
   }
 
-  const res = await fetch(webhookUrl, {
+  // Re-validate the URL right before the fetch. Save-time validation could
+  // have passed (public hostname, https) while DNS now resolves to a private
+  // address (DNS rebinding / DNS hijack). Resolve and reject any private,
+  // loopback, link-local or multicast address. The dns.lookup result is
+  // passed through hostname-resolution only - the actual fetch reuses the
+  // original URL so TLS hostname verification still works against a hostile
+  // resolver only when paired with a hostile CA, which is out of scope.
+  const syntactic = validateWebhookUrl(webhookUrl);
+  if (!syntactic.ok) {
+    throw new Error(`webhook URL refused: ${syntactic.error}`);
+  }
+  const safe = await resolveSafe(syntactic.url);
+  if (!safe.ok) {
+    throw new Error(`webhook URL refused: ${safe.error}`);
+  }
+
+  // Body size + status both ignored on response: never reflect the response
+  // body in our error path to prevent the webhook destination from being
+  // used as an oracle.
+  const res = await fetch(syntactic.url.toString(), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    redirect: "manual",
   });
   if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`webhook ${res.status}: ${t.slice(0, 200)}`);
+    throw new Error(`webhook delivery failed: HTTP ${res.status}`);
   }
 }

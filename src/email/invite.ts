@@ -6,7 +6,7 @@ import nodemailer from "nodemailer";
 // to a real uid on first login (see src/lib/auth/current-user.ts).
 //
 // Returns true on success. Logs and returns false on failure so the calling
-// admin action doesn't crash if SES is misconfigured — the user row is still
+// admin action doesn't crash if SES is misconfigured; the user row is still
 // created either way and admin can resend.
 
 export async function sendInviteEmail(
@@ -30,7 +30,7 @@ export async function sendInviteEmail(
   const subject = `${invitedByEmail} invited you to replen`;
   const text = `Hi,
 
-${invitedByEmail} added you to replen — a daily, personalised feed of
+${invitedByEmail} added you to replen: a daily, personalised feed of
 open-source projects relevant to whatever you're building.
 
 Sign in here with this email address (${invitedEmail}):
@@ -39,12 +39,12 @@ Sign in here with this email address (${invitedEmail}):
 Once you're in, head to /settings to add your GitHub token and configure
 where you'd like the morning research email sent.
 
-— replen`;
+- replen`;
 
   const html = `<!doctype html>
 <html><body style="font-family: ui-sans-serif, system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.55;">
   <h1 style="font-size: 22px; letter-spacing: -0.02em; margin: 0 0 16px;">You're in.</h1>
-  <p><b>${escapeHtml(invitedByEmail)}</b> added you to replen — the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
+  <p><b>${escapeHtml(invitedByEmail)}</b> added you to replen, the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
   <p style="margin: 24px 0;">
     <a href="${loginUrl}" style="display: inline-block; padding: 10px 18px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a>
   </p>

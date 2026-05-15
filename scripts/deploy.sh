@@ -8,7 +8,7 @@
 #   DEPLOY_NGINX_SITE      filename in /etc/nginx/sites-* (default: replen.conf)
 #   DEPLOY_LOG_DIR         remote log dir (default: /var/log/replen)
 #
-# The script never copies .env automatically — populate it manually on the
+# The script never copies .env automatically - populate it manually on the
 # server (chmod 600) so secrets aren't in any sync that includes your laptop.
 #
 set -euo pipefail

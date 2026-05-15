@@ -132,7 +132,7 @@ export const tiktokFetcher: Fetcher = {
           raw: p,
         });
       }
-      // Be polite — 1.5s gap so we don't get rate-limited by tiktok.com.
+      // Be polite - 1.5s gap so we don't get rate-limited by tiktok.com.
       await new Promise((r) => setTimeout(r, 1500));
     }
     return out;

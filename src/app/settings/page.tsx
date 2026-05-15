@@ -1,29 +1,46 @@
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
-import { decryptSecret, maybeEncrypt } from "@/lib/crypto";
+import { hashIngestToken } from "@/lib/crypto";
+import { readUserSecret, writeUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 import { archiveOldHidden } from "../actions";
 import { randomBytes } from "crypto";
+import { validateWebhookUrl } from "@/lib/url-guard";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+// The settings page accepts ?newToken=<ing_…> for ONE render after rotation.
+// The plaintext token lives only in the URL of the redirect that rotateIngestToken
+// emits — it's read here, displayed once, and never persisted. Refreshing the
+// page (or copy-pasting the URL elsewhere later) loses the token; that's the
+// intended UX, paired with the hash-only at-rest model.
+type Params = { searchParams: Promise<{ newToken?: string }> };
+
+export default async function SettingsPage({ searchParams }: Params) {
+  const sp = await searchParams;
+  const justRotatedToken = typeof sp.newToken === "string" && /^ing_[A-Za-z0-9_-]{8,}$/.test(sp.newToken)
+    ? sp.newToken
+    : null;
   const user = await requireUser();
   const rawSettings = await db
     .select()
     .from(schema.userSettings)
     .where(eq(schema.userSettings.userId, user.id))
     .get();
-  // Decrypt secrets in-memory only for the masked display. `save()` re-uses
-  // the already-encrypted value from the DB rather than the plaintext shown here.
+  // For the settings UI we only need to know WHETHER each secret is set, not
+  // the plaintext - the form field is rendered as a masked password input and
+  // we never echo the value back in any case. By only checking presence here
+  // we avoid writing four secret_access_log decrypts on every settings page
+  // render (which was the audit's "plaintext on every load" concern).
   const s = rawSettings && {
     ...rawSettings,
-    githubToken: rawSettings.githubToken ? safeDecrypt(rawSettings.githubToken) : null,
-    githubWriteToken: rawSettings.githubWriteToken ? safeDecrypt(rawSettings.githubWriteToken) : null,
-    deepseekApiKey: rawSettings.deepseekApiKey ? safeDecrypt(rawSettings.deepseekApiKey) : null,
-    anthropicApiKey: rawSettings.anthropicApiKey ? safeDecrypt(rawSettings.anthropicApiKey) : null,
+    githubToken: rawSettings.githubToken ? "•••••" : null,
+    githubWriteToken: rawSettings.githubWriteToken ? "•••••" : null,
+    deepseekApiKey: rawSettings.deepseekApiKey ? "•••••" : null,
+    anthropicApiKey: rawSettings.anthropicApiKey ? "•••••" : null,
   };
   const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
   const sharedAllowed = !!userRow?.canUseSharedLlm;
@@ -54,16 +71,16 @@ export default async function SettingsPage() {
     // anything still reading `github_write_token` (older rows, future migrations)
     // keeps working without a code change.
     const encGithubToken = newToken
-      ? maybeEncrypt(newToken)
+      ? await writeUserSecret(u.id, newToken)
       : existingPrev?.githubToken ?? existingPrev?.githubWriteToken ?? null;
     const values = {
       userId: u.id,
       githubToken: encGithubToken,
       githubWriteToken: encGithubToken,
-      deepseekApiKey: newDS ? maybeEncrypt(newDS) : existingPrev?.deepseekApiKey ?? null,
-      anthropicApiKey: newAN ? maybeEncrypt(newAN) : existingPrev?.anthropicApiKey ?? null,
+      deepseekApiKey: newDS ? await writeUserSecret(u.id, newDS) : existingPrev?.deepseekApiKey ?? null,
+      anthropicApiKey: newAN ? await writeUserSecret(u.id, newAN) : existingPrev?.anthropicApiKey ?? null,
       // Source handles are managed on /sources, not here. Preserve whatever's
-      // already stored — anyone wanting per-user private overrides edits via
+      // already stored - anyone wanting per-user private overrides edits via
       // the DB or we add it back later.
       threadsHandles: existingPrev?.threadsHandles ?? null,
       tiktokHandles: existingPrev?.tiktokHandles ?? null,
@@ -72,10 +89,24 @@ export default async function SettingsPage() {
       enabled: form.get("enabled") === "on",
       cronHourUtc: Math.min(Math.max(parseInt((form.get("cronHourUtc") as string) || "6", 10) || 6, 0), 23),
       dailyCostCapUsd: Math.max(0, Number((form.get("dailyCostCapUsd") as string) || "5") || 5),
-      webhookUrl: ((form.get("webhookUrl") as string) || "").trim() || null,
+      webhookUrl: (() => {
+        const raw = ((form.get("webhookUrl") as string) || "").trim();
+        if (!raw) return null;
+        const v = validateWebhookUrl(raw);
+        if (!v.ok) {
+          // We reject silently here (preserve previous value) rather than
+          // throwing so the rest of the form save still applies. The user
+          // can see the rejected URL is gone from the field next render.
+          console.warn(`[settings] webhook URL rejected: ${v.error}`);
+          return existingPrev?.webhookUrl ?? null;
+        }
+        return v.url.toString();
+      })(),
       webhookKind: ((form.get("webhookKind") as string) || "generic"),
-      // Preserve the existing ingest token unless the rotate action set it.
-      ingestToken: existingPrev?.ingestToken ?? null,
+      // Preserve the existing ingest-token HASH. Plaintext ingest_token column
+      // is migration-only and stays null on writes.
+      ingestToken: null,
+      ingestTokenHash: existingPrev?.ingestTokenHash ?? null,
       // Detected languages are owned by the re-detect action / PAT save below;
       // don't clobber them on a vanilla settings save.
       detectedLanguages: existingPrev?.detectedLanguages ?? null,
@@ -102,7 +133,10 @@ export default async function SettingsPage() {
     const u = await requireUser();
     const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     const tokenStored = settings?.githubToken ?? null;
-    const token = tokenStored ? safeDecrypt(tokenStored) : null;
+    let token: string | null = null;
+    if (tokenStored) {
+      try { token = await readUserSecret(u.id, "githubToken", tokenStored, "redetect-languages"); } catch { token = null; }
+    }
     if (!token) return;
     try {
       const r = await autoDetectAndStoreRepos(u.id, token);
@@ -117,13 +151,25 @@ export default async function SettingsPage() {
     "use server";
     const u = await requireUser();
     const fresh = "ing_" + randomBytes(24).toString("base64url");
-    const existing = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
+    const hash = hashIngestToken(fresh);
+    const existing = await db.select({ id: schema.userSettings.id }).from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     if (existing) {
-      await db.update(schema.userSettings).set({ ingestToken: fresh, updatedAt: new Date() }).where(eq(schema.userSettings.userId, u.id));
+      await db.update(schema.userSettings)
+        .set({ ingestTokenHash: hash, ingestToken: null, updatedAt: new Date() })
+        .where(eq(schema.userSettings.userId, u.id));
     } else {
-      await db.insert(schema.userSettings).values({ userId: u.id, ingestToken: fresh, updatedAt: new Date() });
+      await db.insert(schema.userSettings).values({
+        userId: u.id,
+        ingestTokenHash: hash,
+        ingestToken: null,
+        updatedAt: new Date(),
+      });
     }
     revalidatePath("/settings");
+    // Redirect with the freshly-minted plaintext in the URL. This is the one
+    // and only chance for the user to copy it — the server stores only the
+    // hash, so subsequent renders cannot reveal the plaintext again.
+    redirect(`/settings?newToken=${encodeURIComponent(fresh)}#ingest`);
   }
 
   return (
@@ -134,13 +180,13 @@ export default async function SettingsPage() {
       </p>
 
       <form action={save} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16, maxWidth: 640 }}>
-        <Section title="Credentials (your own — never shared)">
+        <Section title="Credentials (your own, never shared)">
           <Field label="GitHub PAT" name="githubToken" value={s?.githubToken ?? s?.githubWriteToken ?? ""} type="password" placeholder="github_pat_…" />
           <div style={{ background: "#0001", border: "1px solid #ccc4", borderRadius: 6, padding: 12, fontSize: 13, lineHeight: 1.55 }}>
             <p style={{ margin: 0, fontWeight: 600 }}>One fine-grained PAT covers everything.</p>
             <p style={{ margin: "6px 0 10px", color: "#888" }}>
               Used for pipeline repo lookups (read) and the handoff-PR action (write).
-              Click the button below — you'll need to set these on the GitHub page:
+              Click the button below. You'll need to set these on the GitHub page:
             </p>
             <table style={{ width: "auto", margin: 0, fontSize: 12 }}>
               <tbody>
@@ -191,7 +237,7 @@ export default async function SettingsPage() {
           <Field label="Anthropic API key (required for high-sensitivity projects)" name="anthropicApiKey" value={s?.anthropicApiKey ?? ""} type="password" placeholder="sk-ant-…" statusBadge={anthropicStatus} />
           <p className="meta" style={{ marginTop: 4 }}>
             {sharedAllowed
-              ? "Admin has granted you fallback to shared LLM keys — leaving DeepSeek/Anthropic blank still works. GitHub token is always BYO (any usage shows up under your GitHub account)."
+              ? "Admin has granted you fallback to shared LLM keys; leaving DeepSeek/Anthropic blank still works. GitHub token is always BYO (any usage shows up under your GitHub account)."
               : "Provide your own DeepSeek key (and Anthropic if you mark any project high-sensitivity). Ask admin to grant shared LLM access if you'd rather not pay."}
           </p>
         </Section>
@@ -199,7 +245,7 @@ export default async function SettingsPage() {
         <Section title="Detected stack (drives gh-trending slices)">
           <p className="meta" style={{ margin: 0 }}>
             We scan your own GitHub repos when you save a PAT and pick the top languages by repo size.
-            The gh-trending fetcher pulls language-specific trending pages for these — most TikTok/Threads
+            The gh-trending fetcher pulls language-specific trending pages for these; most TikTok/Threads
             creators are just repackaging gh-trending, so this is the highest-signal source.
           </p>
           {rawSettings?.detectedLanguages ? (
@@ -209,7 +255,7 @@ export default async function SettingsPage() {
               ))}
             </div>
           ) : (
-            <p className="meta" style={{ margin: 0 }}>None detected yet — save a PAT above, then click re-detect.</p>
+            <p className="meta" style={{ margin: 0 }}>None detected yet. Save a PAT above, then click re-detect.</p>
           )}
           <form action={redetectLanguages} style={{ marginTop: 4 }}>
             <button type="submit">Re-detect stack from GitHub</button>
@@ -249,42 +295,45 @@ export default async function SettingsPage() {
       </form>
 
       <Section title="Ingest endpoint (for bookmarklets / browser extensions)">
-        <p className="meta" style={{ margin: 0 }}>
+        <p id="ingest" className="meta" style={{ margin: 0 }}>
           POST a URL to <code>/api/ingest</code> with header <code>x-ingest-token: &lt;your token&gt;</code> and body <code>{`{"url":"…"}`}</code>. Lands as a high-score candidate for the next run.
         </p>
-        {rawSettings?.ingestToken ? (
-          <div style={{ marginTop: 8, padding: 10, background: "#0001", border: "1px solid #ccc4", borderRadius: 6 }}>
-            <code style={{ fontSize: 12, wordBreak: "break-all" }}>{rawSettings.ingestToken}</code>
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12 }}>Bookmarklet (drag to bookmark bar)</summary>
-              <pre style={{ marginTop: 6, fontSize: 11, whiteSpace: "pre-wrap" }}>{bookmarklet(rawSettings.ingestToken)}</pre>
-            </details>
+        {justRotatedToken ? (
+          <div style={{ marginTop: 8, padding: 12, background: "#fff8e1", border: "2px solid #f5b400", borderRadius: 6 }}>
+            <p style={{ margin: "0 0 8px", fontWeight: 700, color: "#8a6500" }}>
+              🔑 Copy this token now. It will not be shown again.
+            </p>
+            <p className="meta" style={{ margin: "0 0 8px" }}>
+              We store only the hash. Refreshing or leaving this page loses the plaintext; you would have to rotate again.
+            </p>
+            <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginBottom: 12 }}>{justRotatedToken}</code>
             <details open style={{ marginTop: 8 }}>
               <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>🔌 Connect Claude Code / Codex (MCP)</summary>
               <p className="meta" style={{ margin: "6px 0" }}>
                 Paste this one-liner into your terminal. It writes the MCP server into <code>~/.claude.json</code> (with a backup). Then restart Claude Code.
               </p>
-              <pre style={{ marginTop: 6, fontSize: 11, padding: 8, background: "#0d1117", color: "#e6edf3", borderRadius: 6, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{mcpSetupCommand(rawSettings.ingestToken)}</pre>
-              <p className="meta" style={{ margin: "6px 0 0" }}>
-                Exposes tools: <code>digest_today</code>, <code>digest_search</code>, <code>digest_starred</code>,
-                {" "}<code>digest_analyze_repo</code>, <code>digest_create_handoff</code>, <code>digest_feedback</code>.
-                <br />
-                <a href="https://www.npmjs.com/package/@replen/mcp" target="_blank" rel="noreferrer">view package on npm</a>
-                {" · "}
-                <span>raw JSON config? expand below</span>
-              </p>
+              <pre style={{ marginTop: 6, fontSize: 11, padding: 8, background: "#0d1117", color: "#e6edf3", borderRadius: 6, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{mcpSetupCommand(justRotatedToken)}</pre>
               <details style={{ marginTop: 6 }}>
-                <summary style={{ cursor: "pointer", fontSize: 11, color: "#888" }}>raw JSON (if you'd rather hand-edit)</summary>
-                <pre style={{ marginTop: 4, fontSize: 11, whiteSpace: "pre-wrap" }}>{mcpConfig(rawSettings.ingestToken)}</pre>
+                <summary style={{ cursor: "pointer", fontSize: 11, color: "#888" }}>raw JSON (hand-edit ~/.claude.json)</summary>
+                <pre style={{ marginTop: 4, fontSize: 11, whiteSpace: "pre-wrap" }}>{mcpConfig(justRotatedToken)}</pre>
               </details>
             </details>
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: "pointer", fontSize: 12 }}>Bookmarklet (drag to bookmark bar)</summary>
+              <pre style={{ marginTop: 6, fontSize: 11, whiteSpace: "pre-wrap" }}>{bookmarklet(justRotatedToken)}</pre>
+            </details>
           </div>
+        ) : rawSettings?.ingestTokenHash ? (
+          <p className="meta" style={{ marginTop: 8 }}>
+            Token configured. The plaintext was shown once at generation/rotation and is not retrievable from this page — rotate below to mint a new one (the old one stops working immediately).
+            {" "}Or use <code>npx replen</code> from your terminal to authorize a fresh device without exposing the token in a URL.
+          </p>
         ) : (
-          <p className="meta">No token yet. Generate one below.</p>
+          <p className="meta">No token yet. Generate one below, or use <code>npx replen</code>.</p>
         )}
         <form action={rotateIngestToken} style={{ marginTop: 6 }}>
-          <button type="submit">{rawSettings?.ingestToken ? "Rotate token" : "Generate token"}</button>
-          {rawSettings?.ingestToken && <span className="meta" style={{ marginLeft: 8 }}>old token stops working immediately</span>}
+          <button type="submit">{rawSettings?.ingestTokenHash ? "Rotate token" : "Generate token"}</button>
+          {rawSettings?.ingestTokenHash && <span className="meta" style={{ marginLeft: 8 }}>old token stops working immediately</span>}
         </form>
       </Section>
 
@@ -326,13 +375,6 @@ function mcpConfig(token: string): string {
 function mcpSetupCommand(token: string): string {
   const base = process.env.PUBLIC_BASE_URL ?? "http://localhost:3030";
   return `npx -y @replen/mcp setup --token=${token} --base=${base}`;
-}
-
-function safeDecrypt(stored: string | null): string | null {
-  try { return decryptSecret(stored); } catch (e) {
-    console.error("[settings] decrypt failed (treating as opaque):", (e as any)?.message ?? e);
-    return null;
-  }
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

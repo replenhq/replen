@@ -39,7 +39,7 @@ export default async function CliAuthPage({ searchParams }: Params) {
         <h1 style={h1Style}>Bad request</h1>
         <p style={dimStyle}>
           This page needs to be opened by the <code>replen</code> CLI. Run{" "}
-          <code>npx replen</code> from your terminal — it'll open the right
+          <code>npx replen</code> from your terminal; it'll open the right
           link for you.
         </p>
       </main>
@@ -64,15 +64,15 @@ export default async function CliAuthPage({ searchParams }: Params) {
 
         <div style={{ fontSize: 13, color: "#555", marginBottom: 8 }}>The CLI will receive</div>
         <ul style={ulStyle}>
-          <li>Your ingest token — read/write access to matches, settings, handoffs</li>
-          <li>Your dashboard URL — to wire into Claude Code / Codex config</li>
+          <li>Your ingest token: read/write access to matches, settings, handoffs</li>
+          <li>Your dashboard URL: to wire into Claude Code / Codex config</li>
         </ul>
 
         <CliAuthForm port={port} state={state} />
 
         <p style={{ fontSize: 12, color: "#888", marginTop: 16 }}>
           You can revoke this at any time on the{" "}
-          <a href="/settings" style={{ color: "#06f" }}>Settings</a> page — rotating the ingest
+          <a href="/settings" style={{ color: "#06f" }}>Settings</a> page; rotating the ingest
           token stops the old one working immediately.
         </p>
       </div>

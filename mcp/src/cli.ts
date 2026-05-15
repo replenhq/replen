@@ -14,7 +14,7 @@ async function main() {
     return;
   }
   if (process.argv[2] === "--version" || process.argv[2] === "-v") {
-    // Read version from package.json at runtime — keeps single source of truth.
+    // Read version from package.json at runtime; keeps single source of truth.
     const pkg = JSON.parse(
       (await import("fs")).readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
@@ -22,7 +22,7 @@ async function main() {
     return;
   }
   if (process.argv[2] === "--help" || process.argv[2] === "-h") {
-    console.error(`replen-mcp — MCP server for replen (https://replen.dev)
+    console.error(`replen-mcp: MCP server for replen (https://replen.dev)
 
 Commands:
   replen-mcp setup --token=<DIGEST_TOKEN> [--base=<URL>]
@@ -30,7 +30,7 @@ Commands:
 
   replen-mcp
       Run as MCP stdio server. Reads DIGEST_TOKEN and DIGEST_BASE_URL from env.
-      Spawned by your MCP host (Claude Code / Codex) — you shouldn't run this directly.
+      Spawned by your MCP host (Claude Code / Codex); you shouldn't run this directly.
 `);
     return;
   }

@@ -4,7 +4,7 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 
 // GET /api/sync?since=<iso8601>&user_id=<id>
 // Token-protected (still keyed on SYNC_TOKEN so the laptop CLI works without Firebase).
-// Always scoped to a specific user_id — required.
+// Always scoped to a specific user_id - required.
 export async function GET(req: Request) {
   if (!authorized(req)) return new NextResponse("unauthorized", { status: 401 });
 
@@ -54,7 +54,7 @@ function authorized(req: Request): boolean {
   // Fail closed: previously this returned true when SYNC_TOKEN was unset,
   // exposing every user's matches to the open internet given a guessable user_id.
   if (!token) {
-    console.error("[/api/sync] SYNC_TOKEN env var not set — refusing all requests");
+    console.error("[/api/sync] SYNC_TOKEN env var not set - refusing all requests");
     return false;
   }
   const got = req.headers.get("x-sync-token");

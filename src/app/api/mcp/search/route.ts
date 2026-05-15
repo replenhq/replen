@@ -16,7 +16,12 @@ export async function GET(req: Request) {
     .select({ match: schema.matches, repo: schema.repos, project: schema.projectProfiles })
     .from(schema.matches)
     .innerJoin(schema.repos, eq(schema.matches.repoId, schema.repos.id))
-    .leftJoin(schema.projectProfiles, eq(schema.matches.projectId, schema.projectProfiles.id))
+    // leftJoin's ON clause carries the tenant guard so a future schema bug
+    // (orphaned projectId pointing at another tenant) cannot leak rows.
+    .leftJoin(schema.projectProfiles, and(
+      eq(schema.matches.projectId, schema.projectProfiles.id),
+      eq(schema.projectProfiles.userId, auth.userId),
+    ))
     .where(and(
       eq(schema.matches.userId, auth.userId),
       or(
@@ -41,7 +46,7 @@ export async function GET(req: Request) {
     project: p?.slug ?? "_general",
     relevance: m.relevance,
     relevanceScore: m.relevanceScore,
-    summary: ((m.writeupMd ?? "").split("\n\n— — —\n")[0]?.trim() || m.summary || "").slice(0, 400),
+    summary: ((m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "").slice(0, 400),
     starred: m.userStatus === "starred",
     handoffPrUrl: m.handoffPrUrl,
     createdAt: m.createdAt.toISOString(),

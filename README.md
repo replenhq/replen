@@ -27,13 +27,13 @@
 
 **AI coding tools are reactive. Replen is proactive.**
 
-Claude Code, Codex, Cursor — they wait for you to ask. None of them look at your codebase on their own and ask *"what could we be doing better here? what are others doing we could learn from?"*
+Claude Code, Codex, Cursor: they wait for you to ask. None of them look at your codebase on their own and ask *"what could we be doing better here? what are others doing we could learn from?"*
 
-Replen does. Every morning, on every project, against the live ecosystem. For each new repo in your niche, it does the comparative work a senior dev would: read it, compare against your codebase, decide — **adopt as-is**, **port a specific idea**, or **skip** — with the reasoning written in. The keepers come with a PR-ready briefing your AI coding workflow (Claude Code, Codex, whichever) picks up and integrates.
+Replen does. Every morning, on every project, against the live ecosystem. For each new repo in your niche, it does the comparative work a senior dev would: read it, compare against your codebase, decide (adopt as-is, port a specific idea, or skip) with the reasoning written in. The keepers come with a PR-ready briefing your AI coding workflow (Claude Code, Codex, whichever) picks up and integrates.
 
-The training-cutoff problem makes this more urgent — every LLM has a date past which it just doesn't know, and your AI tool will happily confabulate around the gap. But the deeper reason is simpler: good engineering means asking *"can we do this better?"* — continuously. Replen runs that loop for you.
+The training-cutoff problem makes this more urgent. Every LLM has a date past which it just doesn't know, and your AI tool will happily confabulate around the gap. But the deeper reason is simpler: good engineering means asking *"can we do this better?"* continuously. Replen runs that loop for you.
 
-Pulls from gh-trending, TikTok, Threads, Reddit, HN — plus niche-scouted GitHub searches tuned to your project's domain. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev) — or self-host (no Docker required).
+Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub searches tuned to your project's domain. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev), or self-host (no Docker required).
 
 ## Quickstart
 
@@ -58,11 +58,11 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 
 ## What it does
 
-1. **Characterises your projects.** Reads each project's docs (README, CLAUDE.md, manifests) to build a profile of what you're building — stack, niche, purpose, use cases — regardless of project type (library, CLI, app, infra, research code, etc.).
+1. **Characterises your projects.** Reads each project's docs (README, CLAUDE.md, manifests) to build a profile of what you're building (stack, niche, purpose, use cases) regardless of project type (library, CLI, app, infra, research code, etc.).
 2. **Ingests from the ecosystem.** gh-trending pages tailored to your stack, TikTok / Threads handles, Reddit subs, HN, plus niche-scouted GitHub searches derived from your project profile. Catches things trending feeds miss.
-3. **Compares each new repo against your code.** DeepSeek by default (~$0.10–$0.30/day), Anthropic opt-in per-project for sensitive codebases. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip** — with the reasoning written in. Auto-skips established big-co repos.
+3. **Compares each new repo against your code.** DeepSeek by default (~$0.10 to $0.30/day), Anthropic opt-in per-project for sensitive codebases. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos.
 4. **Delivers** three ways:
-   - **Web dashboard** at the digest URL — triage, star, hide, search, open handoff PRs.
+   - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs.
    - **HTML email** every morning at the UTC hour you set.
    - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
 5. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
@@ -72,15 +72,15 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 The morning email is just the entry point. The interesting bit is what happens after you find something worth keeping:
 
 ```
-1. replen surfaces a match           — in email, dashboard, or via MCP tool
-2. You star it                       — click ★, or "use replen to handoff matchId 96"
-3. replen opens a PR in your repo    — a markdown briefing in .replen/handoffs/
-4. Your agent picks it up            — Claude Code / Codex reads the briefing,
+1. replen surfaces a match           → in email, dashboard, or via MCP tool
+2. You star it                       → click ★, or "use replen to handoff matchId 96"
+3. replen opens a PR in your repo    → a markdown briefing in .replen/handoffs/
+4. Your agent picks it up            → Claude Code / Codex reads the briefing,
                                        has full context, proposes the integration
-5. You review and merge              — replen polls PR status, flips to integrated
+5. You review and merge              → replen polls PR status, flips to integrated
 ```
 
-The briefing — committed to your repo, not ours — covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. replen is research + dispatch; never the one writing code into your repo.
+The briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. replen is research + dispatch; never the one writing code into your repo.
 
 Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-loop).
 
@@ -148,8 +148,8 @@ Required `.env` keys for local:
 
 The VPS uses systemd + nginx + certbot. Two services run:
 
-- `replen.service` — Next.js dashboard on `127.0.0.1:3030`
-- `replen-cron.service` — node-cron scheduler that wakes at the user's `cron_hour_utc` and runs the per-user pipeline + nightly aging
+- `replen.service`: Next.js dashboard on `127.0.0.1:3030`
+- `replen-cron.service`: node-cron scheduler that wakes at the user's `cron_hour_utc` and runs the per-user pipeline + nightly aging
 
 ```bash
 # from your laptop, populate .env on the remote first (chmod 600)
@@ -189,11 +189,11 @@ The script: `rsync`s the repo (excluding `.env`, `node_modules`, `.next`, `data`
 |---|---|
 | `/` | Today's matches, project-grouped, with star/hide/feedback/handoff actions |
 | `/starred` | All starred matches bucketed by handoff state (awaiting / open PR / integrated) |
-| `/integrated` | Wall of merged OSS — proof of what actually got shipped |
+| `/integrated` | Wall of merged OSS; proof of what actually got shipped |
 | `/search` | Full-text across writeups, repo metadata, personal notes |
 | `/projects` | Per-project config: sensitivity, LLM provider override, GitHub repo binding |
 | `/sources` | Per-user source handles + curated source proposals |
-| `/runs` | Run history with cost cards (7d / 30d / avg/match / provider mix), per-source breakdown (candidates → matches → convert% + 👍/👎 net) |
+| `/runs` | Run history with cost cards (7d / 30d / avg per match / provider mix), per-source breakdown (candidates → matches → convert% + 👍/👎 net) |
 | `/settings` | Credentials, delivery prefs, daily cost cap, webhook, ingest token, bookmarklet + MCP install snippet, language re-detect, maintenance (archive old hidden) |
 | `/admin` | (admin only) Manage users, grant shared-LLM access, review source proposals |
 
@@ -208,11 +208,11 @@ Self-contained npm package (`@replen/mcp`) that exposes six tools to Claude Code
 | `digest_today` | Recent matches in JSON, filterable by days / relevance / project |
 | `digest_search` | Full-text search results |
 | `digest_starred` | Starred matches with handoff state |
-| `digest_analyze_repo` | Raw README + repo meta + your project profiles for a given owner/name — no LLM call, lets the *host* agent judge fit with your codebase in context |
+| `digest_analyze_repo` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
 | `digest_create_handoff` | Opens a handoff PR for a starred match |
 | `digest_feedback` | Records good/bad/star/unstar/hide |
 
-**Install:** `npx replen` (does the OAuth flow + wires this into Claude Code in one command — see Quickstart above).
+**Install:** `npx replen` (does the OAuth flow + wires this into Claude Code in one command; see Quickstart above).
 
 To install the MCP only (skip the auth flow), or to wire it into a host other than Claude Code, add the entry by hand:
 
@@ -235,7 +235,7 @@ Token from `/settings` → "Connect Claude Code".
 
 ### Skill (`skills/replen-triage/`)
 
-Optional Claude Code skill that wraps the MCP into a morning-triage protocol — fetch today, evaluate the high-relevance ones, propose handoffs, train source weights. Invoke with `/replen-triage`. Installed by copying `skills/replen-triage/` to `~/.claude/skills/`.
+Optional Claude Code skill that wraps the MCP into a morning-triage protocol: fetch today, evaluate the high-relevance ones, propose handoffs, train source weights. Invoke with `/replen-triage`. Installed by copying `skills/replen-triage/` to `~/.claude/skills/`.
 
 The MCP gives the agent **tools** (data access); the skill gives it a **playbook** (when to call what, in what order). Domain-volatility split per [LlamaIndex's skills-vs-MCP article](https://www.llamaindex.ai/blog/skills-vs-mcp-tools-for-agents-when-to-use-what).
 
@@ -243,9 +243,9 @@ The MCP gives the agent **tools** (data access); the skill gives it a **playbook
 
 | Source | Auth | Notes |
 |---|---|---|
-| gh-trending | none | HTML scrape; pulls a global page + a slice per user-detected language (TypeScript / Python / etc.) — the highest-signal source by far |
+| gh-trending | none | HTML scrape; pulls a global page + a slice per user-detected language (TypeScript / Python / etc.). The highest-signal source by far |
 | TikTok | session-id cookie | Direct API; supports backfill via the separate `Scraper` repo |
-| Threads | RSSHub | Optional — point `THREADS_RSSHUB_BASE` at any [RSSHub](https://docs.rsshub.app) instance (self-host or public) |
+| Threads | RSSHub | Optional. Point `THREADS_RSSHUB_BASE` at any [RSSHub](https://docs.rsshub.app) instance (self-host or public) |
 | Reddit | none | JSON endpoints, configurable subs |
 | HN | none | Algolia API |
 | Manual | per-user ingest token | `POST /api/ingest` from a bookmarklet, browser extension, or anywhere else |
@@ -254,36 +254,36 @@ Source ranking (for tie-breaking when multiple sources surface the same repo): t
 
 ## Pipeline (per user, per run)
 
-1. **Cost guardrail** — sum the last 24h of runs; if ≥ `daily_cost_cap_usd`, skip and record a `paused_reason='cost-cap'` row.
-2. **runFetchers** — pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`.
+1. **Cost guardrail**: sum the last 24h of runs; if ≥ `daily_cost_cap_usd`, skip and record a `paused_reason='cost-cap'` row.
+2. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`.
 3. **runAnalysis**:
    - Apply `user_feedback` weights to source ranking.
    - Skip already-actioned repos (starred / hidden / integrated / has handoff PR).
    - For each unique GitHub repo:
-     - `scanRepo` — metadata, README, contributor count, postinstall hooks, secret scan.
-     - `triage` (DeepSeek-chat) — keep/skip JSON. Skip if not keep.
-     - `reasonAboutRepo` (DeepSeek or Anthropic by project sensitivity) — per-project relevance + writeup.
+     - `scanRepo`: metadata, README, contributor count, postinstall hooks, secret scan.
+     - `triage` (DeepSeek-chat): keep/skip JSON. Skip if not keep.
+     - `reasonAboutRepo` (DeepSeek or Anthropic by project sensitivity): per-project relevance + writeup.
    - Persist a `match` row per (repo, project) pair with a denormalised `source_kind`.
-4. **sendDigestEmail** — HTML email grouped by project, with TOC, colour-coded relevance chips, source attribution, click-through to dashboard.
-5. **sendHighRelevanceWebhook** (optional) — POST to Slack/Discord/generic if any `relevance=high` matches.
+4. **sendDigestEmail**: HTML email grouped by project, with TOC, colour-coded relevance chips, source attribution, click-through to dashboard.
+5. **sendHighRelevanceWebhook** (optional): POST to Slack/Discord/generic if any `relevance=high` matches.
 
 Encrypted at rest: PATs, LLM keys (DeepSeek + Anthropic), and SES creds are stored as `enc:v1:<iv>:<tag>:<ciphertext>` using AES-256-GCM keyed off `ENCRYPTION_KEY`. Decrypted only in memory during a run.
 
 ## Costs
 
-- **DeepSeek:** ~$0.10–$0.30 per typical daily run after their prefix-cache kicks in.
-- **Anthropic:** only used for high-sensitivity projects. ~$0.50–$2 per run if any.
+- **DeepSeek:** ~$0.10 to $0.30 per typical daily run after their prefix-cache kicks in.
+- **Anthropic:** only used for high-sensitivity projects. ~$0.50 to $2 per run if any.
 - **SES:** free tier covers ~62k emails/month from EC2; ~$0.10/1k otherwise.
 - **VPS:** flat, whatever you already pay.
-- **MCP / bookmarklet:** no marginal cost — they just query the same DB.
+- **MCP / bookmarklet:** no marginal cost; they just query the same DB.
 
 Default daily cap is **$5/user**; configurable on `/settings`.
 
 ## What's still stubbed / known gaps
 
-- **Tenant-isolation test** — multi-tenant queries look clean by audit but no automated guard yet.
-- **HTML triage artifacts** — the skill writes to `~/replen/reports/`; pending validation as to whether this beats terminal markdown for daily use.
-- **Aging policy automation** — `archiveOldHidden(90)` is manual via /settings; could run nightly.
+- **Tenant-isolation test**: multi-tenant queries look clean by audit but no automated guard yet.
+- **HTML triage artifacts**: the skill writes to `~/replen/reports/`; pending validation as to whether this beats terminal markdown for daily use.
+- **Aging policy automation**: `archiveOldHidden(90)` is manual via /settings; could run nightly.
 
 ## Repository layout
 

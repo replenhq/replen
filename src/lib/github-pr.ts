@@ -2,7 +2,7 @@
 // starred OSS match. Used by the dashboard's "create handoff" action.
 //
 // All calls go through the GitHub REST API with the user's write-scoped PAT.
-// Errors throw — callers should catch and surface to the user.
+// Errors throw - callers should catch and surface to the user.
 
 const API = "https://api.github.com";
 
@@ -61,7 +61,7 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
   }
   const defaultBranch = repoInfo.default_branch;
 
-  // 2. Check whether the file already exists on the default branch — skip if so.
+  // 2. Check whether the file already exists on the default branch - skip if so.
   const existsRes = await gh(
     client,
     `/repos/${owner}/${repo}/contents/${encodeURIPathSegments(input.filePath)}?ref=${encodeURIComponent(defaultBranch)}`

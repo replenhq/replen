@@ -25,7 +25,7 @@ const DOC_NAMES = [
   "SPEC.md", "Spec.md", "spec.md",
   "DESIGN.md", "design.md",
   "ARCHITECTURE.md", "Architecture.md", "architecture.md",
-  // Plans / roadmaps (lowest priority — used only if nothing else)
+  // Plans / roadmaps (lowest priority - used only if nothing else)
   "PRODUCT_PLAN.md", "PLAN.md", "plan.md",
   "roadmap.md", "ROADMAP.md", "Roadmap.md",
   "ACTION-PLAN.md", "ACTION_PLAN.md", "action-plan.md",

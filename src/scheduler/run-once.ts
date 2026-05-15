@@ -55,7 +55,7 @@ export async function runPipelineForUser(userId: number) {
     matchesCreated = analysis.matchesCreated;
     emailSent = await sendDigestEmail(run!.id, userId, cfg);
     // Real-time webhook for `high` matches. Failures are logged but don't
-    // poison the run — email is the canonical delivery.
+    // poison the run - email is the canonical delivery.
     if (settings?.webhookUrl) {
       await sendHighRelevanceWebhook(run!.id, userId, settings.webhookUrl, settings.webhookKind ?? "generic")
         .catch((e) => console.warn(`[webhook] user=${userId} failed:`, e));
@@ -101,7 +101,7 @@ export async function runPipeline() {
     .where(eq(schema.users.status, "active"));
 
   if (activeUsers.length === 0) {
-    console.log("[pipeline] no users yet — skipping (sign in once to bootstrap)");
+    console.log("[pipeline] no users yet - skipping (sign in once to bootstrap)");
     return;
   }
 

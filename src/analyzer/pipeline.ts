@@ -178,7 +178,7 @@ async function runAnalysisInner(runId: number, userId: number) {
 
       const t1 = await triage(safety);
       if (!t1.shouldReason) {
-        console.log(`[triage] skip ${t.owner}/${t.name} — ${t1.oneLiner}`);
+        console.log(`[triage] skip ${t.owner}/${t.name} - ${t1.oneLiner}`);
         continue;
       }
 

@@ -76,7 +76,7 @@ export default async function ProposalsAdmin() {
           <div>
             <span className="tag">{p.kind}</span>{" "}
             <code style={{ fontSize: 14 }}>{p.value}</code>
-            {" — proposed by "}<b>{userMap.get(p.userId) ?? "unknown"}</b>{" · "}
+            {" - proposed by "}<b>{userMap.get(p.userId) ?? "unknown"}</b>{" · "}
             <span className="meta">{p.createdAt.toISOString().slice(0, 16)}</span>
           </div>
           {p.note && <p style={{ margin: "8px 0", fontStyle: "italic" }}>"{p.note}"</p>}

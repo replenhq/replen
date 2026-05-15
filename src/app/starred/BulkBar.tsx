@@ -5,7 +5,7 @@ import { bulkCreateHandoffs, bulkUnstar } from "../actions";
 
 // Floating bar that collects checked match IDs and fires bulk actions. Renders
 // nothing until at least one row is checked. The checkboxes live on the
-// server-rendered rows and post their IDs via a custom event we listen to —
+// server-rendered rows and post their IDs via a custom event we listen to -
 // keeps the parent /starred page entirely server-rendered.
 export function BulkBar() {
   const [ids, setIds] = useState<Set<number>>(new Set());
@@ -74,7 +74,7 @@ export function BulkBar() {
   );
 }
 
-// Tiny client checkbox — fires the window-scoped callback so the bar above
+// Tiny client checkbox - fires the window-scoped callback so the bar above
 // (which holds the actual state) can react. Marked with data-bulk to make
 // "select-all" easy to implement later if we want it.
 export function RowCheck({ id }: { id: number }) {

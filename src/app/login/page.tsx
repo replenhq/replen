@@ -122,9 +122,9 @@ function prettyErr(e: any): string {
     case "auth/popup-closed-by-user":
       return "Sign-in popup closed.";
     case "auth/network-request-failed":
-      return "Network error — check your connection.";
+      return "Network error. Check your connection.";
     case "auth/too-many-requests":
-      return "Too many attempts — wait a minute and try again.";
+      return "Too many attempts. Wait a minute and try again.";
     default:
       return e?.message ?? "Sign in failed.";
   }

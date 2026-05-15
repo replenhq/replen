@@ -1,5 +1,5 @@
 [Unit]
-Description=replen — cron scheduler (fetchers + analyzer + email)
+Description=replen - cron scheduler (fetchers + analyzer + email)
 After=network-online.target replen.service
 Wants=network-online.target
 

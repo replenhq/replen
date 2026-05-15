@@ -5,7 +5,7 @@ import { refreshHandoffStatuses } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-// Wall of OSS we've actually integrated — handoff PRs that were merged.
+// Wall of OSS we've actually integrated - handoff PRs that were merged.
 // Both a sense of progress ("we shipped X external bits this quarter") and a
 // reminder of what's already in the codebase so we don't re-evaluate it.
 export default async function Integrated() {
@@ -29,7 +29,11 @@ export default async function Integrated() {
   }
   const projectMap = new Map<number, typeof schema.projectProfiles.$inferSelect>();
   if (projectIds.length > 0) {
-    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    const ps = await db.select().from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, user.id),
+        inArray(schema.projectProfiles.id, projectIds),
+      ));
     for (const p of ps) projectMap.set(p.id, p);
   }
 

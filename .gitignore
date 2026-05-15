@@ -5,7 +5,7 @@ node_modules
 dist
 build
 
-# Local state — never commit
+# Local state - never commit
 .env
 .env.local
 .env.*.local

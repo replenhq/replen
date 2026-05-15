@@ -13,7 +13,7 @@ function normalizePrivateKey(): string {
   const raw = process.env.FIREBASE_PRIVATE_KEY || "";
   // Some pipelines deliver real newlines, others deliver literal `\n` sequences,
   // and broken pipelines strip the backslash entirely leaving stray `n` chars.
-  // Handle the first two; the third (n-stripped) is unrecoverable — use base64.
+  // Handle the first two; the third (n-stripped) is unrecoverable - use base64.
   return raw.replace(/\\n/g, "\n");
 }
 

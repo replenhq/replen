@@ -4,7 +4,7 @@
 
 import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
-import { decryptSecret } from "../lib/crypto";
+import { readUserSecret } from "../lib/user-secrets";
 import { autoDetectAndStoreRepos } from "../lib/github-repo-detect";
 
 async function main() {
@@ -13,11 +13,11 @@ async function main() {
     const s = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     const tokenStored = s?.githubToken ?? s?.githubWriteToken ?? null;
     if (!tokenStored) {
-      console.log(`[redetect] user=${u.id} (${u.email}) no PAT — skip`);
+      console.log(`[redetect] user=${u.id} (${u.email}) no PAT - skip`);
       continue;
     }
     let token: string | null = null;
-    try { token = decryptSecret(tokenStored); } catch { console.warn(`[redetect] user=${u.id} decrypt fail`); continue; }
+    try { token = await readUserSecret(u.id, "githubToken", tokenStored, "redetect-languages"); } catch { console.warn(`[redetect] user=${u.id} decrypt fail`); continue; }
     if (!token) { console.warn(`[redetect] user=${u.id} decrypt empty`); continue; }
     try {
       const r = await autoDetectAndStoreRepos(u.id, token);

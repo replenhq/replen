@@ -4,7 +4,7 @@
 // LLM github resolver, and inserts as candidates.
 //
 // Pagination is fragile: doc_id rotates ~quarterly, headers/variables drift.
-// That's tolerable here because seeding is one-shot — once posts are in the DB,
+// That's tolerable here because seeding is one-shot - once posts are in the DB,
 // the daily fetcher only needs to pick up incremental new ones.
 //
 // Usage:
@@ -14,15 +14,15 @@
 // For full pagination (~100 posts), set two env vars by capturing values from
 // your browser's devtools Network tab while scrolling a Threads profile:
 //
-//   THREADS_DOC_ID    — value of the "doc_id" form field on a graphql/query POST
+//   THREADS_DOC_ID    - value of the "doc_id" form field on a graphql/query POST
 //                       whose x-fb-friendly-name is
 //                       BarcelonaProfileThreadsTabPaginationDirectFragment
-//   THREADS_COOKIE    — full cookie header from the same request
+//   THREADS_COOKIE    - full cookie header from the same request
 //
 // Both rotate; capture fresh ones each time you do a seed run. If unset, the
 // CLI falls back to the ~8 posts embedded in the public profile HTML.
 //
-// Re-running is safe — the (user_id, source, source_item_id) unique constraint
+// Re-running is safe - the (user_id, source, source_item_id) unique constraint
 // dedupes existing posts.
 
 import { db, schema } from "../db/client";
@@ -95,7 +95,7 @@ function extractDocId(html: string): string | null {
   // filter for "graphql", look at the form-data "doc_id" field for the
   // BarcelonaProfileThreadsTabPaginationDirectFragment request).
   if (process.env.THREADS_DOC_ID) return process.env.THREADS_DOC_ID;
-  // Otherwise scan the HTML — Threads usually lazy-loads the doc_id, so this
+  // Otherwise scan the HTML - Threads usually lazy-loads the doc_id, so this
   // often misses, but try anyway.
   const idx = html.indexOf(FRIENDLY_NAME);
   if (idx >= 0) {
@@ -107,7 +107,7 @@ function extractDocId(html: string): string | null {
   return any?.[1] ?? null;
 }
 
-// parseEmbeddedPosts is shared with the daily fetcher — see ../fetchers/threads-scrape.ts
+// parseEmbeddedPosts is shared with the daily fetcher - see ../fetchers/threads-scrape.ts
 
 // ─────────────────────────────────────────────────────────────
 // Stage 2: paginate via GraphQL
@@ -199,7 +199,7 @@ async function paginateGraphql(
 
 function extractPostsFromGraphql(json: any): { posts: ThreadPost[]; nextCursor: string | null; hasNext: boolean | null } {
   const posts: ThreadPost[] = [];
-  // The shape varies — walk and collect anything looking like a post node.
+  // The shape varies - walk and collect anything looking like a post node.
   const stack: any[] = [json];
   let nextCursor: string | null = null;
   let hasNext: boolean | null = null;
@@ -275,7 +275,7 @@ async function seedHandle(
     posts = pag.posts;
     via = `graphql (${pag.posts.length})`;
   } else if (!pag.ok) {
-    console.warn(`  ${handle}: graphql failed — ${pag.reason}; falling back to embedded`);
+    console.warn(`  ${handle}: graphql failed - ${pag.reason}; falling back to embedded`);
   }
   let gh = 0, inserted = 0;
   for (const p of posts) {

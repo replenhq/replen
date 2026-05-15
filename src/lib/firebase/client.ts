@@ -1,4 +1,4 @@
-// Browser-side Firebase auth (just for login page — server uses next-firebase-auth-edge).
+// Browser-side Firebase auth (just for login page - server uses next-firebase-auth-edge).
 "use client";
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";

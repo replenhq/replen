@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
+import { hashIngestToken } from "@/lib/crypto";
 
 // POST /api/ingest
 //   headers: x-ingest-token: <user's personal ingest token from /settings>
 //   body:    { url: "https://github.com/owner/repo", title?: "...", note?: "..." }
 //
 // Creates a candidate scoped to the token's owner so the next pipeline run
-// picks it up. Useful from a bookmarklet or browser extension — the user
+// picks it up. Useful from a bookmarklet or browser extension - the user
 // finds an interesting repo on the web, hits the bookmark, it lands in their
 // digest queue.
 //
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
   const settings = await db
     .select()
     .from(schema.userSettings)
-    .where(eq(schema.userSettings.ingestToken, token))
+    .where(eq(schema.userSettings.ingestTokenHash, hashIngestToken(token)))
     .get();
   if (!settings) return NextResponse.json({ ok: false, error: "invalid token" }, { status: 401 });
 
@@ -62,7 +63,7 @@ export async function POST(req: Request) {
       url,
       githubUrl,
       author: body.note ?? null,
-      score: 100, // manual ingest is high signal — surface it first
+      score: 100, // manual ingest is high signal - surface it first
       postedAt: new Date(),
       fetchedAt: new Date(),
       rawJson: null,

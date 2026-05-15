@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
 // Write the @replen/mcp server entry into Claude Code's config. Uses npx so
-// the user doesn't need a separate global install — Claude Code will fetch
+// the user doesn't need a separate global install; Claude Code will fetch
 // @replen/mcp on first MCP launch and cache it.
 
 const SERVER_NAME = "replen";
@@ -27,7 +27,10 @@ export async function setupMcp(token: string, base: string): Promise<void> {
   console.log(`  Wiring replen MCP into Claude Code config…`);
 
   if (existsSync(CONFIG_PATH)) {
-    const backup = `${CONFIG_PATH}.bak`;
+    // Timestamp the backup so re-running setup never overwrites a previous
+    // backup. Each run preserves the prior state.
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backup = `${CONFIG_PATH}.bak.${ts}`;
     writeFileSync(backup, readFileSync(CONFIG_PATH));
     console.log(`  (backed up existing config to ${backup})`);
   }

@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
-import { decryptSecret, maybeEncrypt } from "@/lib/crypto";
+import { writeUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 import { runPipelineForUser } from "@/scheduler/run-once";
 
@@ -49,7 +49,7 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
     const token = ((form.get("githubToken") as string) ?? "").trim();
     if (!token) return;
     const existing = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
-    const enc = maybeEncrypt(token);
+    const enc = await writeUserSecret(u.id, token);
     if (existing) {
       await db.update(schema.userSettings).set({ githubToken: enc, githubWriteToken: enc, updatedAt: new Date() }).where(eq(schema.userSettings.userId, u.id));
     } else {
@@ -75,15 +75,14 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
   async function startFirstRun() {
     "use server";
     const u = await requireUser();
-    // Fire-and-forget — user lands on /runs to watch.
+    // Fire-and-forget; user lands on /runs to watch.
     void runPipelineForUser(u.id).catch((e) => console.error("[welcome] first run failed", e));
     redirect("/runs");
   }
 
-  // Decrypt any existing token only for the masked-display.
-  const tokenForDisplay = settings?.githubToken
-    ? (() => { try { return decryptSecret(settings.githubToken!); } catch { return null; } })()
-    : null;
+  // We never echo the token plaintext back in onboarding. Presence is all we
+  // need for the masked-display branch.
+  const tokenForDisplay = settings?.githubToken ? "•••••" : null;
 
   return (
     <>

@@ -3,7 +3,7 @@ import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
 
-const HELP = `replen — Smart AI Development workflows
+const HELP = `replen: Smart AI Development workflows
 
 Usage:
   npx replen              Sign up / sign in + wire MCP into Claude Code
@@ -59,7 +59,7 @@ async function main() {
       console.log(`Forgot auth at ${configPath()}`);
     } catch (e: any) {
       if (e?.code === "ENOENT") {
-        console.log(`No saved auth — nothing to forget.`);
+        console.log(`No saved auth; nothing to forget.`);
       } else {
         throw e;
       }

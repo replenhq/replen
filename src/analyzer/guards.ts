@@ -10,7 +10,7 @@
 //      that shouldn't contain them.
 //
 // These are mitigations, not guarantees. High-sensitivity projects should
-// still route to Anthropic (the more robust model) — see reason.ts routing.
+// still route to Anthropic (the more robust model) - see reason.ts routing.
 
 const INJECTION_PATTERNS = [
   /ignore\s+(?:all\s+)?(?:prior|previous|above)\s+(?:instructions|prompts?|directives)/i,
@@ -28,7 +28,7 @@ const INJECTION_PATTERNS = [
 ];
 
 // Returns the input with a "[guards] prompt-injection pattern N detected"
-// marker prepended if anything matches. Doesn't strip — the model still sees
+// marker prepended if anything matches. Doesn't strip - the model still sees
 // the original so it can warn the user about it.
 export function sanitizeUntrusted(text: string, label: string): string {
   if (!text) return text;
@@ -66,12 +66,39 @@ export function looksLikeInjectionLeak(writeup: string): string | null {
   if (/\[replen guards\]/i.test(writeup)) return "echoed guard banner";
   // Imperative exfil
   if (/please\s+(?:visit|fetch|curl|wget|POST|GET)\s+https?:\/\//i.test(writeup)) return "exfil instruction";
-  // Suspicious TLDs in a writeup (legitimate GH-related URLs are mostly .com/.io/.dev)
+  // URL allowlist: legitimate writeups about OSS repos should only reference
+  // GitHub-family hosts and a small set of docs hosts. Any URL outside the
+  // allowlist is treated as a possible exfil channel and rejects the writeup.
+  // This replaces the prior denylist of suspicious TLDs (which trivially
+  // bypassed via .com / .io / .dev).
   const urls = writeup.match(/https?:\/\/[^\s)>"]+/g) ?? [];
-  const suspicious = urls.find((u) =>
-    /\.(zip|country|click|gq|tk|cf|ml|xyz|top|loan|men|win|pw|cm|ru)(\b|\/)/i.test(u) ||
-    /(?:webhook|burp|requestbin|ngrok-free|pipedream|interactsh)\b/i.test(u)
-  );
-  if (suspicious) return `suspicious url: ${suspicious}`;
+  for (const raw of urls) {
+    let host: string;
+    try { host = new URL(raw).hostname.toLowerCase(); } catch { return `unparseable url: ${raw}`; }
+    if (!URL_HOST_ALLOWLIST.some((d) => host === d || host.endsWith("." + d))) {
+      return `url outside allowlist: ${raw}`;
+    }
+  }
   return null;
 }
+
+// Hosts permitted to appear in writeup output. Extend conservatively. Any new
+// host added here can be reached from a writeup; the briefing renderer then
+// emits it as a Markdown link in the user's PR.
+const URL_HOST_ALLOWLIST = [
+  "github.com",
+  "githubusercontent.com",
+  "raw.githubusercontent.com",
+  "gist.github.com",
+  "github.io",
+  "npmjs.com",
+  "pypi.org",
+  "crates.io",
+  "docs.rs",
+  "rust-lang.org",
+  "readthedocs.io",
+  "readthedocs.org",
+  "developer.mozilla.org",
+  "nodejs.org",
+  "python.org",
+];
