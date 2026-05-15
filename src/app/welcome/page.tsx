@@ -156,7 +156,7 @@ function Step1({ onSave, currentToken }: { onSave: (f: FormData) => Promise<void
 function Step2({ onSave, current }: { onSave: (f: FormData) => Promise<void>; current: typeof schema.userSettings.$inferSelect | undefined }) {
   return (
     <>
-      <h2 style={{ marginTop: 0 }}>2. Where should we send your daily digest?</h2>
+      <h2 style={{ marginTop: 0 }}>2. Where should we send your morning research?</h2>
       <p>Your digest email lands here each morning. You can also browse it on the dashboard any time.</p>
       <form action={onSave} style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>

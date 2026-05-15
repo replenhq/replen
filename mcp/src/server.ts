@@ -25,7 +25,7 @@ type Tool = {
 const TOOLS: Tool[] = [
   {
     name: "digest_today",
-    description: "List OSS matches from your daily digest pipeline. Returns repos that surfaced in the last N days, scored against your project profiles. Use this to answer 'what's new today' or 'anything for <project-name> this week'.",
+    description: "List matches from replen — the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. Use this to answer 'what could make my project sharper today' or 'anything for <project-name> this week'.",
     inputSchema: {
       type: "object",
       properties: {

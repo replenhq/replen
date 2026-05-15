@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="replen">
+  <!-- Card frame: the day's digest -->
+  <rect x="3" y="3" width="58" height="58" rx="12" fill="none" stroke="#d97706" stroke-width="3"/>
+  <!-- Three rows: the day's matches -->
+  <line x1="15" y1="24" x2="49" y2="24" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
+  <line x1="15" y1="34" x2="42" y2="34" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
+  <line x1="15" y1="44" x2="45" y2="44" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
+  <!-- New-today dot, top-right corner -->
+  <circle cx="51" cy="13" r="6" fill="#d97706"/>
+</svg>

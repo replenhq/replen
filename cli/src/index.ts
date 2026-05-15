@@ -3,7 +3,7 @@ import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
 
-const HELP = `replen — daily personalised OSS discovery
+const HELP = `replen — Smart AI Development workflows
 
 Usage:
   npx replen              Sign up / sign in + wire MCP into Claude Code

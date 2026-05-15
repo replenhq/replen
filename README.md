@@ -1,10 +1,39 @@
-# replen
+<div align="center">
+  <img src="logo.svg" width="64" alt="replen">
+  <h1>replen</h1>
+  <p><strong>Smart AI Development workflows</strong></p>
+  <p>The AI that asks: <em>"can we do this better?"</em></p>
 
-**Daily personalised OSS discovery — handed off ready-to-integrate.**
+  <p>
+    <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/v/replen?style=flat-square&color=d97706" alt="npm version"></a>
+    <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/dm/replen?style=flat-square&color=d97706" alt="npm downloads"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
+    <a href="https://replen.dev"><img src="https://img.shields.io/badge/website-replen.dev-d97706?style=flat-square" alt="Website"></a>
+  </p>
 
-Each morning replen surfaces new repos matched to *your* projects. Star one and it opens a PR in your repo with a briefing your AI agent — Claude Code, Codex, whichever — picks up and runs with. Discovery + dispatch in one tool.
+  <p>
+    <a href="https://replen.dev">Website</a> ·
+    <a href="https://docs.replen.dev">Docs</a> ·
+    <a href="#quickstart">Install</a> ·
+    <a href="#workflow">Workflow</a> ·
+    <a href="mcp/">MCP</a> ·
+    <a href="skills/">Skill</a> ·
+    <a href="#self-host">Self-host</a> ·
+    <a href="https://app.replen.dev">app.replen.dev</a>
+  </p>
+</div>
 
-Pulls from gh-trending, TikTok, Threads, Reddit, and HN. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev) — or self-host (no Docker required).
+---
+
+**AI coding tools are reactive. Replen is proactive.**
+
+Claude Code, Codex, Cursor — they wait for you to ask. None of them look at your codebase on their own and ask *"what could we be doing better here? what are others doing we could learn from?"*
+
+Replen does. Every morning, on every project, against the live ecosystem. For each new repo in your niche, it does the comparative work a senior dev would: read it, compare against your codebase, decide — **adopt as-is**, **port a specific idea**, or **skip** — with the reasoning written in. The keepers come with a PR-ready briefing your AI coding workflow (Claude Code, Codex, whichever) picks up and integrates.
+
+The training-cutoff problem makes this more urgent — every LLM has a date past which it just doesn't know, and your AI tool will happily confabulate around the gap. But the deeper reason is simpler: good engineering means asking *"can we do this better?"* — continuously. Replen runs that loop for you.
+
+Pulls from gh-trending, TikTok, Threads, Reddit, HN — plus niche-scouted GitHub searches tuned to your project's domain. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev) — or self-host (no Docker required).
 
 ## Quickstart
 
@@ -29,14 +58,14 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 
 ## What it does
 
-1. **Fetches** from sources you (and curated defaults) configure — gh-trending pages tailored to your detected languages, TikTok / Threads handles, Reddit subs, HN, plus manual `/api/ingest` POSTs.
-2. **Triages + reasons** with DeepSeek (low-sensitivity projects) or Anthropic (high), using each project's README / CLAUDE.md / tech summary as context. Auto-skips established big-co repos.
-3. **Persists** matches scored against each of your project profiles, with a markdown writeup explaining why the OSS fits and how to integrate.
-4. **Delivers** via three surfaces:
+1. **Characterises your projects.** Reads each project's docs (README, CLAUDE.md, manifests) to build a profile of what you're building — stack, niche, purpose, use cases — regardless of project type (library, CLI, app, infra, research code, etc.).
+2. **Ingests from the ecosystem.** gh-trending pages tailored to your stack, TikTok / Threads handles, Reddit subs, HN, plus niche-scouted GitHub searches derived from your project profile. Catches things trending feeds miss.
+3. **Compares each new repo against your code.** DeepSeek by default (~$0.10–$0.30/day), Anthropic opt-in per-project for sensitive codebases. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip** — with the reasoning written in. Auto-skips established big-co repos.
+4. **Delivers** three ways:
    - **Web dashboard** at the digest URL — triage, star, hide, search, open handoff PRs.
-   - **HTML email** every morning at the UTC hour you set, sent via Amazon SES.
+   - **HTML email** every morning at the UTC hour you set.
    - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
-5. **Closes the loop** when you star a match: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
+5. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
 
 ## Workflow
 

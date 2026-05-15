@@ -1,12 +1,14 @@
 # replen
 
-One-command setup for [replen](https://replen.dev) — daily personalised OSS discovery.
+**Smart AI Development workflows.** One-command setup for [replen](https://replen.dev) — the AI that asks *"can we do this better?"* on your codebase, every morning.
 
 ```bash
 npx replen
 ```
 
-That single command:
+While your AI coding tool waits for prompts, replen reads your code against the ecosystem and surfaces drop-in libraries, ideas to port, and patterns to learn from. A proactive layer for your AI coding workflow.
+
+The single command above:
 1. Opens your browser to sign in / sign up at `app.replen.dev`
 2. Captures the auth back into the terminal (browser-callback flow, like `gh auth login`)
 3. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config

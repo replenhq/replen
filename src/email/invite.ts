@@ -37,19 +37,19 @@ Sign in here with this email address (${invitedEmail}):
   ${loginUrl}
 
 Once you're in, head to /settings to add your GitHub token and configure
-where you'd like the daily digest emailed.
+where you'd like the morning research email sent.
 
 — replen`;
 
   const html = `<!doctype html>
 <html><body style="font-family: ui-sans-serif, system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.55;">
   <h1 style="font-size: 22px; letter-spacing: -0.02em; margin: 0 0 16px;">You're in.</h1>
-  <p><b>${escapeHtml(invitedByEmail)}</b> added you to replen — a daily, personalised feed of open-source projects relevant to whatever you're building.</p>
+  <p><b>${escapeHtml(invitedByEmail)}</b> added you to replen — the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
   <p style="margin: 24px 0;">
     <a href="${loginUrl}" style="display: inline-block; padding: 10px 18px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a>
   </p>
   <p>Use this email address: <code>${escapeHtml(invitedEmail)}</code></p>
-  <p style="margin-top: 24px; font-size: 13px; color: #888;">After sign-in, visit <a href="${appUrl}/settings">/settings</a> to add your GitHub token and configure where the daily digest emails should arrive. Manage your sources (curated + your own additions) on <a href="${appUrl}/sources">/sources</a>.</p>
+  <p style="margin-top: 24px; font-size: 13px; color: #888;">After sign-in, visit <a href="${appUrl}/settings">/settings</a> to add your GitHub token and configure where the morning research email should arrive. Manage your sources (curated + your own additions) on <a href="${appUrl}/sources">/sources</a>.</p>
   <p style="font-size: 12px; color: #888; margin-top: 32px;">If you didn't expect this email, just ignore it.</p>
 </body></html>`;
 

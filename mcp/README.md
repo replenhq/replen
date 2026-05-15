@@ -1,8 +1,10 @@
 # @replen/mcp
 
-MCP server that surfaces [replen](https://replen.dev) — your personalised daily OSS digest — inside Claude Code / Codex / any MCP host. The agent can ask:
+**Smart AI Development workflows.** MCP server that brings [replen](https://replen.dev) — the AI that asks *"can we do this better?"* on your codebase — inside Claude Code / Codex / any MCP host.
 
-- *"what new OSS surfaced for me this week?"*
+While your AI coding tool waits for prompts, replen reads your code against the ecosystem every morning. This MCP lets the agent act on the results without leaving chat:
+
+- *"what new tools shipped this week that fit my project?"*
 - *"is github.com/owner/repo worth integrating into the codebase I have open?"*
 - *"open handoff PRs for everything I starred"*
 
