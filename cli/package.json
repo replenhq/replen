@@ -1,0 +1,36 @@
+{
+  "name": "replen",
+  "version": "0.1.0",
+  "description": "One-command setup for replen — daily personalised OSS discovery. Opens a browser to sign you up, captures the auth back into the terminal, and wires the MCP server into your Claude Code / Codex config.",
+  "type": "module",
+  "bin": {
+    "replen": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": ["replen", "oss-discovery", "claude-code", "mcp", "cli"],
+  "homepage": "https://replen.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/replenhq/replen.git",
+    "directory": "cli"
+  },
+  "bugs": "https://github.com/replenhq/replen/issues",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
