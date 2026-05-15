@@ -32,7 +32,7 @@ export function renderHandoff(
 
   return `# Integration brief: ${repo.owner}/${repo.name}
 
-**Surfaced by**: OSS Digest on ${new Date().toISOString().slice(0, 10)}
+**Surfaced by**: replen on ${new Date().toISOString().slice(0, 10)}
 **Source repo**: ${repo.url}
 **Project**: ${projectSlug}
 **Snapshot**: ${repo.stars ?? "?"}★ · ${repo.primaryLanguage ?? "?"} · ${repo.license ?? "no license"}

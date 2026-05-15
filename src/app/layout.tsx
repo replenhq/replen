@@ -5,7 +5,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 
-export const metadata = { title: "Digest" };
+export const metadata = { title: "replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,7 +44,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         {user && (
           <header>
             <a href="/" style={{ marginRight: 16 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>◆ Digest</span>
+              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>◆ replen</span>
             </a>
             <a href="/">today</a>
             <a href="/projects">projects</a>

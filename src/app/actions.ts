@@ -91,7 +91,7 @@ export async function createHandoff(matchId: number): Promise<{ ok: boolean; prU
     filePath,
   );
   const prTitle = `Handoff: ${repo.owner}/${repo.name}`;
-  const prBody = `Automated handoff from OSS Digest.
+  const prBody = `Automated handoff from replen.
 
 This PR adds \`${filePath}\` describing why \`${repo.owner}/${repo.name}\` surfaced as a potential fit for \`${project.slug}\`, plus a prompt for Claude Code / Codex to re-evaluate it with knowledge of this codebase.
 

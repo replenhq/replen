@@ -1,8 +1,31 @@
 # replen
 
-Daily personalised OSS discovery. Pulls new repos from gh-trending, TikTok, Threads, Reddit, and HN; scores each against your own projects via LLM; surfaces the fits on a dashboard, in your inbox, and (optionally) inside Claude Code via MCP.
+**Daily personalised OSS discovery — handed off ready-to-integrate.**
 
-Multi-tenant, encrypted at rest, bring-your-own-keys. A hosted instance lives at [app.replen.dev](https://app.replen.dev); self-host with `npm install && npm run dev` (no Docker required).
+Each morning replen surfaces new repos matched to *your* projects. Star one and it opens a PR in your repo with a briefing your AI agent — Claude Code, Codex, whichever — picks up and runs with. Discovery + dispatch in one tool.
+
+Pulls from gh-trending, TikTok, Threads, Reddit, and HN. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev) — or self-host (no Docker required).
+
+## Quickstart
+
+```bash
+npx replen
+```
+
+That single command:
+1. Opens your browser to sign up / sign in
+2. Captures auth back into the terminal (browser-callback OAuth, same pattern as `gh auth login`)
+3. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
+
+You're triaging by tomorrow morning. No token-paste, no JSON-fiddling.
+
+For self-host targets:
+
+```bash
+REPLEN_BASE=https://replen.your-domain.dev npx replen
+```
+
+Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen --help`.
 
 ## What it does
 
@@ -14,6 +37,23 @@ Multi-tenant, encrypted at rest, bring-your-own-keys. A hosted instance lives at
    - **HTML email** every morning at the UTC hour you set, sent via Amazon SES.
    - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
 5. **Closes the loop** when you star a match: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
+
+## Workflow
+
+The morning email is just the entry point. The interesting bit is what happens after you find something worth keeping:
+
+```
+1. replen surfaces a match           — in email, dashboard, or via MCP tool
+2. You star it                       — click ★, or "use replen to handoff matchId 96"
+3. replen opens a PR in your repo    — a markdown briefing in .replen/handoffs/
+4. Your agent picks it up            — Claude Code / Codex reads the briefing,
+                                       has full context, proposes the integration
+5. You review and merge              — replen polls PR status, flips to integrated
+```
+
+The briefing — committed to your repo, not ours — covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. replen is research + dispatch; never the one writing code into your repo.
+
+Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-loop).
 
 ## Architecture
 
@@ -52,7 +92,7 @@ Multi-tenant, encrypted at rest, bring-your-own-keys. A hosted instance lives at
 ## Local dev
 
 ```bash
-git clone https://github.com/replen/replen.git && cd replen
+git clone https://github.com/replenhq/replen.git && cd replen
 cp .env.example .env   # fill in keys (see below)
 npm install
 npm run db:generate
@@ -143,7 +183,9 @@ Self-contained npm package (`@replen/mcp`) that exposes six tools to Claude Code
 | `digest_create_handoff` | Opens a handoff PR for a starred match |
 | `digest_feedback` | Records good/bad/star/unstar/hide |
 
-Install: `npx -y @replen/mcp setup`, or add manually to your MCP host config:
+**Install:** `npx replen` (does the OAuth flow + wires this into Claude Code in one command — see Quickstart above).
+
+To install the MCP only (skip the auth flow), or to wire it into a host other than Claude Code, add the entry by hand:
 
 ```jsonc
 {
@@ -160,7 +202,7 @@ Install: `npx -y @replen/mcp setup`, or add manually to your MCP host config:
 }
 ```
 
-Token generated on `/settings`.
+Token from `/settings` → "Connect Claude Code".
 
 ### Skill (`skills/replen-triage/`)
 
@@ -212,7 +254,6 @@ Default daily cap is **$5/user**; configurable on `/settings`.
 
 - **Tenant-isolation test** — multi-tenant queries look clean by audit but no automated guard yet.
 - **HTML triage artifacts** — the skill writes to `~/replen/reports/`; pending validation as to whether this beats terminal markdown for daily use.
-- **OAuth-style MCP onboarding** — today's flow is "generate token on /settings, paste into config"; a "Connect Claude Code" button could automate it.
 - **Aging policy automation** — `archiveOldHidden(90)` is manual via /settings; could run nightly.
 
 ## Repository layout
@@ -234,6 +275,7 @@ replen/
 │   ├── lib/                crypto, github-pr, github-repo-detect, source-rank, pricing
 │   ├── db/                 drizzle schema + migrations
 │   └── cli/                one-shot CLIs (sync, backfill, redetect)
+├── cli/                    `replen` CLI (the `npx replen` one-liner)
 ├── mcp/                    @replen/mcp MCP server package
 ├── skills/                 Claude Code skills
 │   └── replen-triage/      morning-triage protocol
