@@ -1,0 +1,22 @@
+[Unit]
+Description=OSS Digest — Next.js dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/oss-digest
+EnvironmentFile=/opt/oss-digest/.env
+Environment=NODE_ENV=production
+Environment=PORT=3030
+# Override laptop-side .env values for the VPS
+Environment=GITHUB_ROOT=/opt/oss-digest/projects-mirror
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/oss-digest/web.log
+StandardError=append:/var/log/oss-digest/web.log
+
+[Install]
+WantedBy=multi-user.target

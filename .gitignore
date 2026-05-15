@@ -1,0 +1,25 @@
+# Build artefacts
+node_modules
+.next
+*.tsbuildinfo
+dist
+build
+
+# Local state — never commit
+.env
+.env.local
+.env.*.local
+data/
+projects-mirror/
+backups/
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+.idea
+.vscode
+
+# Claude Code session files
+.mcp.json

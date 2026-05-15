@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `can_use_shared_llm` integer DEFAULT false NOT NULL;

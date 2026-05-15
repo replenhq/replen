@@ -1,0 +1,46 @@
+// Prefer the base64-encoded form: completely sidesteps the systemd EnvironmentFile
+// backslash-stripping gotcha and the .env shell-quoting gotcha. Fall back to the raw
+// form (with \n unescape) for backwards compatibility.
+function normalizePrivateKey(): string {
+  const b64 = process.env.FIREBASE_PRIVATE_KEY_BASE64;
+  if (b64) {
+    try {
+      return atob(b64.trim());
+    } catch {
+      // fall through to raw
+    }
+  }
+  const raw = process.env.FIREBASE_PRIVATE_KEY || "";
+  // Some pipelines deliver real newlines, others deliver literal `\n` sequences,
+  // and broken pipelines strip the backslash entirely leaving stray `n` chars.
+  // Handle the first two; the third (n-stripped) is unrecoverable — use base64.
+  return raw.replace(/\\n/g, "\n");
+}
+
+const isProd = process.env.NODE_ENV === "production";
+
+export const authConfig = {
+  apiKey: process.env.FIREBASE_API_KEY!,
+  cookieName: "__session",
+  cookieSignatureKeys: [
+    process.env.COOKIE_SECRET_CURRENT!,
+    process.env.COOKIE_SECRET_PREVIOUS!,
+  ],
+  cookieSerializeOptions: {
+    path: "/",
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax" as const,
+    maxAge: 12 * 60 * 60 * 24,
+    // Set AUTH_COOKIE_DOMAIN (e.g. ".example.com") to share the session cookie
+    // across subdomains; leave unset for single-host installs.
+    domain: isProd ? (process.env.AUTH_COOKIE_DOMAIN || undefined) : undefined,
+  },
+  serviceAccount: {
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+    clientEmail: (process.env.FIREBASE_CLIENT_EMAIL || "").trim(),
+    privateKey: normalizePrivateKey(),
+  },
+  enableMultipleCookies: true,
+  debug: !isProd,
+};

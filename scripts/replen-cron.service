@@ -1,0 +1,20 @@
+[Unit]
+Description=replen — cron scheduler (fetchers + analyzer + email)
+After=network-online.target replen.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/replen
+EnvironmentFile=/opt/replen/.env
+Environment=NODE_ENV=production
+Environment=GITHUB_ROOT=/opt/replen/projects-mirror
+ExecStart=/usr/bin/npx tsx src/scheduler/cron.ts
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/var/log/replen/cron.log
+StandardError=append:/var/log/replen/cron.log
+
+[Install]
+WantedBy=multi-user.target

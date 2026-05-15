@@ -1,0 +1,20 @@
+[Unit]
+Description=OSS Digest — cron scheduler (fetchers + analyzer + email)
+After=network-online.target oss-digest.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/oss-digest
+EnvironmentFile=/opt/oss-digest/.env
+Environment=NODE_ENV=production
+Environment=GITHUB_ROOT=/opt/oss-digest/projects-mirror
+ExecStart=/usr/bin/npx tsx src/scheduler/cron.ts
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/var/log/oss-digest/cron.log
+StandardError=append:/var/log/oss-digest/cron.log
+
+[Install]
+WantedBy=multi-user.target

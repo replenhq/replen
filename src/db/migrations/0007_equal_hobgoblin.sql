@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `tiktok_handles` text;

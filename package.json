@@ -1,0 +1,44 @@
+{
+  "name": "replen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3030",
+    "build": "next build",
+    "start": "next start -p 3030",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "pipeline:run": "tsx src/scheduler/run-once.ts",
+    "pipeline:start": "tsx src/scheduler/cron.ts",
+    "sync": "tsx src/cli/digest-sync.ts"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "cheerio": "^1.0.0",
+    "drizzle-orm": "^0.45.1",
+    "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0",
+    "next": "^16.2.6",
+    "next-firebase-auth-edge": "^1.12.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^8.0.7",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.16",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

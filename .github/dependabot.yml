@@ -1,0 +1,46 @@
+# Drop this file into each repo at: .github/dependabot.yml
+# Tweaks per-repo:
+#   - update directory: if package.json isn't at the root, set "/path"
+#   - allow:dependency-type=production if you want to ignore dev-dep noise
+#   - groups: combine related deps (e.g. all @next/* in one PR)
+#
+# After committing this file, GitHub will start opening PRs for vulnerable
+# packages within hours and for routine version bumps weekly.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    # Only allow updates that fix advisories OR are within-major patches.
+    # Bigger upgrades come up as separate PRs you can review on your own time.
+    versioning-strategy: "increase-if-necessary"
+    groups:
+      production-deps:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+          - "minor"
+      dev-deps:
+        dependency-type: "development"
+        update-types:
+          - "patch"
+          - "minor"
+    # Critical/high CVE advisories always open a dedicated PR (Dependabot
+    # security updates — enabled at the repo settings level, not here).
+    labels:
+      - "deps"
+
+  # If the repo also has a Python part (e.g. FastAPI in /api), uncomment:
+  # - package-ecosystem: "pip"
+  #   directory: "/api"
+  #   schedule:
+  #     interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

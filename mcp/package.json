@@ -1,0 +1,56 @@
+{
+  "name": "@replen/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for replen — surface daily OSS matches inside Claude Code / Codex / any MCP host. Includes a `setup` subcommand that wires itself into Claude Code config.",
+  "type": "module",
+  "bin": {
+    "replen-mcp": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "oss",
+    "open-source",
+    "digest",
+    "discovery",
+    "replen"
+  ],
+  "homepage": "https://replen.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/replen/replen.git",
+    "directory": "mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/replen/replen/issues"
+  },
+  "author": "replen.dev",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

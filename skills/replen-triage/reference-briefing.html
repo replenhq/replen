@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Briefing · roboflow/supervision → my-cv-project</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb; --card: #ffffff;
+    --green: #1f8a4c; --amber: #b8860b; --red: #c0392b; --primary: #1f3a8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f172a; --fg: #f1f5f9; --muted: #94a3b8; --line: #334155; --card: #1e293b; --primary: #93c5fd; }
+  }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    max-width: 920px; margin: 0 auto; padding: 24px; background: var(--bg); color: var(--fg); }
+  header { border-bottom: 2px solid var(--primary); padding-bottom: 14px; margin-bottom: 20px; }
+  header .eyebrow { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  header h1 { margin: 6px 0 4px; font-size: 22px; }
+  header h1 a { color: var(--primary); text-decoration: none; }
+  header .stats { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .verdict-banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px;
+    background: #d1fae5; border-left: 4px solid var(--green); margin: 0 0 20px; }
+  .verdict-banner.skip { background: #f1f5f9; border-left-color: var(--muted); }
+  .verdict-banner.bad { background: #fee2e2; border-left-color: var(--red); }
+  .verdict-banner .badge { font-weight: 700; font-size: 18px; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 10px; border-radius: 4px; background: var(--green); color: #fff; }
+  .verdict-banner.skip .badge { background: var(--muted); }
+  .verdict-banner.bad .badge { background: var(--red); }
+  .verdict-banner .verdict-text { font-size: 15px; line-height: 1.5; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 0 20px; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  h2 { margin: 24px 0 8px; font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table th, table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+  table th { color: var(--muted); font-weight: 500; font-size: 12px; }
+
+  pre { background: #0d1117; color: #e6edf3; padding: 12px 14px; border-radius: 6px; overflow-x: auto;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace; }
+  pre.diff .add { color: #7ee787; }
+  pre.diff .del { color: #ffa198; }
+  code.inline { background: #0001; padding: 1px 5px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  @media (prefers-color-scheme: dark) { code.inline { background: #ffffff15; } }
+
+  /* Risk / signal panel with SVG icons */
+  .signals { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .signal { display: flex; gap: 8px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+  .signal svg { flex-shrink: 0; width: 18px; height: 18px; }
+  .signal .label { font-size: 11px; color: var(--muted); }
+  .signal .value { font-size: 13px; font-weight: 600; }
+  .signal.good { border-left: 3px solid var(--green); }
+  .signal.warn { border-left: 3px solid var(--amber); }
+  .signal.bad { border-left: 3px solid var(--red); }
+
+  /* Dataflow SVG */
+  .dataflow { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 10px 0 20px; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+  .actions button { font: inherit; cursor: pointer; padding: 8px 14px; font-size: 13px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); border-radius: 6px; }
+  .actions button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .actions button:hover { transform: translateY(-1px); }
+  .actions button.done { background: #d1fae5; color: var(--green); border-color: var(--green); }
+
+  details.readme { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 10px 0 20px; }
+  details.readme summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+  details.readme[open] summary { margin-bottom: 10px; }
+  details.readme .content { font-size: 13px; line-height: 1.6; max-height: 500px; overflow-y: auto; }
+
+  #toast { position: fixed; bottom: 16px; right: 16px; background: var(--fg); color: var(--bg); padding: 8px 14px;
+    border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">◆ Digest Briefing · 2026-05-15</div>
+  <h1><a href="https://github.com/roboflow/supervision" target="_blank">roboflow/supervision</a> → my-cv-project</h1>
+  <div class="stats">38.7k★ · 150 contributors · Python · MIT · created 4 years ago · pushed 3 days ago · 24 open issues</div>
+</header>
+
+<div class="verdict-banner">
+  <span class="badge">KEEP</span>
+  <span class="verdict-text">
+    Strong fit. Drop-in replacement for hand-rolled annotation code, plus deletes our ByteTrack reimplementation.
+    No blocker risks; recommend handoff PR + start integration in <code class="inline">my-cv-project/src/annotations.py</code>.
+  </span>
+</div>
+
+<h2>Signals</h2>
+<div class="signals">
+  <div class="signal good">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.78 5.97L7.25 10.5 4.22 7.47l1.06-1.06L7.25 8.38l3.47-3.47 1.06 1.06Z"/></svg>
+    <div><div class="label">licence</div><div class="value">MIT</div></div>
+  </div>
+  <div class="signal good">
+    <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 8h8M8 4v8" stroke="currentColor" stroke-width="1.5"/></svg>
+    <div><div class="label">contributors</div><div class="value">150</div></div>
+  </div>
+  <div class="signal good">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.5 3v3.79l2.65 1.58-.7 1.17L7.5 9V4.5h1Z"/></svg>
+    <div><div class="label">days since push</div><div class="value">3</div></div>
+  </div>
+  <div class="signal good">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 5v6h10V5H3Zm0-1.5h10A1.5 1.5 0 0 1 14.5 5v6a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 11V5A1.5 1.5 0 0 1 3 3.5Z"/></svg>
+    <div><div class="label">postinstall</div><div class="value">none</div></div>
+  </div>
+  <div class="signal warn">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1 1 14h14L8 1Zm0 5v4M8 12v.5"/></svg>
+    <div><div class="label">secrets scan</div><div class="value">0 found</div></div>
+  </div>
+  <div class="signal good">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Z"/></svg>
+    <div><div class="label">stars / day</div><div class="value">27 (steady)</div></div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Your project · my-cv-project</h3>
+    <table>
+      <tr><th>Tech</th><td>Python 3.11, PyTorch, OpenCV, FastAPI</td></tr>
+      <tr><th>Repo</th><td><code class="inline">acme/my-cv-project</code></td></tr>
+      <tr><th>Sensitivity</th><td>low</td></tr>
+      <tr><th>Hand-rolled today</th><td><code class="inline">annotations.py</code> (320 LOC), <code class="inline">trackers/byte.py</code> (510 LOC)</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Repo summary</h3>
+    <table>
+      <tr><th>Primary use</th><td>Reusable CV utilities — annotators, dataset loaders, trackers</td></tr>
+      <tr><th>Model coupling</th><td>None — works with any detection model</td></tr>
+      <tr><th>Python support</th><td>3.8–3.12</td></tr>
+      <tr><th>Coverage of our use</th><td>~80% replaces both hand-rolled files</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>Integration sketch — data flow</h2>
+<div class="dataflow">
+  <svg viewBox="0 0 720 160" width="100%" style="max-width: 720px;" aria-label="my-cv-project current vs proposed dataflow">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/>
+      </marker>
+    </defs>
+    <!-- Current row -->
+    <text x="0" y="20" font-size="11" fill="#6b7280" font-weight="600">CURRENT</text>
+    <rect x="0" y="30" width="120" height="36" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="60" y="52" text-anchor="middle" font-size="12">detection model</text>
+    <line x1="120" y1="48" x2="170" y2="48" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <rect x="170" y="30" width="160" height="36" rx="6" fill="#fee2e2" stroke="#c0392b"/>
+    <text x="250" y="52" text-anchor="middle" font-size="12">annotations.py (hand-rolled)</text>
+    <line x1="330" y1="48" x2="380" y2="48" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <rect x="380" y="30" width="140" height="36" rx="6" fill="#fee2e2" stroke="#c0392b"/>
+    <text x="450" y="52" text-anchor="middle" font-size="12">trackers/byte.py</text>
+    <line x1="520" y1="48" x2="570" y2="48" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <rect x="570" y="30" width="120" height="36" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="630" y="52" text-anchor="middle" font-size="12">FastAPI handler</text>
+    <!-- Proposed row -->
+    <text x="0" y="100" font-size="11" fill="#1f8a4c" font-weight="600">PROPOSED</text>
+    <rect x="0" y="110" width="120" height="36" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="60" y="132" text-anchor="middle" font-size="12">detection model</text>
+    <line x1="120" y1="128" x2="170" y2="128" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <rect x="170" y="110" width="320" height="36" rx="6" fill="#d1fae5" stroke="#1f8a4c"/>
+    <text x="330" y="132" text-anchor="middle" font-size="12">supervision.Detections + ByteTrack</text>
+    <line x1="490" y1="128" x2="540" y2="128" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <rect x="540" y="110" width="120" height="36" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="600" y="132" text-anchor="middle" font-size="12">FastAPI handler</text>
+  </svg>
+</div>
+
+<h2>Code: before / after</h2>
+<pre class="diff"><span class="del">- # my-cv-project/src/annotations.py (hand-rolled)</span>
+<span class="del">- def draw_bbox(img, x, y, w, h, label):</span>
+<span class="del">-     cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)</span>
+<span class="del">-     cv2.putText(img, label, (x, y-10), ...)</span>
+<span class="add">+ # using supervision</span>
+<span class="add">+ import supervision as sv</span>
+<span class="add">+ box_annotator = sv.BoxAnnotator()</span>
+<span class="add">+ label_annotator = sv.LabelAnnotator()</span>
+<span class="add">+ frame = box_annotator.annotate(scene=frame, detections=dets)</span>
+<span class="add">+ frame = label_annotator.annotate(scene=frame, detections=dets, labels=labels)</span></pre>
+
+<h2>Risks &amp; open questions</h2>
+<ul>
+  <li><b>API stability:</b> supervision is on 0.25.x. Pin to a minor; their changelog flags breaking changes clearly.</li>
+  <li><b>Numpy/cv2 version pin:</b> they require numpy &lt; 2.0; my-cv-project already does, no conflict.</li>
+  <li><b>Tracker handoff:</b> our ByteTrack tunings (high_thresh, match_thresh) need porting to supervision's wrapper — straightforward but test against the staging dataset before merging.</li>
+</ul>
+
+<details class="readme">
+  <summary>📖 README excerpt (~600 lines · click to expand)</summary>
+  <div class="content">
+    <p>(README content goes here — first ~12k chars of the upstream README, rendered as plain text or simple HTML.)</p>
+    <p><b>Supervision</b> is a tool for working with computer vision models. It provides utilities for working with detection, classification, and segmentation results...</p>
+  </div>
+</details>
+
+<div class="actions">
+  <button class="primary copy-prompt" data-prompt="use replen to digest_create_handoff with matchId 96">→ Open handoff PR (matchId 96)</button>
+  <button class="copy-prompt" data-prompt="use replen to digest_feedback matchId 96 action good">Mark 👍</button>
+  <button class="copy-prompt" data-prompt="clone acme/my-cv-project and start the integration from the .digest/handoffs/roboflow-supervision-2026-05-15.md briefing">Clone &amp; start integrating</button>
+  <button class="copy-prompt" data-prompt="re-evaluate roboflow/supervision specifically focusing on whether it can replace trackers/byte.py">Deeper dive on tracker</button>
+</div>
+
+<div id="toast" role="status" aria-live="polite">Copied to clipboard</div>
+
+<script>
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 1400);
+  }
+  document.querySelectorAll('button.copy-prompt').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const prompt = btn.dataset.prompt;
+      try {
+        await navigator.clipboard.writeText(prompt);
+        const orig = btn.textContent;
+        btn.classList.add('done');
+        btn.textContent = '✓ Copied · paste into Claude';
+        showToast('Prompt copied — paste into Claude Code');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 2200);
+      } catch (e) { showToast('Copy failed'); console.error(e); }
+    });
+  });
+</script>
+</body>
+</html>

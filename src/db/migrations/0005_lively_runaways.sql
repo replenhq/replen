@@ -1,0 +1,1 @@
+ALTER TABLE `project_profiles` ADD `llm_provider` text DEFAULT 'auto' NOT NULL;

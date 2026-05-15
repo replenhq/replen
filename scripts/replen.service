@@ -1,0 +1,21 @@
+[Unit]
+Description=replen — Next.js dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/replen
+EnvironmentFile=/opt/replen/.env
+Environment=NODE_ENV=production
+Environment=PORT=3030
+Environment=GITHUB_ROOT=/opt/replen/projects-mirror
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/replen/web.log
+StandardError=append:/var/log/replen/web.log
+
+[Install]
+WantedBy=multi-user.target

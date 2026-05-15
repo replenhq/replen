@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digest Triage · 2026-05-15</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb; --card: #ffffff;
+    --green: #1f8a4c; --amber: #b8860b; --blue: #4a6fa5; --grey: #94a3b8;
+    --red: #c0392b; --primary: #1f3a8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f172a; --fg: #f1f5f9; --muted: #94a3b8; --line: #334155; --card: #1e293b; --primary: #93c5fd; }
+  }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    max-width: 960px; margin: 0 auto; padding: 24px; background: var(--bg); color: var(--fg); }
+  header { border-bottom: 2px solid var(--primary); padding-bottom: 14px; margin-bottom: 24px; }
+  header .eyebrow { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  header h1 { margin: 6px 0 4px; font-size: 22px; }
+  header .summary { color: var(--muted); font-size: 13px; }
+  header .summary b { color: var(--fg); }
+  .toc { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0 0; font-size: 13px; }
+  .toc a { color: var(--primary); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  h2 { margin: 32px 0 8px; font-size: 17px; padding: 6px 10px; border-radius: 6px; background: #eef2ff; }
+  @media (prefers-color-scheme: dark) { h2 { background: #1e3a8a33; } }
+  h2 .count { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 6px; }
+  .match { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+  .match.skip { opacity: 0.78; }
+  .match.bad { opacity: 0.78; border-left: 3px solid var(--red); }
+  .match-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+  .match-head a.repo { font-size: 15px; font-weight: 600; color: var(--primary); text-decoration: none; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+  .chip.high { background: var(--green); color: #fff; }
+  .chip.medium { background: var(--amber); color: #fff; }
+  .chip.awareness { background: var(--blue); color: #fff; }
+  .chip.source { background: #eef; color: #225; font-weight: 500; }
+  .chip.verdict-keep { background: #d1fae5; color: var(--green); }
+  .chip.verdict-skip { background: #f1f5f9; color: var(--muted); }
+  .chip.verdict-bad { background: #fee2e2; color: var(--red); }
+  .meta { color: var(--muted); font-size: 12px; }
+  .why { font-size: 14px; line-height: 1.6; margin: 6px 0 10px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .actions button { font: inherit; cursor: pointer; padding: 4px 10px; font-size: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); border-radius: 4px; }
+  .actions button:hover { background: #f1f5f9; border-color: var(--primary); }
+  .actions button.copy-prompt::after { content: " ↗"; opacity: 0.6; }
+  .actions button.done { background: #d1fae5; border-color: var(--green); color: var(--green); }
+  .compact { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px 12px; font-size: 13px; align-items: baseline; padding: 8px 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 4px; }
+  .compact a { color: var(--primary); text-decoration: none; font-weight: 500; }
+  .compact .meta { font-size: 11px; }
+  footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  footer code { background: #0001; padding: 1px 5px; border-radius: 3px; }
+  @media (prefers-color-scheme: dark) { footer code { background: #ffffff15; } }
+
+  /* Tiny bar chart at the top, no JS. */
+  .source-bars { display: grid; grid-template-columns: 80px 1fr 30px; gap: 4px 10px; font-size: 12px; margin: 8px 0 0; align-items: center; }
+  .source-bars .bar { height: 8px; background: var(--primary); border-radius: 2px; opacity: 0.9; }
+  .source-bars .bar.bad { background: var(--red); opacity: 0.7; }
+
+  /* Toast after copy */
+  #toast { position: fixed; bottom: 16px; right: 16px; background: var(--fg); color: var(--bg); padding: 8px 14px;
+    border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">◆ Digest Triage · 2026-05-15</div>
+  <h1>14 matches reviewed · 3 high-fit · 2 marked bad</h1>
+  <div class="summary">
+    Window: <b>last 24h</b> · sources: <b>5</b> · pipeline cost: <b>$0.124</b>
+  </div>
+  <div class="source-bars" aria-label="Matches by source (24h)">
+    <span class="meta">gh-trending</span><span class="bar" style="width: 70%"></span><span class="meta">7</span>
+    <span class="meta">tiktok</span><span class="bar" style="width: 30%"></span><span class="meta">3</span>
+    <span class="meta">threads</span><span class="bar" style="width: 20%"></span><span class="meta">2</span>
+    <span class="meta">reddit</span><span class="bar" style="width: 10%"></span><span class="meta">1</span>
+    <span class="meta">hn</span><span class="bar" style="width: 10%"></span><span class="meta">1</span>
+  </div>
+  <div class="toc">
+    <a href="#high-fit">High-fit (3)</a>
+    <a href="#worth-glance">Worth a glance (5)</a>
+    <a href="#skipped">Skipped (4)</a>
+    <a href="#bad">Marked bad (2)</a>
+  </div>
+</header>
+
+<section id="high-fit">
+  <h2>High-fit <span class="count">· 3 · ready for handoff</span></h2>
+
+  <article class="match keep">
+    <div class="match-head">
+      <a class="repo" href="https://github.com/roboflow/supervision" target="_blank">roboflow/supervision</a>
+      <span class="chip high">high 85</span>
+      <span class="chip source">via gh-trending</span>
+      <span class="chip verdict-keep">KEEP → my-cv-project</span>
+      <span class="meta">38.7k★ · Python · MIT · pushed 3d ago</span>
+    </div>
+    <div class="why">
+      Drop-in replacement for the bbox/mask annotation utilities my-cv-project currently has hand-rolled in <code>annotations.py</code>.
+      150 contributors, MIT, no postinstall hooks, mature API surface. Their tracker module would also let us delete our
+      reimplementation of ByteTrack in <code>trackers/byte.py</code>.
+    </div>
+    <div class="actions">
+      <button class="copy-prompt" data-prompt="use replen to digest_create_handoff with matchId 96">Open handoff PR</button>
+      <button class="copy-prompt" data-prompt="use replen to digest_feedback matchId 96 action good">Mark 👍</button>
+      <button class="copy-prompt" data-prompt="use replen to digest_analyze_repo for roboflow/supervision and propose specific files to replace">Plan integration</button>
+    </div>
+  </article>
+
+  <article class="match keep">
+    <div class="match-head">
+      <a class="repo" href="https://github.com/oxc-project/oxc" target="_blank">oxc-project/oxc</a>
+      <span class="chip high">high 78</span>
+      <span class="chip source">via gh-trending</span>
+      <span class="chip verdict-keep">KEEP → my-webapp</span>
+      <span class="meta">12.4k★ · Rust · MIT · pushed 1d ago</span>
+    </div>
+    <div class="why">
+      Rust-native JS/TS toolchain — parser, linter, formatter. Could shave 60-70% off my-webapp's CI lint+typecheck step
+      (currently 90s on Vercel). Risk: still pre-1.0, breaking changes between minors. Worth a feature-flagged experiment.
+    </div>
+    <div class="actions">
+      <button class="copy-prompt" data-prompt="use replen to digest_create_handoff with matchId 145">Open handoff PR</button>
+      <button class="copy-prompt" data-prompt="use replen to digest_feedback matchId 145 action good">Mark 👍</button>
+    </div>
+  </article>
+
+  <article class="match keep">
+    <div class="match-head">
+      <a class="repo" href="https://github.com/blader/humanizer" target="_blank">blader/humanizer</a>
+      <span class="chip medium">medium 76</span>
+      <span class="chip source">via tiktok</span>
+      <span class="chip verdict-keep">KEEP → revisit</span>
+      <span class="meta">8.4k★ · TypeScript · MIT · pushed 4d ago</span>
+    </div>
+    <div class="why">
+      Text humanisation library. Strong fit for my-webapp's blog/CMS content layer — but that surface doesn't exist yet,
+      so park it. <b>Project's <code>githubFullName</code> not set</b>; can't auto-handoff until you set it on /projects.
+    </div>
+    <div class="actions">
+      <button class="copy-prompt" data-prompt="use replen to digest_feedback matchId 143 action star">★ Star for later</button>
+    </div>
+  </article>
+</section>
+
+<section id="worth-glance">
+  <h2>Worth a glance <span class="count">· 5 · score 60–74, no deep dive</span></h2>
+  <div class="compact"><a href="https://github.com/cartesiancs/map3d">cartesiancs/map3d</a><span class="meta">→ my-webapp · 68</span><span class="meta">2.1k★</span><span class="meta">TS</span></div>
+  <div class="compact"><a href="https://github.com/runablehq/mini-browser">runablehq/mini-browser</a><span class="meta">→ my-cv-project · 65</span><span class="meta">890★</span><span class="meta">Py</span></div>
+  <div class="compact"><a href="https://github.com/glouw/nibble">glouw/nibble</a><span class="meta">→ _general · 64</span><span class="meta">540★</span><span class="meta">C</span></div>
+  <div class="compact"><a href="https://github.com/cactus-compute/needle">cactus-compute/needle</a><span class="meta">→ my-cv-project · 62</span><span class="meta">3.0k★</span><span class="meta">Rust</span></div>
+  <div class="compact"><a href="https://github.com/shiyu-coder/Kronos">shiyu-coder/Kronos</a><span class="meta">→ my-webapp · 61</span><span class="meta">1.8k★</span><span class="meta">Py</span></div>
+</section>
+
+<section id="skipped">
+  <h2>Skipped <span class="count">· 4 · low fit, no action needed</span></h2>
+  <div class="compact"><a href="https://github.com/example/foo">example/foo</a><span class="meta">3.2k★</span><span class="chip verdict-skip">SKIP</span><span class="meta">Rust ML, no project fits</span></div>
+  <div class="compact"><a href="https://github.com/example/bar">example/bar</a><span class="meta">450★</span><span class="chip verdict-skip">SKIP</span><span class="meta">AGPL, licence blocker</span></div>
+  <div class="compact"><a href="https://github.com/example/baz">example/baz</a><span class="meta">120★</span><span class="chip verdict-skip">SKIP</span><span class="meta">Abandoned, last push 14mo</span></div>
+  <div class="compact"><a href="https://github.com/example/qux">example/qux</a><span class="meta">800★</span><span class="chip verdict-skip">SKIP</span><span class="meta">Single-contributor, supply-chain risk</span></div>
+</section>
+
+<section id="bad">
+  <h2 style="background: #fee2e2;">Marked bad <span class="count">· 2 · feeds source down-weighting</span></h2>
+  <div class="compact"><a href="https://github.com/example/spam1">example/spam1</a><span class="meta">12k★</span><span class="chip verdict-bad">BAD</span><span class="meta">Pure prompt-engineering "framework"</span></div>
+  <div class="compact"><a href="https://github.com/example/spam2">example/spam2</a><span class="meta">5.4k★</span><span class="chip verdict-bad">BAD</span><span class="meta">Crypto/Web3, off-topic</span></div>
+  <div class="actions" style="margin-top: 10px;">
+    <button class="copy-prompt" data-prompt="use replen to digest_feedback matchId 138 action bad, then digest_feedback matchId 139 action bad">Apply both 👎 to sources</button>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Next triage: tomorrow morning. Run again any time with <code>/replen-triage</code> or "triage my digest".<br>
+    Source weights are updated when you 👍/👎 — chronically-bad sources sink in candidate ranking.
+  </p>
+</footer>
+
+<div id="toast" role="status" aria-live="polite">Copied to clipboard</div>
+
+<script>
+  // Two-way interaction: every action button copies a Claude-Code prompt to the
+  // clipboard. The user then pastes back into Claude to actually act. The HTML
+  // never calls our API directly — it stays a pure local artifact.
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 1400);
+  }
+  document.querySelectorAll('button.copy-prompt').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const prompt = btn.dataset.prompt;
+      try {
+        await navigator.clipboard.writeText(prompt);
+        const orig = btn.textContent;
+        btn.classList.add('done');
+        btn.textContent = '✓ Copied · paste into Claude';
+        showToast('Prompt copied — paste into Claude Code');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 2200);
+      } catch (e) {
+        showToast('Copy failed — see console');
+        console.error(e);
+      }
+    });
+  });
+</script>
+</body>
+</html>
