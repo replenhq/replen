@@ -64,7 +64,7 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: 360, margin: "80px auto", fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Sign in to replen</h1>
+      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Sign in to Replen</h1>
       <p style={{ color: "#666", fontSize: 14, marginBottom: 20 }}>
         Type your email; we'll send you a one-time sign-in link. No password.
       </p>

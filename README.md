@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="logo.svg" width="64" alt="replen">
-  <h1>replen</h1>
+  <img src="logo.svg" width="120" alt="Replen">
+  <h1>Replen</h1>
   <p><strong>Smart AI Development workflows</strong></p>
   <p>The AI that asks: <em>"can we do this better?"</em></p>
 
@@ -67,20 +67,38 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
    - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
 5. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
 
+## What a match looks like
+
+Not a one-liner. Each match is a 400-900 word writeup with the same shape:
+
+> **roboflow/supervision** — high · 87 · gh-trending · 38.7k★ · MIT · pushed 3d ago
+>
+> Reusable CV building blocks in Python: bounding-box drawing, mask compositing, video sinks, and a small set of trackers (ByteTrack + a Norfair adapter). Active — 11 PRs merged this week.
+>
+> For *my-cv-project* specifically, there are 3 concrete plug points where it earns its place. Listed in increasing ambition:
+>
+> 1. **Drop-in replacement for annotations.py.** Your current `BoxAnnotator` / `MaskAnnotator` wrap cv2 in ~180 lines; `supervision.Detections` + `supervision.BoxAnnotator` give the same surface plus label-collision handling and built-in confidence formatting. One file deleted, one import. ~30 min including a smoke test of the demo notebook.
+> 2. **Replace trackers/byte.py with supervision.ByteTrack.** You vendored ByteTrack in May; supervision tracks upstream and ships the class-aware tracking fix from October. Drops ~600 lines plus the requirements pin. ~1h to wire up + verify the multi-class regression test passes.
+> 3. **Use the video utilities** (`sv.VideoSink`, `sv.get_video_frames_generator`). You call `cv2.VideoCapture` / `VideoWriter` directly across 4 files; supervision wraps them with proper resource management and progress reporting. Less load-bearing than (1) and (2); only if you're already in that code path.
+>
+> Do (1) first — single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
+
+The plug points reference your project's actual files because Replen reads them. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
+
 ## Workflow
 
 The morning email is just the entry point. The interesting bit is what happens after you find something worth keeping:
 
 ```
-1. replen surfaces a match           → in email, dashboard, or via MCP tool
+1. Replen surfaces a match           → in email, dashboard, or via MCP tool
 2. You star it                       → click ★, or "use replen to handoff matchId 96"
-3. replen opens a PR in your repo    → a markdown briefing in .replen/handoffs/
+3. Replen opens a PR in your repo    → a markdown briefing in .replen/handoffs/
 4. Your agent picks it up            → Claude Code / Codex reads the briefing,
                                        has full context, proposes the integration
-5. You review and merge              → replen polls PR status, flips to integrated
+5. You review and merge              → Replen polls PR status, flips to integrated
 ```
 
-The briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. replen is research + dispatch; never the one writing code into your repo.
+The briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. Replen is research + dispatch; never the one writing code into your repo.
 
 Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-loop).
 

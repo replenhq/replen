@@ -35,7 +35,11 @@ rsync -az --delete \
   ./ "$REMOTE:$REMOTE_DIR/"
 
 echo "[3/6] npm install + db migrate + build"
-ssh "$REMOTE" "cd $REMOTE_DIR && npm install --no-audit --no-fund && npm run db:generate && npm run db:migrate && npm run build"
+# db:generate intentionally NOT run on remote — migrations are committed
+# to the repo. Running drizzle-kit generate against the live schema would
+# emit an extra autogen migration whenever the remote snapshot drifts from
+# main, which then races the committed migration of the same step number.
+ssh "$REMOTE" "cd $REMOTE_DIR && npm install --no-audit --no-fund && npm run db:migrate && npm run build"
 
 echo "[4/6] installing systemd units"
 ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$WEB_SVC /etc/systemd/system/$WEB_SVC && sudo cp $REMOTE_DIR/scripts/$CRON_SVC /etc/systemd/system/$CRON_SVC && sudo systemctl daemon-reload"

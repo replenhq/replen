@@ -10,7 +10,7 @@ type Project = typeof schema.projectProfiles.$inferSelect;
 
 export async function sendDigestEmail(runId: number, userId: number, cfg: UserConfig) {
   const fromAddr = process.env.EMAIL_FROM_ADDRESS;
-  const fromName = process.env.EMAIL_FROM_NAME ?? "replen";
+  const fromName = process.env.EMAIL_FROM_NAME ?? "Replen";
   const to = cfg.emailToAddress ?? process.env.EMAIL_TO_ADDRESS;
 
   if (!fromAddr || !to) {
@@ -61,7 +61,7 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
   const r = await provider.send({
     from: `"${fromName}" <${fromAddr}>`,
     to,
-    subject: `replen digest - ${today} - ${matchesForRun.length} matches`,
+    subject: `Replen digest - ${today} - ${matchesForRun.length} matches`,
     html,
     text,
   });
@@ -144,7 +144,7 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
 
   const header = `
     <div style="border-bottom:2px solid #1f3a8a;padding-bottom:12px;margin-bottom:18px">
-      <div style="font-size:13px;color:#888;letter-spacing:0.05em;text-transform:uppercase">◆ replen · ${escapeHtml(today)}</div>
+      <div style="font-size:13px;color:#888;letter-spacing:0.05em;text-transform:uppercase">Replen · ${escapeHtml(today)}</div>
       <h1 style="margin:6px 0 4px;font-size:22px;color:#1a1a1a">${totalMatches} new ${totalMatches === 1 ? "match" : "matches"} today</h1>
       <div style="color:#666;font-size:13px">
         ${highCount > 0 ? `<span style="color:#1f8a4c;font-weight:600">${highCount} high</span>` : ""}${highCount > 0 && (mediumCount + awarenessCount) > 0 ? " · " : ""}

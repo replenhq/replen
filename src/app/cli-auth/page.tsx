@@ -52,10 +52,10 @@ export default async function CliAuthPage({ searchParams }: Params) {
 
   return (
     <main style={pageStyle}>
-      <h1 style={h1Style}>Authorize the replen CLI</h1>
+      <h1 style={h1Style}>Authorize the Replen CLI</h1>
       <p style={dimStyle}>
         An app running on your computer (<code>localhost:{port}</code>) is
-        asking to connect to your replen account.
+        asking to connect to your Replen account.
       </p>
 
       <div style={cardStyle}>

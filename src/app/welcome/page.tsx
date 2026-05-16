@@ -86,7 +86,7 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
 
   return (
     <>
-      <h1>Welcome to replen</h1>
+      <h1>Welcome to Replen</h1>
       <Stepper step={step} />
       {step === 1 && <Step1 onSave={saveGithubToken} currentToken={tokenForDisplay} />}
       {step === 2 && <Step2 onSave={saveDelivery} current={settings} />}
@@ -120,7 +120,7 @@ function Step1({ onSave, currentToken }: { onSave: (f: FormData) => Promise<void
     <>
       <h2 style={{ marginTop: 0 }}>1. Connect GitHub</h2>
       <p>
-        replen reads your project READMEs to know what you're building, and (optionally) opens handoff PRs back to your repos when you star a match.
+        Replen reads your project READMEs to know what you're building, and (optionally) opens handoff PRs back to your repos when you star a match.
         One fine-grained PAT covers both.
       </p>
       <p className="meta">
@@ -178,7 +178,7 @@ function Step3({ projects, matched, curated }: { projects: typeof schema.project
     <>
       <h2 style={{ marginTop: 0 }}>3. We discovered your projects</h2>
       <p>
-        replen scanned <a href="/projects">your project_profiles</a> and found <b>{projects.length}</b> active.
+        Replen scanned <a href="/projects">your project_profiles</a> and found <b>{projects.length}</b> active.
         {matched > 0 && <> Of those, <b>{matched}</b> are linked to GitHub repos (auto-detected).</>}
       </p>
       <ul style={{ fontSize: 13, lineHeight: 1.6 }}>

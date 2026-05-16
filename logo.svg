@@ -1,10 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="replen">
-  <!-- Card frame: the day's digest -->
-  <rect x="3" y="3" width="58" height="58" rx="12" fill="none" stroke="#d97706" stroke-width="3"/>
-  <!-- Three rows: the day's matches -->
-  <line x1="15" y1="24" x2="49" y2="24" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
-  <line x1="15" y1="34" x2="42" y2="34" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
-  <line x1="15" y1="44" x2="45" y2="44" stroke="#d97706" stroke-width="3" stroke-linecap="round"/>
-  <!-- New-today dot, top-right corner -->
-  <circle cx="51" cy="13" r="6" fill="#d97706"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100" role="img" aria-label="Replen">
+  <defs>
+    <mask id="replen-screen-mask">
+      <rect width="160" height="100" fill="#fff"/>
+      <path fill="#000" d="M 36 36 H 124 a 6 6 0 0 1 6 6 V 64 c 0 4 -4 8 -10 8 c -6 0 -10 2 -14 4 c -2 1 -4 2 -6 2 c -3 0 -5 -2 -8 -4 c -3 -2 -5 -4 -8 -4 c -3 0 -5 2 -8 4 c -3 2 -5 4 -8 4 c -2 0 -4 -1 -6 -2 c -4 -2 -8 -4 -14 -4 c -6 0 -10 -4 -10 -8 V 42 a 6 6 0 0 1 6 -6 Z"/>
+    </mask>
+  </defs>
+  <g fill="currentColor" mask="url(#replen-screen-mask)">
+    <rect x="18" y="20" width="124" height="60" rx="10"/>
+    <rect x="2" y="28" width="20" height="44" rx="9"/>
+    <rect x="138" y="28" width="20" height="44" rx="9"/>
+  </g>
 </svg>

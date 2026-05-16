@@ -15,7 +15,7 @@ export async function sendInviteEmail(
   invitedByEmail: string
 ): Promise<boolean> {
   const fromAddr = process.env.EMAIL_FROM_ADDRESS;
-  const fromName = process.env.EMAIL_FROM_NAME ?? "replen";
+  const fromName = process.env.EMAIL_FROM_NAME ?? "Replen";
   const appUrl = process.env.PUBLIC_BASE_URL ?? process.env.APP_PUBLIC_URL ?? "http://localhost:3030";
 
   if (!fromAddr) {
@@ -29,10 +29,10 @@ export async function sendInviteEmail(
   }
 
   const loginUrl = `${appUrl}/login`;
-  const subject = `${invitedByEmail} invited you to replen`;
+  const subject = `${invitedByEmail} invited you to Replen`;
   const text = `Hi,
 
-${invitedByEmail} added you to replen: a daily, personalised feed of
+${invitedByEmail} added you to Replen: a daily, personalised feed of
 open-source projects relevant to whatever you're building.
 
 Sign in here with this email address (${invitedEmail}):
@@ -41,12 +41,12 @@ Sign in here with this email address (${invitedEmail}):
 Once you're in, head to /settings to add your GitHub token and configure
 where you'd like the morning research email sent.
 
-- replen`;
+- Replen`;
 
   const html = `<!doctype html>
 <html><body style="font-family: ui-sans-serif, system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.55;">
   <h1 style="font-size: 22px; letter-spacing: -0.02em; margin: 0 0 16px;">You're in.</h1>
-  <p><b>${escapeHtml(invitedByEmail)}</b> added you to replen, the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
+  <p><b>${escapeHtml(invitedByEmail)}</b> added you to Replen, the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
   <p style="margin: 24px 0;">
     <a href="${escapeHref(loginUrl)}" style="display: inline-block; padding: 10px 18px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a>
   </p>
