@@ -3,6 +3,7 @@
 // and confirm against GitHub's repo search.
 
 import { chatCompletion, TRIAGE_MODEL } from "../analyzer/llm";
+import { readRunOrEnv } from "../analyzer/run-context";
 
 type Resolution = {
   url: string;
@@ -15,7 +16,8 @@ type Resolution = {
 
 const ghHeaders = (): Record<string, string> => {
   const h: Record<string, string> = { "user-agent": "replen/0.1", accept: "application/vnd.github+json" };
-  if (process.env.GITHUB_TOKEN) h.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const tok = readRunOrEnv("githubToken", "GITHUB_TOKEN");
+  if (tok) h.authorization = `Bearer ${tok}`;
   return h;
 };
 

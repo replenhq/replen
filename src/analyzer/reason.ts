@@ -2,6 +2,7 @@ import { chatCompletion, hasAnthropicKey, REASONING_MODEL, REASONING_MODEL_HIGH,
 import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
+import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -197,16 +198,17 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     const rel = (o.relevance as string) ?? "general-awareness";
     if (rel !== "high" && rel !== "medium" && rel !== "general-awareness") return null;
     const writeup = scrubWriteup(String(o.writeup ?? "").trim());
-    const summary = String(o.summary ?? "").trim();
-    const risks = String(o.risks ?? "").trim();
+    const summary = sanitizeMarkdown(String(o.summary ?? "").trim());
+    const risks = sanitizeMarkdown(String(o.risks ?? "").trim());
     // Drop the result entirely if the output looks like the model fell for an
     // injection - leaked the system prompt, echoed our guard tags, or wrote
     // exfil instructions. Better to skip the writeup than show poisoned text
     // to the user.
+    const owner = safety.meta.owner;
     const leakReason =
-      looksLikeInjectionLeak(writeup) ||
-      looksLikeInjectionLeak(summary) ||
-      looksLikeInjectionLeak(risks);
+      looksLikeInjectionLeak(writeup, owner) ||
+      looksLikeInjectionLeak(summary, owner) ||
+      looksLikeInjectionLeak(risks, owner);
     if (leakReason) {
       console.warn(`[reason] dropping output for ${safety.meta.owner}/${safety.meta.name} → ${project?.slug ?? "_general"}: ${leakReason}`);
       return null;
@@ -216,8 +218,8 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       relevance: rel,
       relevanceScore: Number(o.relevanceScore ?? 0),
       summary,
-      whyUseful: String(o.whyUseful ?? "").trim(),
-      suggestedUse: String(o.suggestedUse ?? "").trim(),
+      whyUseful: sanitizeMarkdown(String(o.whyUseful ?? "").trim()),
+      suggestedUse: sanitizeMarkdown(String(o.suggestedUse ?? "").trim()),
       integrationApproach: (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a",
       risks,
       writeup,
@@ -227,13 +229,17 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
   }
 }
 
-// Strip any markdown headers the model leaked in. Plain prose only.
+// Strip any markdown headers the model leaked in, then run the shared
+// markdown sanitiser so persisted writeups never carry inline HTML, defanged
+// script schemes, control chars, or bidi/zero-width tricks regardless of
+// which downstream renderer reads them.
 function scrubWriteup(s: string): string {
-  return s
+  const stripped = s
     .replace(/^#{1,6}\s+.*$/gm, "")
     .replace(/^\s*\*\*[^*]+\*\*\s*:?\s*$/gm, "") // standalone bold "headers"
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  return sanitizeMarkdown(stripped);
 }
 
 // ─────────────────────────────────────────────────────────────

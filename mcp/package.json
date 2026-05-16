@@ -1,6 +1,6 @@
 {
   "name": "@replen/mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server for replen - Smart AI Development workflows. Brings replen's proactive 'can we do this better?' research into Claude Code / Codex / any MCP host, so your AI coding workflow can act on the day's matches without ever leaving the chat.",
   "type": "module",
   "bin": {
@@ -30,11 +30,11 @@
   "homepage": "https://replen.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/replen/replen.git",
+    "url": "git+https://github.com/replenhq/replen.git",
     "directory": "mcp"
   },
   "bugs": {
-    "url": "https://github.com/replen/replen/issues"
+    "url": "https://github.com/replenhq/replen/issues"
   },
   "author": "replen.dev",
   "license": "MIT",

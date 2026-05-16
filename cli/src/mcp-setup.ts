@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -19,8 +19,13 @@ function readJson(path: string): Record<string, unknown> {
 function writeJsonAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2));
+  // The file contains the user's ingest token (DIGEST_TOKEN). On a
+  // multi-user box, the default 0644 leaks it to every local user, so
+  // create the tmp file 0600 and chmod the final path after rename in
+  // case the umask changed it on this platform.
+  writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   renameSync(tmp, path);
+  try { chmodSync(path, 0o600); } catch { /* best-effort on platforms that don't support chmod */ }
 }
 
 export async function setupMcp(token: string, base: string): Promise<void> {

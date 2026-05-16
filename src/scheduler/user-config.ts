@@ -11,6 +11,21 @@ import { readUserSecret } from "../lib/user-secrets";
 export type UserConfig = {
   userId: number;
   githubToken: string | undefined;
+  // Generic LLM slots. Provider-agnostic. Each slot has a key + base URL +
+  // model. The sensitive slot also has a wire-format hint ('anthropic' or
+  // 'openai-compatible'). Empty means "no per-user override; fall back to
+  // shared-env values via canUseSharedLlm".
+  llmPrimaryApiKey: string | undefined;
+  llmPrimaryBaseUrl: string | undefined;
+  llmPrimaryModel: string | undefined;
+  llmSensitiveApiKey: string | undefined;
+  llmSensitiveBaseUrl: string | undefined;
+  llmSensitiveModel: string | undefined;
+  llmSensitiveWireFormat: string | undefined;
+  // Legacy per-provider fields. Populated from the deepseekApiKey /
+  // anthropicApiKey columns only when the generic slot above is empty.
+  // Downstream pipeline code that sets DEEPSEEK_API_KEY / ANTHROPIC_API_KEY
+  // env vars uses these.
   deepseekApiKey: string | undefined;
   anthropicApiKey: string | undefined;
   threadsHandles: string;
@@ -45,16 +60,30 @@ export async function resolveUserConfig(userId: number): Promise<UserConfig> {
   // (or enc:v1 legacy / plaintext); readUserSecret routes to the right key
   // and writes a secret_access_log row for each call.
   const decGithub = await safeRead(userId, "githubToken", settings?.githubToken);
+  const decPrimary = await safeRead(userId, "llmPrimaryApiKey", settings?.llmPrimaryApiKey);
+  const decSensitive = await safeRead(userId, "llmSensitiveApiKey", settings?.llmSensitiveApiKey);
   const decDeepseek = await safeRead(userId, "deepseekApiKey", settings?.deepseekApiKey);
   const decAnthropic = await safeRead(userId, "anthropicApiKey", settings?.anthropicApiKey);
 
+  // Prefer the generic-slot fields. Fall back to legacy columns so existing
+  // rows keep working without forcing the user to re-enter keys.
+  const primaryKey = decPrimary || decDeepseek || (canUseShared ? process.env.LLM_PRIMARY_API_KEY ?? process.env.DEEPSEEK_API_KEY : undefined) || undefined;
+  const sensitiveKey = decSensitive || decAnthropic || (canUseShared ? process.env.LLM_SENSITIVE_API_KEY ?? process.env.ANTHROPIC_API_KEY : undefined) || undefined;
+
   return {
     userId,
-    // GitHub token: BYO. Never shared.
     githubToken: decGithub || undefined,
-    // LLM keys: user's own first, else shared (only if granted).
-    deepseekApiKey: decDeepseek || (canUseShared ? process.env.DEEPSEEK_API_KEY : undefined) || undefined,
-    anthropicApiKey: decAnthropic || (canUseShared ? process.env.ANTHROPIC_API_KEY : undefined) || undefined,
+    llmPrimaryApiKey: primaryKey,
+    llmPrimaryBaseUrl: settings?.llmPrimaryBaseUrl || undefined,
+    llmPrimaryModel: settings?.llmPrimaryModel || undefined,
+    llmSensitiveApiKey: sensitiveKey,
+    llmSensitiveBaseUrl: settings?.llmSensitiveBaseUrl || undefined,
+    llmSensitiveModel: settings?.llmSensitiveModel || undefined,
+    llmSensitiveWireFormat: settings?.llmSensitiveWireFormat || undefined,
+    // Legacy mirrors. Filled with the same values so older callers (that
+    // still set DEEPSEEK_API_KEY / ANTHROPIC_API_KEY env vars) keep working.
+    deepseekApiKey: primaryKey,
+    anthropicApiKey: sensitiveKey,
     threadsHandles: mergedThreads.join(","),
     redditSubs: mergedReddit.join(","),
     tiktokHandles: mergedTiktok.join(","),

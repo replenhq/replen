@@ -18,6 +18,7 @@ import { reasonAboutRepo, renderWriteup, type ProjectAssessment } from "../analy
 import { resolveUserConfig } from "./user-config";
 import type { LocalProject } from "../projects/loader";
 import type { SafetyReport } from "../scanner/safety";
+import { withRunConfig } from "../analyzer/run-context";
 
 const DEFAULT_LIMIT = parseInt(process.env.REPROCESS_LIMIT ?? "25", 10);
 const DELETE_REJECTED = process.env.DELETE_REJECTED === "1";
@@ -73,15 +74,28 @@ export async function reprocessForUser(userId: number, opts: ReprocessOpts = {})
   const limit = opts.limit ?? DEFAULT_LIMIT;
   console.log(`[reprocess] user=${userId} starting (projectSlug=${opts.projectSlug ?? "*"} forceAll=${!!opts.forceAll} limit=${limit})`);
   const cfg = await resolveUserConfig(userId);
-  const prev = {
-    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-  };
-  if (cfg.deepseekApiKey) process.env.DEEPSEEK_API_KEY = cfg.deepseekApiKey;
-  if (cfg.anthropicApiKey) process.env.ANTHROPIC_API_KEY = cfg.anthropicApiKey;
+  return withRunConfig(
+    {
+      llmPrimaryApiKey: cfg.llmPrimaryApiKey,
+      llmPrimaryBaseUrl: cfg.llmPrimaryBaseUrl,
+      llmPrimaryModel: cfg.llmPrimaryModel,
+      llmSensitiveApiKey: cfg.llmSensitiveApiKey,
+      llmSensitiveBaseUrl: cfg.llmSensitiveBaseUrl,
+      llmSensitiveModel: cfg.llmSensitiveModel,
+      llmSensitiveWireFormat: cfg.llmSensitiveWireFormat,
+      deepseekApiKey: cfg.deepseekApiKey,
+      anthropicApiKey: cfg.anthropicApiKey,
+      githubToken: cfg.githubToken,
+    },
+    () => reprocessForUserInner(userId, opts),
+  );
+}
+
+async function reprocessForUserInner(userId: number, opts: ReprocessOpts): Promise<{ fixed: number; skipped: number }> {
+  const limit = opts.limit ?? DEFAULT_LIMIT;
 
   let fixed = 0, skipped = 0;
-  try {
+  {
     const dbProjects = await db
       .select()
       .from(schema.projectProfiles)
@@ -168,11 +182,6 @@ export async function reprocessForUser(userId: number, opts: ReprocessOpts = {})
       }
     }
     console.log(`[reprocess] user=${userId} done: fixed=${fixed} skipped=${skipped}`);
-  } finally {
-    for (const [k, v] of Object.entries(prev)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
   }
   return { fixed, skipped };
 }

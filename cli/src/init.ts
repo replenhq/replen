@@ -34,6 +34,17 @@ type CallbackResult = { code: string };
 function waitForCallback(port: number, expectedState: string): Promise<CallbackResult> {
   return new Promise((resolve, reject) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      // Defence in depth against DNS rebinding: only accept requests whose
+      // Host header matches the loopback bind. Modern browsers (Chrome ≥ M94)
+      // already block public-DNS hostnames from rebinding to RFC1918, but an
+      // explicit check costs nothing.
+      const expectedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+      const reqHost = (req.headers.host ?? "").toLowerCase();
+      if (!expectedHosts.has(reqHost)) {
+        res.writeHead(400, { "content-type": "text/plain" });
+        res.end("bad host");
+        return;
+      }
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
       if (url.pathname !== "/callback") {
         res.writeHead(404, { "content-type": "text/plain" });

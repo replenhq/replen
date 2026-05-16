@@ -10,7 +10,16 @@ WorkingDirectory=/opt/oss-digest
 EnvironmentFile=/opt/oss-digest/.env
 Environment=NODE_ENV=production
 Environment=GITHUB_ROOT=/opt/oss-digest/projects-mirror
-ExecStart=/usr/bin/npx tsx src/scheduler/cron.ts
+ExecStartPre=+/bin/mkdir -p /var/log/oss-digest
+ExecStartPre=+/bin/chmod 0750 /var/log/oss-digest
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/oss-digest
+ExecStartPre=+/usr/bin/touch /var/log/oss-digest/cron.log
+ExecStartPre=+/bin/chmod 0640 /var/log/oss-digest/cron.log
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/oss-digest/cron.log
+# Pin tsx to the installed binary. `npx tsx` would silently `npm install`
+# tsx from the registry on every restart if node_modules went missing —
+# a supply-chain race every cron startup.
+ExecStart=/opt/oss-digest/node_modules/.bin/tsx src/scheduler/cron.ts
 Restart=on-failure
 RestartSec=30
 StandardOutput=append:/var/log/oss-digest/cron.log

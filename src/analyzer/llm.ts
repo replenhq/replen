@@ -1,18 +1,88 @@
-// LLM clients. Two providers wired:
-//   - DeepSeek (cheap, used for triage + low-sensitivity reasoning)
-//   - Anthropic (Claude, used for HIGH-sensitivity projects so confidential
-//     architecture stays inside Anthropic's terms; not sent to DeepSeek in China)
+// LLM clients. Provider-agnostic: two slots, swap in any vendor by setting the
+// corresponding env vars. Defaults shown below are convenient starter values,
+// not a recommendation — see README for the full provider list.
 //
-// Both expose the same minimal ChatResponse shape so reason.ts can stay provider-agnostic.
+//   Primary slot   - used for triage + low-sensitivity reasoning.
+//                    Env: LLM_PRIMARY_API_KEY, LLM_PRIMARY_BASE_URL, LLM_PRIMARY_MODEL.
+//                    Wire format: OpenAI-compatible /chat/completions JSON.
+//   Sensitive slot - used for high-sensitivity projects (project_profiles.sensitivity='high').
+//                    Env: LLM_SENSITIVE_API_KEY, LLM_SENSITIVE_BASE_URL, LLM_SENSITIVE_MODEL.
+//                    Wire format: Anthropic /v1/messages by default; toggle via
+//                    LLM_SENSITIVE_WIRE_FORMAT=openai-compatible if your provider exposes
+//                    the OpenAI shape instead.
+//
+// Legacy env names DEEPSEEK_* / ANTHROPIC_* still work as aliases.
+//
+// Per-user config (key, base URL, model, wire format) is carried via
+// AsyncLocalStorage in run-context.ts — never via process.env mutation.
+// See SECURITY.md "Per-user config" for the cross-tenant risk this avoids.
 
-const DEEPSEEK_BASE = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/$/, "");
-const ANTHROPIC_BASE = (process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/$/, "");
+import { readRunOrEnv, hasUserBaseUrlOverride } from "./run-context";
+import { resolveSafeWithPinnedDispatcher, validateWebhookUrl } from "../lib/url-guard";
+import type { Agent } from "undici";
 
-export const TRIAGE_MODEL = process.env.TRIAGE_MODEL ?? "deepseek-v4-flash";
-export const REASONING_MODEL = process.env.REASONING_MODEL ?? "deepseek-v4-flash";
-// Used for high-sensitivity projects routed to Claude.
-export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? "claude-opus-4-7";
+// Read at request time so per-user overrides (carried via AsyncLocalStorage)
+// take precedence over the operator's shared env vars.
+function primaryBase(): string {
+  return (readRunOrEnv("llmPrimaryBaseUrl", "LLM_PRIMARY_BASE_URL", "DEEPSEEK_BASE_URL") ?? "https://api.deepseek.com").replace(/\/$/, "");
+}
+function sensitiveBase(): string {
+  return (readRunOrEnv("llmSensitiveBaseUrl", "LLM_SENSITIVE_BASE_URL", "ANTHROPIC_BASE_URL") ?? "https://api.anthropic.com").replace(/\/$/, "");
+}
+function sensitiveWire(): string {
+  return (readRunOrEnv("llmSensitiveWireFormat", "LLM_SENSITIVE_WIRE_FORMAT") ?? "anthropic").toLowerCase();
+}
 
+// SSRF guard: resolve and reject private / loopback / link-local addresses
+// before each outbound LLM fetch. Without this a user could set their base
+// URL to http://169.254.169.254/... and exfiltrate the shared env API key.
+// The returned dispatcher pins the connection to the validated address so a
+// hostile resolver cannot rebind between resolve and fetch.
+// `slot` controls whether a shared/env key is permitted at all: if the user
+// has overridden the base URL, only a per-user key may be sent.
+async function safeLlmUrl(base: string, path: string, slot: "primary" | "sensitive"): Promise<{ url: URL; dispatcher: Agent }> {
+  const target = base.replace(/\/$/, "") + path;
+  const syntactic = validateWebhookUrl(target);
+  if (!syntactic.ok) throw new Error(`refusing ${slot} LLM call: ${syntactic.error} (${target})`);
+  const pinned = await resolveSafeWithPinnedDispatcher(syntactic.url);
+  if (!pinned.ok) throw new Error(`refusing ${slot} LLM call: ${pinned.error} (${target})`);
+  return { url: pinned.url, dispatcher: pinned.dispatcher };
+}
+
+// Reject the operator's shared env key when the user has pointed the request
+// at their own base URL. Otherwise the shared key would be sent to whatever
+// arbitrary endpoint the user picked, which is an exfil channel.
+function pickApiKey(slot: "primary" | "sensitive"): string {
+  const cfgKey = slot === "primary"
+    ? readRunOrEnv("llmPrimaryApiKey")
+    : readRunOrEnv("llmSensitiveApiKey");
+  if (cfgKey) return cfgKey;
+  if (hasUserBaseUrlOverride(slot)) {
+    throw new Error(
+      `refusing to send shared ${slot} key to a user-overridden base URL — set a per-user API key on /settings to use a custom endpoint`
+    );
+  }
+  // Legacy aliases + env fallback.
+  if (slot === "primary") {
+    const k = readRunOrEnv("deepseekApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY");
+    if (!k) throw new Error("LLM_PRIMARY_API_KEY (or legacy DEEPSEEK_API_KEY) not set");
+    return k;
+  }
+  const k = readRunOrEnv("anthropicApiKey", "LLM_SENSITIVE_API_KEY", "ANTHROPIC_API_KEY");
+  if (!k) throw new Error("LLM_SENSITIVE_API_KEY (or legacy ANTHROPIC_API_KEY) not set; required for high-sensitivity projects");
+  return k;
+}
+
+// Module-load reads kept as fallbacks for callers that don't run inside a
+// withRunConfig() scope (e.g. one-off CLI scripts). Per-user pipelines should
+// always run inside the scope, where the dynamic readers above take over.
+export const TRIAGE_MODEL = process.env.TRIAGE_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
+export const REASONING_MODEL = process.env.REASONING_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
+export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? process.env.LLM_SENSITIVE_MODEL ?? "claude-opus-4-7";
+
+// Provider identifiers retained for backward-compatible accounting in
+// digest_runs and the cost dashboard. "primary"/"sensitive" are the new
+// semantic slots; "deepseek"/"anthropic" remain valid aliases.
 export type Provider = "deepseek" | "anthropic";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -102,15 +172,17 @@ export function endUsageTracking(): UsageSummary {
 }
 
 export function hasAnthropicKey(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !!(readRunOrEnv("llmSensitiveApiKey", "LLM_SENSITIVE_API_KEY", "ANTHROPIC_API_KEY")
+    ?? readRunOrEnv("anthropicApiKey", "ANTHROPIC_API_KEY"));
 }
 
 // ─────────────────────────────────────────────────────────────
-// DeepSeek (OpenAI-shaped JSON)
+// Primary slot (OpenAI-compatible /chat/completions wire format).
+// Works with DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter,
+// local llama.cpp / ollama servers, anything that speaks OpenAI's chat API.
 // ─────────────────────────────────────────────────────────────
 async function deepseekCompletion(req: ChatRequest, opts: { timeoutMs?: number; retries?: number }): Promise<ChatResponse> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error("DEEPSEEK_API_KEY not set");
+  const apiKey = pickApiKey("primary");
   const timeoutMs = opts.timeoutMs ?? 90_000;
   const retries = opts.retries ?? 3;
 
@@ -122,35 +194,64 @@ async function deepseekCompletion(req: ChatRequest, opts: { timeoutMs?: number; 
     response_format: req.response_format,
   };
 
+  const pinned = await safeLlmUrl(primaryBase(), "/chat/completions", "primary");
   return doWithRetry(
     () =>
-      fetch(`${DEEPSEEK_BASE}/chat/completions`, {
+      fetch(pinned.url, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
         body: JSON.stringify(body),
-      }),
-    "deepseek",
+        dispatcher: pinned.dispatcher,
+      } as any),
+    "primary",
     timeoutMs,
     retries
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Anthropic
+// Sensitive slot. Wire format defaults to Anthropic's /v1/messages.
+// Set LLM_SENSITIVE_WIRE_FORMAT=openai-compatible to use the same OpenAI-shaped
+// path as the primary slot (lets you route sensitive projects to e.g. a
+// privately-hosted OpenAI-compatible model on infra you control).
 // ─────────────────────────────────────────────────────────────
 async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number; retries?: number }): Promise<ChatResponse> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set (required for high-sensitivity projects)");
+  const apiKey = pickApiKey("sensitive");
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const retries = opts.retries ?? 2;
 
-  // Split system messages out - Anthropic takes them as a top-level field, not in messages.
+  // OpenAI-compatible path: same as the primary slot. Use when the sensitive
+  // provider exposes /chat/completions instead of /v1/messages.
+  const wire = sensitiveWire();
+  if (wire === "openai-compatible" || wire === "openai") {
+    const body = {
+      model: req.model,
+      messages: req.messages,
+      max_tokens: req.max_tokens,
+      temperature: req.temperature,
+      response_format: req.response_format,
+    };
+    const pinned = await safeLlmUrl(sensitiveBase(), "/chat/completions", "sensitive");
+    return doWithRetry(
+      () =>
+        fetch(pinned.url, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+          dispatcher: pinned.dispatcher,
+        } as any),
+      "sensitive",
+      timeoutMs,
+      retries
+    );
+  }
+
+  // Anthropic /v1/messages: split system messages out (top-level field).
   const systemMsgs = req.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const userAssistant = req.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
 
-  // Anthropic doesn't have a native response_format=json_object knob. Force JSON by
-  // prefilling the assistant turn with "{" and adding a stop sequence is overkill;
-  // adding a clear instruction in the system message is enough given our prompts.
+  // Anthropic doesn't have a native response_format=json_object knob; a clear
+  // instruction in the system message is enough given our prompts.
   const jsonNote = req.response_format?.type === "json_object" ? "\n\nReply with a single JSON object only. No prose before or after." : "";
 
   const body = {
@@ -161,9 +262,10 @@ async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number;
     temperature: req.temperature,
   };
 
+  const pinned = await safeLlmUrl(sensitiveBase(), "/v1/messages", "sensitive");
   return doWithRetry(
     async () => {
-      const res = await fetch(`${ANTHROPIC_BASE}/v1/messages`, {
+      const res = await fetch(pinned.url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -171,7 +273,8 @@ async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number;
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify(body),
-      });
+        dispatcher: pinned.dispatcher,
+      } as any);
       // Convert Anthropic shape -> ChatResponse before returning to the retry helper.
       // We need to make this fetch return JSON the helper can parse uniformly, so wrap.
       if (!res.ok) return res;

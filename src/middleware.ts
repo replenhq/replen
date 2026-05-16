@@ -77,7 +77,7 @@ function applySecurityHeaders(res: NextResponse, nonce: string): NextResponse {
 //   1. CF-Connecting-IP must be present (Cloudflare always sets this on
 //      forwarded requests; clients connecting directly to the origin IP do
 //      not).
-//   2. If CF_ORIGIN_SECRET is set, the request must carry x-cf-origin-secret
+//   2. If CF_ORIGIN_SECRET is set, the request must carry x-replen-edge-secret
 //      with the same value. Pair this with a Cloudflare Transform Rule that
 //      injects the secret on every forwarded request (Rules → Transform →
 //      Modify Request Header → Set static).
@@ -95,7 +95,7 @@ function rejectIfNotCloudflare(request: NextRequest): NextResponse | null {
   }
   const expected = process.env.CF_ORIGIN_SECRET;
   if (expected) {
-    const got = request.headers.get("x-cf-origin-secret");
+    const got = request.headers.get("x-replen-edge-secret");
     if (!got || got !== expected) {
       return new NextResponse(null, { status: 421 });
     }

@@ -35,28 +35,32 @@ export default async function SettingsPage({ searchParams }: Params) {
   // we never echo the value back in any case. By only checking presence here
   // we avoid writing four secret_access_log decrypts on every settings page
   // render (which was the audit's "plaintext on every load" concern).
+  // Determine whether each secret column has SOMETHING stored without
+  // decrypting. Used to mask the inputs and show status badges.
+  const primaryKeySet = !!(rawSettings?.llmPrimaryApiKey || rawSettings?.deepseekApiKey);
+  const sensitiveKeySet = !!(rawSettings?.llmSensitiveApiKey || rawSettings?.anthropicApiKey);
   const s = rawSettings && {
     ...rawSettings,
     githubToken: rawSettings.githubToken ? "•••••" : null,
     githubWriteToken: rawSettings.githubWriteToken ? "•••••" : null,
-    deepseekApiKey: rawSettings.deepseekApiKey ? "•••••" : null,
-    anthropicApiKey: rawSettings.anthropicApiKey ? "•••••" : null,
+    llmPrimaryApiKey: primaryKeySet ? "•••••" : null,
+    llmSensitiveApiKey: sensitiveKeySet ? "•••••" : null,
   };
   const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
   const sharedAllowed = !!userRow?.canUseSharedLlm;
 
   // When the user hasn't set their own LLM key but they're allowed to use the
   // shared one, surface "(using shared)" so they don't think the field is broken.
-  const envHasDeepseek = !!process.env.DEEPSEEK_API_KEY;
-  const envHasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-  const deepseekStatus = s?.deepseekApiKey
+  const envHasPrimary = !!(process.env.LLM_PRIMARY_API_KEY ?? process.env.DEEPSEEK_API_KEY);
+  const envHasSensitive = !!(process.env.LLM_SENSITIVE_API_KEY ?? process.env.ANTHROPIC_API_KEY);
+  const primaryStatus = primaryKeySet
     ? "your own"
-    : sharedAllowed && envHasDeepseek
+    : sharedAllowed && envHasPrimary
       ? "using shared (env)"
       : null;
-  const anthropicStatus = s?.anthropicApiKey
+  const sensitiveStatus = sensitiveKeySet
     ? "your own"
-    : sharedAllowed && envHasAnthropic
+    : sharedAllowed && envHasSensitive
       ? "using shared (env)"
       : null;
 
@@ -65,8 +69,29 @@ export default async function SettingsPage({ searchParams }: Params) {
     const u = await requireUser();
     const existingPrev = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     const newToken = (form.get("githubToken") as string || "").trim();
-    const newDS = (form.get("deepseekApiKey") as string || "").trim();
-    const newAN = (form.get("anthropicApiKey") as string || "").trim();
+    const newPrimaryKey = (form.get("llmPrimaryApiKey") as string || "").trim();
+    const newPrimaryBaseUrlRaw = (form.get("llmPrimaryBaseUrl") as string || "").trim();
+    const newPrimaryModel = (form.get("llmPrimaryModel") as string || "").trim();
+    const newSensitiveKey = (form.get("llmSensitiveApiKey") as string || "").trim();
+    const newSensitiveBaseUrlRaw = (form.get("llmSensitiveBaseUrl") as string || "").trim();
+    const newSensitiveModel = (form.get("llmSensitiveModel") as string || "").trim();
+    const newSensitiveWire = (form.get("llmSensitiveWireFormat") as string || "").trim() || null;
+    // Validate LLM base URLs the same way webhooks are validated: https-only,
+    // no IP literals, no internal-zone suffixes. Rejected URLs preserve the
+    // prior stored value rather than throwing — keeps the save UX forgiving.
+    // The fetch-time check (resolveSafe in llm.ts) is the final gate against
+    // DNS-rebinding into a private range.
+    const validateLlmUrl = (raw: string, existing: string | null): string | null => {
+      if (!raw) return existing;
+      const v = validateWebhookUrl(raw);
+      if (!v.ok) {
+        console.warn(`[settings] LLM base URL rejected: ${v.error}`);
+        return existing;
+      }
+      return v.url.toString();
+    };
+    const newPrimaryBaseUrl = validateLlmUrl(newPrimaryBaseUrlRaw, existingPrev?.llmPrimaryBaseUrl ?? null);
+    const newSensitiveBaseUrl = validateLlmUrl(newSensitiveBaseUrlRaw, existingPrev?.llmSensitiveBaseUrl ?? null);
     // Single GitHub PAT: store the same encrypted value in both columns so
     // anything still reading `github_write_token` (older rows, future migrations)
     // keeps working without a code change.
@@ -77,8 +102,42 @@ export default async function SettingsPage({ searchParams }: Params) {
       userId: u.id,
       githubToken: encGithubToken,
       githubWriteToken: encGithubToken,
-      deepseekApiKey: newDS ? await writeUserSecret(u.id, newDS) : existingPrev?.deepseekApiKey ?? null,
-      anthropicApiKey: newAN ? await writeUserSecret(u.id, newAN) : existingPrev?.anthropicApiKey ?? null,
+      // Generic LLM slot writes; legacy columns are nulled out only on
+      // explicit re-entry of a key so the back-compat fallback in
+      // resolveUserConfig keeps working for users who haven't touched the
+      // form since the migration.
+      llmPrimaryApiKey: newPrimaryKey
+        ? await writeUserSecret(u.id, newPrimaryKey)
+        : existingPrev?.llmPrimaryApiKey ?? null,
+      llmPrimaryBaseUrl: newPrimaryBaseUrl,
+      llmPrimaryModel: newPrimaryModel || existingPrev?.llmPrimaryModel || null,
+      llmSensitiveApiKey: newSensitiveKey
+        ? await writeUserSecret(u.id, newSensitiveKey)
+        : existingPrev?.llmSensitiveApiKey ?? null,
+      llmSensitiveBaseUrl: newSensitiveBaseUrl,
+      llmSensitiveModel: newSensitiveModel || existingPrev?.llmSensitiveModel || null,
+      llmSensitiveWireFormat: newSensitiveWire || existingPrev?.llmSensitiveWireFormat || null,
+      // Extra doc paths (globs). Normalise: trim, drop empties, and refuse
+      // any character that could escape the per-project root at glob-walk
+      // time. The loader does its own path.resolve check, but defence in
+      // depth — bad input rejected at save means it never reaches the FS.
+      extraDocPaths: ((form.get("extraDocPaths") as string) || "")
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter((s) => {
+          if (!s) return false;
+          if (s.includes("..")) return false;
+          if (s.startsWith("/") || s.startsWith("~")) return false;
+          // Windows UNC, drive letters, NUL byte, backslash.
+          if (/[\\\x00]/.test(s)) return false;
+          if (/^[a-zA-Z]:/.test(s)) return false;
+          return true;
+        })
+        .join(",") || null,
+      // Legacy columns: preserve any existing values so users who haven't
+      // re-entered keys since the schema migration still authenticate.
+      deepseekApiKey: existingPrev?.deepseekApiKey ?? null,
+      anthropicApiKey: existingPrev?.anthropicApiKey ?? null,
       // Source handles are managed on /sources, not here. Preserve whatever's
       // already stored - anyone wanting per-user private overrides edits via
       // the DB or we add it back later.
@@ -233,12 +292,52 @@ export default async function SettingsPage({ searchParams }: Params) {
               Create a PAT on GitHub
             </a>
           </div>
-          <Field label="DeepSeek API key" name="deepseekApiKey" value={s?.deepseekApiKey ?? ""} type="password" placeholder="sk-…" statusBadge={deepseekStatus} />
-          <Field label="Anthropic API key (required for high-sensitivity projects)" name="anthropicApiKey" value={s?.anthropicApiKey ?? ""} type="password" placeholder="sk-ant-…" statusBadge={anthropicStatus} />
+        </Section>
+
+        <Section title="LLM provider — primary slot (triage + most reasoning)">
+          <p className="meta" style={{ margin: 0 }}>
+            Any OpenAI-compatible endpoint. Set base URL + model to point at the provider of your choice (DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter, a local llama.cpp / ollama server, etc.). Empty fields fall back to defaults.
+          </p>
+          <Field label="API key" name="llmPrimaryApiKey" value={s?.llmPrimaryApiKey ?? ""} type="password" placeholder="sk-…" statusBadge={primaryStatus} />
+          <Field label="Base URL" name="llmPrimaryBaseUrl" value={rawSettings?.llmPrimaryBaseUrl ?? ""} type="url" placeholder="https://api.deepseek.com  (or  https://api.openai.com/v1  · https://api.groq.com/openai/v1  · https://openrouter.ai/api/v1)" />
+          <Field label="Model name" name="llmPrimaryModel" value={rawSettings?.llmPrimaryModel ?? ""} placeholder="deepseek-v4-flash  (or  gpt-4o-mini  ·  llama-3.3-70b-versatile  ·  qwen2.5-coder:7b  …)" />
+        </Section>
+
+        <Section title="LLM provider — sensitive slot (only for high-sensitivity projects)">
+          <p className="meta" style={{ margin: 0 }}>
+            Used only on project_profiles flagged <code>high</code>. Leave blank if you don't have high-sensitivity projects.
+          </p>
+          <Field label="API key" name="llmSensitiveApiKey" value={s?.llmSensitiveApiKey ?? ""} type="password" placeholder="sk-ant-…" statusBadge={sensitiveStatus} />
+          <Field label="Base URL" name="llmSensitiveBaseUrl" value={rawSettings?.llmSensitiveBaseUrl ?? ""} type="url" placeholder="https://api.anthropic.com" />
+          <Field label="Model name" name="llmSensitiveModel" value={rawSettings?.llmSensitiveModel ?? ""} placeholder="claude-opus-4-7" />
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 13 }}>Wire format</span>
+            <select name="llmSensitiveWireFormat" defaultValue={rawSettings?.llmSensitiveWireFormat ?? "anthropic"} style={{ padding: 6, maxWidth: 360 }}>
+              <option value="anthropic">Anthropic /v1/messages (default)</option>
+              <option value="openai-compatible">OpenAI-compatible /chat/completions</option>
+            </select>
+            <span className="meta">Pick OpenAI-compatible if your provider exposes that shape (e.g. a self-hosted model).</span>
+          </label>
           <p className="meta" style={{ marginTop: 4 }}>
             {sharedAllowed
-              ? "Admin has granted you fallback to shared LLM keys; leaving DeepSeek/Anthropic blank still works. GitHub token is always BYO (any usage shows up under your GitHub account)."
-              : "Provide your own DeepSeek key (and Anthropic if you mark any project high-sensitivity). Ask admin to grant shared LLM access if you'd rather not pay."}
+              ? "Admin has granted you fallback to shared LLM keys; leaving these blank still works. GitHub token is always BYO (any usage shows up under your GitHub account)."
+              : "Provide your own keys (primary is required; sensitive only if you have projects flagged high-sensitivity). Ask admin to grant shared LLM access if you'd rather not pay."}
+          </p>
+        </Section>
+
+        <Section title="Extra doc paths (optional)">
+          <p className="meta" style={{ margin: 0 }}>
+            Replen always reads each project's <code>README.md</code>, <code>CLAUDE.md</code>, and a manifest. Add globs here for extra files you want included (e.g. <code>SPEC.md</code>, <code>docs/architecture/*.md</code>). Patterns are relative to each project root. Capped at 5 matches per pattern, 20K chars per file.
+          </p>
+          <textarea
+            name="extraDocPaths"
+            defaultValue={(rawSettings?.extraDocPaths ?? "").split(",").join("\n")}
+            placeholder={"e.g.\nSPEC.md\ndocs/architecture/*.md\ndocs/internal/**/*.md"}
+            rows={4}
+            style={{ padding: 6, fontFamily: "ui-monospace, monospace", fontSize: 13, width: "100%" }}
+          />
+          <p className="meta">
+            One pattern per line (or comma-separated). See <a href="https://docs.replen.dev/project-docs.html" target="_blank" rel="noreferrer">the project-docs guide</a> for what makes a project's docs work well with replen, including a copy-pasteable <code>CLAUDE.md</code> template.
           </p>
         </Section>
 

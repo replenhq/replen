@@ -1,6 +1,7 @@
 import type { Fetcher, FetchedCandidate } from "./types";
 import { extractGithubRepos } from "../lib/github-url";
 import { resolveGithubFromText, stripHtml } from "./resolve-github";
+import { readRunOrEnv } from "../analyzer/run-context";
 
 // Threads fetcher.
 //
@@ -18,7 +19,7 @@ export const threadsFetcher: Fetcher = {
   name: "threads",
   async run() {
     const base = process.env.RSSHUB_BASE;
-    const handles = (process.env.THREADS_HANDLES ?? "")
+    const handles = (readRunOrEnv("threadsHandles", "THREADS_HANDLES") ?? "")
       .split(",")
       .map((h) => h.trim().replace(/^@/, ""))
       .filter(Boolean);

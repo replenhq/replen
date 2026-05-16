@@ -20,7 +20,9 @@ function normalizePrivateKey(): string {
 const isProd = process.env.NODE_ENV === "production";
 
 export const authConfig = {
-  apiKey: process.env.FIREBASE_API_KEY!,
+  // Same Firebase web API key as the client SDK uses; falling back to the
+  // NEXT_PUBLIC_ one lets us keep a single source of truth in .env.
+  apiKey: (process.env.FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY)!,
   cookieName: "__session",
   cookieSignatureKeys: [
     process.env.COOKIE_SECRET_CURRENT!,
@@ -32,8 +34,10 @@ export const authConfig = {
     secure: isProd,
     sameSite: "lax" as const,
     maxAge: 12 * 60 * 60 * 24,
-    // Set AUTH_COOKIE_DOMAIN (e.g. ".example.com") to share the session cookie
-    // across subdomains; leave unset for single-host installs.
+    // Host-only by default. Only set AUTH_COOKIE_DOMAIN (e.g. ".example.com")
+    // when every subdomain under that parent is first-party and equally
+    // trusted — a parent-domain cookie is sent to ALL subdomains, so an
+    // XSS or untrusted content on any sibling becomes session theft.
     domain: isProd ? (process.env.AUTH_COOKIE_DOMAIN || undefined) : undefined,
   },
   serviceAccount: {

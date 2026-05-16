@@ -14,6 +14,7 @@
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { Agent } from "undici";
 
 // Hostnames that should never be reached outbound regardless of how they
 // resolve. Defence in depth on top of the IP-range check below.
@@ -112,4 +113,45 @@ export async function resolveSafe(url: URL): Promise<UrlGuardResult> {
     }
   }
   return { ok: true, url };
+}
+
+// Stronger guard: resolve the hostname once, validate, and return a fetch
+// dispatcher pinned to the resolved address. Prevents DNS rebinding between
+// the validate call and the actual fetch — a hostile resolver returning a
+// public IP first and a private IP second cannot win the race because the
+// dispatcher's connect step uses the address we already approved.
+//
+// Use like:
+//   const r = await resolveSafeWithPinnedDispatcher(url);
+//   if (!r.ok) throw new Error(r.error);
+//   await fetch(url, { dispatcher: r.dispatcher } as any);
+export type PinnedResult =
+  | { ok: true; url: URL; dispatcher: Agent }
+  | { ok: false; error: string };
+
+export async function resolveSafeWithPinnedDispatcher(url: URL): Promise<PinnedResult> {
+  const host = url.hostname.toLowerCase();
+  if (BLOCKED_HOSTS.has(host)) return { ok: false, error: "Hostname blocked" };
+  if (isIP(host) !== 0) return { ok: false, error: "IP-literal hostnames are not allowed" };
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch (e) {
+    return { ok: false, error: `DNS lookup failed: ${(e as Error).message}` };
+  }
+  const pickable = addrs.filter((a) => !isPrivateAddress(a.address, a.family));
+  if (pickable.length === 0) {
+    const bad = addrs[0]?.address ?? "unknown";
+    return { ok: false, error: `Resolved address ${bad} is in a private range` };
+  }
+  const picked = pickable[0];
+  // Force the connect step to use the already-validated address. Hostname
+  // remains the original so TLS SNI + cert verification still works.
+  const dispatcher = new Agent({
+    connect: {
+      lookup: (_hostname, _opts, cb) =>
+        cb(null, picked.address, picked.family as 4 | 6),
+    },
+  });
+  return { ok: true, url, dispatcher };
 }

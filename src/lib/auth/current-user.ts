@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { getTokens } from "next-firebase-auth-edge/lib/next/tokens";
 import { authConfig } from "./config";
 import { db, schema } from "@/db/client";
@@ -10,7 +11,7 @@ export type CurrentUser = {
   email: string;
   displayName: string | null;
   role: "admin" | "user";
-  status: "active" | "suspended";
+  status: "active" | "pending" | "suspended";
 };
 
 /**
@@ -60,48 +61,75 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   }
 
   if (!row) {
-    // First-time user. Admin role is granted *only* if BOOTSTRAP_ADMIN_EMAIL
-    // matches the verified email of this signup. Without the env var set,
-    // no admin is ever auto-created on signup (operator must run a
-    // privileged CLI / direct DB update). This closes the race where two
-    // concurrent first-sign-ins could both observe "no admin exists" and
-    // both insert as admin.
-    const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "").trim().toLowerCase();
-    const becomeAdmin = !!bootstrapEmail && email.toLowerCase() === bootstrapEmail && emailVerified;
-    const inserted = await db
+    // First-time sign-in. Two paths:
+    //   (a) Bootstrap admin: the verified email matches BOOTSTRAP_ADMIN_EMAIL,
+    //       so this is the operator's own first sign-in. Created as active
+    //       admin and given the legacy NULL-userId backfill.
+    //   (b) Public sign-up: anyone else with a verified email. Created with
+    //       status='pending'. The scheduler / dashboard / API routes all
+    //       gate on status='active', so a pending user can authenticate but
+    //       can't run pipelines, consume any scheduler slot, or see anyone
+    //       else's data. They land on /pending until an admin approves them
+    //       from /admin.
+    //
+    // Race: two parallel requests for a brand-new uid both miss the SELECT
+    // above and both attempt an INSERT. The second one would hit the
+    // uniq_user_firebase_uid / uniq_user_email constraint and surface a
+    // 500 to the user. onConflictDoNothing + re-select converts that
+    // collision into a benign no-op.
+    const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "").replace(/\s+/g, "").toLowerCase();
+    const matchesBootstrap = !!bootstrapEmail && email.toLowerCase() === bootstrapEmail && emailVerified;
+    await db
       .insert(schema.users)
       .values({
         firebaseUid: uid,
         email,
         displayName,
-        role: becomeAdmin ? "admin" : "user",
-        status: "active",
-        canUseSharedLlm: becomeAdmin,
+        role: matchesBootstrap ? "admin" : "user",
+        status: matchesBootstrap ? "active" : "pending",
+        canUseSharedLlm: matchesBootstrap,
         createdAt: new Date(),
         lastLoginAt: new Date(),
       })
-      .returning()
-      .get();
-    row = inserted!;
-    if (becomeAdmin) {
+      .onConflictDoNothing();
+    row = await db.select().from(schema.users).where(eq(schema.users.firebaseUid, uid)).get();
+    if (!row) {
+      // The conflict landed on uniq_user_email rather than uniq_user_firebase_uid
+      // (would happen if the same email signed up with a different uid). Look
+      // up by email and refuse to rebind without manual admin action — closes
+      // a silent account-takeover path.
+      const byEmail = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
+      if (byEmail) {
+        console.warn(`[auth] sign-in for ${email} with uid ${uid} conflicts with existing row (uid=${byEmail.firebaseUid}); refusing to rebind`);
+      }
+      return null;
+    }
+    if (matchesBootstrap) {
       // One-time backfill: rows with NULL user_id (pre-phase-2) belong to this admin.
+      // Idempotent — running it twice is a no-op because the second pass has no
+      // NULL rows left.
       await db.update(schema.candidates).set({ userId: row.id }).where(isNull(schema.candidates.userId));
       await db.update(schema.projectProfiles).set({ userId: row.id }).where(isNull(schema.projectProfiles.userId));
       await db.update(schema.matches).set({ userId: row.id }).where(isNull(schema.matches.userId));
       await db.update(schema.digestRuns).set({ userId: row.id }).where(isNull(schema.digestRuns.userId));
+    } else {
+      console.log(`[auth] new pending account created for ${email} (awaiting admin approval)`);
     }
   } else {
     await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, row.id));
   }
 
-  if (row.status !== "active") return null;
+  // 'suspended' is a hard block: refuse to resolve. 'pending' is allowed
+  // through so we can render the /pending holding page, but the layout +
+  // page-level guards downstream restrict what they can actually see.
+  if (row.status === "suspended") return null;
   return {
     id: row.id,
     firebaseUid: row.firebaseUid,
     email: row.email,
     displayName: row.displayName,
     role: row.role as "admin" | "user",
-    status: row.status as "active" | "suspended",
+    status: row.status as "active" | "pending" | "suspended",
   };
 }
 
@@ -109,15 +137,29 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
  * For routes/actions that require a logged-in user.
  * Throws if not authenticated - pair with Next's error boundary or call from
  * a server component after the middleware has gated the path.
+ *
+ * Pending users (newly-signed-up, not yet approved by an admin) are redirected
+ * to /pending. Server actions and API routes that don't want the redirect
+ * can call getCurrentUser() directly and gate on `status === "active"`.
  */
 export async function requireUser(): Promise<CurrentUser> {
   const u = await getCurrentUser();
   if (!u) throw new Error("unauthenticated");
+  if (u.status === "pending") redirect("/pending");
   return u;
+}
+
+// Typed sentinel so top-level error boundaries can render 403 instead of a
+// generic 500. Use `instanceof ForbiddenError` to discriminate.
+export class ForbiddenError extends Error {
+  constructor(message = "forbidden") {
+    super(message);
+    this.name = "ForbiddenError";
+  }
 }
 
 export async function requireAdmin(): Promise<CurrentUser> {
   const u = await requireUser();
-  if (u.role !== "admin") throw new Error("forbidden");
+  if (u.role !== "admin") throw new ForbiddenError("admin role required");
   return u;
 }

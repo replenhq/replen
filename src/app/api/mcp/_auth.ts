@@ -18,13 +18,20 @@ export async function authenticate(req: Request): Promise<McpAuth | null> {
   const token = req.headers.get("x-digest-token") ?? req.headers.get("x-ingest-token");
   if (!token) return null;
   const hash = hashIngestToken(token);
-  const settings = await db
-    .select()
+  const row = await db
+    .select({ settings: schema.userSettings, status: schema.users.status })
     .from(schema.userSettings)
+    .innerJoin(schema.users, eq(schema.users.id, schema.userSettings.userId))
     .where(eq(schema.userSettings.ingestTokenHash, hash))
     .get();
-  if (!settings) return null;
-  return { userId: settings.userId, settings };
+  if (!row) return null;
+  // Status gate: a pending or suspended user must not be able to drive the
+  // ingest / MCP API even if they hold a previously-minted token. Without
+  // this check, demoting a user on /admin had no effect on their token-based
+  // surface — they could keep writing candidates, reading matches, and
+  // opening handoff PRs indefinitely.
+  if (row.status !== "active") return null;
+  return { userId: row.settings.userId, settings: row.settings };
 }
 
 // MCP servers run as a Node process on the user's machine (stdio transport)

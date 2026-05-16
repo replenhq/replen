@@ -12,14 +12,15 @@ export const revalidate = 0;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser().catch(() => null);
+  const isActive = user?.status === "active";
 
   // Per-user header counters: starred matches in the DB, plus how many
   // of those don't yet have a handoff PR, plus integrated total. Single
-  // round-trip, cheap.
+  // round-trip, cheap. Only meaningful for active users.
   let starredCount = 0;
   let starredAwaitingHandoff = 0;
   let integratedCount = 0;
-  if (user) {
+  if (user && isActive) {
     const counts = await db
       .select({
         total: sql<number>`count(*)`,
@@ -41,7 +42,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en">
       <body>
-        {user && (
+        {user && isActive && (
           <header>
             <a href="/" style={{ marginRight: 16 }}>
               <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>◆ replen</span>
@@ -76,8 +77,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </span>
           </header>
         )}
+        {user && !isActive && (
+          <header>
+            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", marginRight: 16 }}>◆ replen</span>
+            <span style={{ float: "right" }}>
+              {user.email} · <a href="/api/logout">sign out</a>
+            </span>
+          </header>
+        )}
         <main>{children}</main>
-        {user && <KeyboardShortcuts />}
+        {user && isActive && <KeyboardShortcuts />}
       </body>
     </html>
   );

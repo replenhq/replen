@@ -33,7 +33,7 @@ Replen does. Every morning, on every project, against the live ecosystem. For ea
 
 The training-cutoff problem makes this more urgent. Every LLM has a date past which it just doesn't know, and your AI tool will happily confabulate around the gap. But the deeper reason is simpler: good engineering means asking *"can we do this better?"* continuously. Replen runs that loop for you.
 
-Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub searches tuned to your project's domain. Multi-tenant, encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev), or self-host (no Docker required).
+Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub searches tuned to your project's domain. Secrets encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev), or self-host (no Docker required).
 
 ## Quickstart
 
@@ -46,7 +46,7 @@ That single command:
 2. Captures auth back into the terminal (browser-callback OAuth, same pattern as `gh auth login`)
 3. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
 
-You're triaging by tomorrow morning. No token-paste, no JSON-fiddling.
+Your first matches arrive within minutes; the daily digest lands at the UTC hour you set thereafter. No token-paste, no JSON-fiddling.
 
 For self-host targets:
 
@@ -60,7 +60,7 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 
 1. **Characterises your projects.** Reads each project's docs (README, CLAUDE.md, manifests) to build a profile of what you're building (stack, niche, purpose, use cases) regardless of project type (library, CLI, app, infra, research code, etc.).
 2. **Ingests from the ecosystem.** gh-trending pages tailored to your stack, TikTok / Threads handles, Reddit subs, HN, plus niche-scouted GitHub searches derived from your project profile. Catches things trending feeds miss.
-3. **Compares each new repo against your code.** DeepSeek by default (~$0.10 to $0.30/day), Anthropic opt-in per-project for sensitive codebases. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos.
+3. **Compares each new repo against your code.** Bring your own LLM: any OpenAI-compatible endpoint for routine triage, plus an optional second slot (e.g. Anthropic, or a privately-hosted model) for high-sensitivity projects. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos.
 4. **Delivers** three ways:
    - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs.
    - **HTML email** every morning at the UTC hour you set.
@@ -102,13 +102,13 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
     ├─ skip already-actioned repos
     ├─ apply user_feedback weights to source ranking
     ├─ scanRepo (GitHub API)  → safety + readme
-    ├─ triage (DeepSeek)      → keep/skip decision
-    ├─ reason (DeepSeek/Anthropic by project sensitivity)
+    ├─ triage (primary LLM)   → keep/skip decision
+    ├─ reason (primary or sensitive LLM by project sensitivity)
     │                         → per-project relevance + writeup
     └─ persist matches  (sqlite)
 
 ─── DELIVERY ─────────────────────────────────────────────────
-  → email digest          (HTML via SES, project-grouped)
+  → email digest          (HTML via configured email provider, project-grouped)
   → /api/mcp/* endpoints  (token-auth, JSON)
   → high-relevance webhook (Slack/Discord/generic, optional)
 
@@ -138,21 +138,23 @@ Required `.env` keys for local:
 |---|---|
 | `ENCRYPTION_KEY` | base64 32-byte key for at-rest secret encryption. Generate with `openssl rand -base64 32` |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY_BASE64` | service account for Firebase Auth |
-| `DEEPSEEK_API_KEY` | optional shared fallback (per-user keys override) |
-| `ANTHROPIC_API_KEY` | same |
+| `LLM_PRIMARY_API_KEY` / `LLM_PRIMARY_BASE_URL` / `LLM_PRIMARY_MODEL` | primary LLM slot, OpenAI-compatible wire format. Works with DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter, local llama.cpp / ollama, anything that speaks the OpenAI chat API. Optional shared fallback when no per-user key is set |
+| `LLM_SENSITIVE_API_KEY` / `LLM_SENSITIVE_BASE_URL` / `LLM_SENSITIVE_MODEL` | optional second slot used only for projects flagged high-sensitivity. Defaults to Anthropic's `/v1/messages` wire format; set `LLM_SENSITIVE_WIRE_FORMAT=openai-compatible` to route through `/chat/completions` instead |
 | `GITHUB_TOKEN` | only used by tests; per-user PATs drive real runs |
 | `SYNC_TOKEN` | random string, gates the laptop `/api/sync` CLI |
-| `EMAIL_FROM_ADDRESS` / `SES_SMTP_*` | Amazon SES creds for email delivery |
+| `EMAIL_PROVIDER` | `ses` (default, generic SMTP) or `resend`. SMTP uses `SES_SMTP_*` / `SMTP_*` env vars; Resend uses `RESEND_API_KEY`. `EMAIL_FROM_ADDRESS` is required either way |
 
-## Production deployment
+## Self-host
 
-The VPS uses systemd + nginx + certbot. Two services run:
+Runs on any Linux server or your local machine: Node.js + sqlite. Two long-running processes:
 
 - `replen.service`: Next.js dashboard on `127.0.0.1:3030`
-- `replen-cron.service`: node-cron scheduler that wakes at the user's `cron_hour_utc` and runs the per-user pipeline + nightly aging
+- `replen-cron.service`: node-cron scheduler that wakes at your `cron_hour_utc` and runs the pipeline + nightly aging
+
+The included `scripts/deploy.sh` rsyncs the repo to a target host, installs systemd units, and reloads. It is one possible layout; you can swap in any process manager (PM2, supervisord, Docker, a launchd plist on macOS) and any reverse proxy (nginx, Caddy, Traefik) without touching the app. Front it with whatever TLS you already use.
 
 ```bash
-# from your laptop, populate .env on the remote first (chmod 600)
+# populate .env on the remote first (chmod 600); secrets never go through rsync
 DEPLOY_HOST=your-ssh-alias \
   ./scripts/deploy.sh
 ```
@@ -161,25 +163,15 @@ Env knobs the deploy script respects (all optional, defaults shown):
 
 | var | default | what |
 |---|---|---|
-| `DEPLOY_HOST` | `replen-host` | SSH alias for your VPS |
+| `DEPLOY_HOST` | `replen-host` | SSH alias for the target host |
 | `DEPLOY_DIR` | `/opt/replen` | Remote install dir |
 | `DEPLOY_USER` | `ubuntu` | Remote user owning the dir |
 | `SERVICE_PREFIX` | `replen` | Systemd unit name prefix |
-| `DEPLOY_NGINX_SITE` | `replen.conf` | nginx sites-* filename |
+| `DEPLOY_NGINX_SITE` | `replen.conf` | reverse-proxy sites filename (if you use nginx) |
 | `DEPLOY_NGINX_TEMPLATE` | `nginx-replen.conf` | template file inside `scripts/` |
 | `DEPLOY_LOG_DIR` | `/var/log/replen` | Remote log dir |
 
-The script: `rsync`s the repo (excluding `.env`, `node_modules`, `.next`, `data`, `.git`), runs `npm install` + migrations + build, installs the systemd units + nginx config, reloads everything. You manage `.env` on the server manually so secrets never transit through your laptop sync.
-
-## Onboarding a new user
-
-1. User signs in to the dashboard via Firebase Auth.
-2. **Welcome wizard** (`/welcome`) walks them through four steps:
-   - Save a GitHub fine-grained PAT (one token: Contents R+W, Pull requests R+W, Metadata R). The wizard auto-detects their project repos *and* their primary languages from this PAT.
-   - Email destination + UTC cron hour.
-   - Confirm detected projects + curated sources.
-   - Fire the first pipeline run.
-3. From then on, `/settings` is where they manage everything: source handles, cost cap, webhook URL, MCP / ingest token rotation, language re-detection.
+The script excludes `.env`, `node_modules`, `.next`, `data`, and `.git` from rsync, then runs `npm install` + migrations + build remotely. You manage `.env` on the target manually so secrets never transit through your laptop sync.
 
 ## Surfaces
 
@@ -195,7 +187,7 @@ The script: `rsync`s the repo (excluding `.env`, `node_modules`, `.next`, `data`
 | `/sources` | Per-user source handles + curated source proposals |
 | `/runs` | Run history with cost cards (7d / 30d / avg per match / provider mix), per-source breakdown (candidates → matches → convert% + 👍/👎 net) |
 | `/settings` | Credentials, delivery prefs, daily cost cap, webhook, ingest token, bookmarklet + MCP install snippet, language re-detect, maintenance (archive old hidden) |
-| `/admin` | (admin only) Manage users, grant shared-LLM access, review source proposals |
+| `/admin` | Review and approve curated source proposals queued up from any account on the instance |
 
 Keyboard shortcuts on `/`: `j/k` navigate matches, `s` star, `h` hide, `/` focus header search, `?` show hint.
 
@@ -261,29 +253,22 @@ Source ranking (for tie-breaking when multiple sources surface the same repo): t
    - Skip already-actioned repos (starred / hidden / integrated / has handoff PR).
    - For each unique GitHub repo:
      - `scanRepo`: metadata, README, contributor count, postinstall hooks, secret scan.
-     - `triage` (DeepSeek-chat): keep/skip JSON. Skip if not keep.
-     - `reasonAboutRepo` (DeepSeek or Anthropic by project sensitivity): per-project relevance + writeup.
+     - `triage` (primary LLM slot): keep/skip JSON. Skip if not keep.
+     - `reasonAboutRepo` (primary or sensitive LLM slot, by project sensitivity): per-project relevance + writeup.
    - Persist a `match` row per (repo, project) pair with a denormalised `source_kind`.
 4. **sendDigestEmail**: HTML email grouped by project, with TOC, colour-coded relevance chips, source attribution, click-through to dashboard.
 5. **sendHighRelevanceWebhook** (optional): POST to Slack/Discord/generic if any `relevance=high` matches.
 
-Encrypted at rest: PATs, LLM keys (DeepSeek + Anthropic), and SES creds are stored as `enc:v1:<iv>:<tag>:<ciphertext>` using AES-256-GCM keyed off `ENCRYPTION_KEY`. Decrypted only in memory during a run.
+Encrypted at rest: PATs, LLM keys, and email-provider creds are stored as AES-256-GCM ciphertext keyed off `ENCRYPTION_KEY` (per-account DEK envelope). Decrypted only in memory during a run.
 
 ## Costs
 
-- **DeepSeek:** ~$0.10 to $0.30 per typical daily run after their prefix-cache kicks in.
-- **Anthropic:** only used for high-sensitivity projects. ~$0.50 to $2 per run if any.
-- **SES:** free tier covers ~62k emails/month from EC2; ~$0.10/1k otherwise.
-- **VPS:** flat, whatever you already pay.
+- **LLM:** depends entirely on the providers you wire up. A typical run on a cheap OpenAI-compatible model lands around $0.10 to $0.30/day after prefix-caching kicks in; a frontier model used only for high-sensitivity projects adds ~$0.50 to $2/run on the days it fires.
+- **Email:** depends on provider. Both built-in adapters (generic SMTP/SES, Resend) have generous free tiers.
+- **Server:** flat, whatever you already pay. Sqlite + Node makes this cheap to run on a small VM or even a Raspberry Pi.
 - **MCP / bookmarklet:** no marginal cost; they just query the same DB.
 
-Default daily cap is **$5/user**; configurable on `/settings`.
-
-## What's still stubbed / known gaps
-
-- **Tenant-isolation test**: multi-tenant queries look clean by audit but no automated guard yet.
-- **HTML triage artifacts**: the skill writes to `~/replen/reports/`; pending validation as to whether this beats terminal markdown for daily use.
-- **Aging policy automation**: `archiveOldHidden(90)` is manual via /settings; could run nightly.
+Default daily LLM cap is **$5/user**; configurable on `/settings`.
 
 ## Repository layout
 

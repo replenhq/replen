@@ -67,12 +67,12 @@ export default async function AdminPage() {
     revalidatePath("/admin");
   }
 
-  async function setStatus(userId: number, status: "active" | "suspended") {
+  async function setStatus(userId: number, status: "active" | "pending" | "suspended") {
     "use server";
     await requireAdmin();
-    if (status !== "active" && status !== "suspended") throw new Error("invalid status");
+    if (status !== "active" && status !== "pending" && status !== "suspended") throw new Error("invalid status");
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
-    if (status === "suspended") {
+    if (status !== "active") {
       const target = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
       if (target?.role === "admin") {
         const activeAdmins = await db
@@ -80,7 +80,7 @@ export default async function AdminPage() {
           .from(schema.users)
           .where(and(eq(schema.users.role, "admin"), eq(schema.users.status, "active")));
         const remaining = activeAdmins.filter((u) => u.id !== userId).length;
-        if (remaining === 0) throw new Error("refusing to suspend the last active admin");
+        if (remaining === 0) throw new Error("refusing to deactivate the last active admin");
       }
     }
     await db.update(schema.users).set({ status }).where(eq(schema.users.id, userId));
@@ -100,9 +100,18 @@ export default async function AdminPage() {
     .from(schema.proposedSources)
     .where(eq(schema.proposedSources.status, "pending"));
 
+  const pendingUsers = users.filter((u) => u.status === "pending");
+
   return (
     <>
       <h1>Admin</h1>
+
+      {pendingUsers.length > 0 && (
+        <div style={{ marginTop: 16, padding: "10px 14px", background: "#fff7e0", border: "1px solid #e0c060", borderRadius: 6 }}>
+          <strong>{pendingUsers.length} {pendingUsers.length === 1 ? "account" : "accounts"} awaiting approval:</strong>{" "}
+          {pendingUsers.map((u) => u.email).join(", ")} — see the <a href="#users">Users table</a> below to approve or reject.
+        </div>
+      )}
 
       <p style={{ marginTop: 12 }}>
         <a href="/admin/proposals">Source proposals queue ({pendingCount.length} pending)</a>
@@ -119,7 +128,7 @@ export default async function AdminPage() {
         <button type="submit">Add</button>
       </form>
 
-      <h2 style={{ marginTop: 32 }}>Users</h2>
+      <h2 id="users" style={{ marginTop: 32 }}>Users</h2>
       <table>
         <thead>
           <tr>
@@ -151,9 +160,20 @@ export default async function AdminPage() {
                 <form className="inline" action={async () => { "use server"; await setRole(u.id, u.role === "admin" ? "user" : "admin"); }}>
                   <button>{u.role === "admin" ? "→ user" : "→ admin"}</button>
                 </form>
-                <form className="inline" action={async () => { "use server"; await setStatus(u.id, u.status === "active" ? "suspended" : "active"); }}>
-                  <button>{u.status === "active" ? "suspend" : "unsuspend"}</button>
-                </form>
+                {u.status === "pending" ? (
+                  <>
+                    <form className="inline" action={async () => { "use server"; await setStatus(u.id, "active"); }}>
+                      <button style={{ background: "#a4d8a4", color: "#1a1a1a", fontWeight: 600 }} title="Approve this account">approve</button>
+                    </form>
+                    <form className="inline" action={async () => { "use server"; await setStatus(u.id, "suspended"); }}>
+                      <button title="Reject this account">reject</button>
+                    </form>
+                  </>
+                ) : (
+                  <form className="inline" action={async () => { "use server"; await setStatus(u.id, u.status === "active" ? "suspended" : "active"); }}>
+                    <button>{u.status === "active" ? "suspend" : "unsuspend"}</button>
+                  </form>
+                )}
                 {u.firebaseUid.startsWith("invited:") && (
                   <form className="inline" action={async () => { "use server"; await resendInvite(u.email); }}>
                     <button title="Re-send the invite email">resend invite</button>

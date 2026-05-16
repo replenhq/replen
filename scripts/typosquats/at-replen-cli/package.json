@@ -1,0 +1,19 @@
+{
+  "name": "@replen/cli",
+  "version": "0.0.0",
+  "description": "RENAMED. The replen CLI is published unscoped as `replen`. Run `npm i -g replen` instead.",
+  "bin": {
+    "replen-cli": "index.js"
+  },
+  "files": ["index.js"],
+  "homepage": "https://replen.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/replenhq/replen.git"
+  },
+  "license": "MIT",
+  "author": "replen.dev",
+  "publishConfig": {
+    "access": "public"
+  }
+}

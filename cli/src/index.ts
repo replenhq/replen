@@ -2,15 +2,18 @@
 import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
+import { runProjectInit } from "./project-init.js";
 
 const HELP = `replen: Smart AI Development workflows
 
 Usage:
-  npx replen              Sign up / sign in + wire MCP into Claude Code
-  npx replen status       Show current config
-  npx replen mcp setup    Re-wire MCP using saved auth
-  npx replen logout       Forget saved auth
-  npx replen --help       This help
+  npx replen                 Sign up / sign in + wire MCP into Claude Code
+  npx replen status          Show current config
+  npx replen mcp setup       Re-wire MCP using saved auth
+  npx replen project-init    Print a prompt your AI coding tool uses to draft
+                             a CLAUDE.md tuned for replen
+  npx replen logout          Forget saved auth
+  npx replen --help          This help
 
 Env:
   REPLEN_BASE             Override dashboard URL (default https://app.replen.dev)
@@ -35,9 +38,13 @@ async function main() {
     }
     console.log(`Signed in.`);
     console.log(`  Dashboard: ${cfg.base}`);
-    console.log(`  Token:     ${cfg.token.slice(0, 8)}…${cfg.token.slice(-4)}`);
     console.log(`  Saved:     ${cfg.savedAt}`);
     console.log(`  Config:    ${configPath()}`);
+    return;
+  }
+
+  if (cmd === "project-init") {
+    runProjectInit();
     return;
   }
 

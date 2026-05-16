@@ -17,6 +17,9 @@ export type FetcherContext = {
   // day" creators just repackage gh-trending, so widening that lens is the
   // highest-leverage thing we can do for signal quality.
   detectedLanguages?: string | null;
+  // Per-user fetcher hook. gh-search reads + writes project_profiles for this
+  // user. Most fetchers ignore it.
+  userId?: number;
 };
 
 export type Fetcher = {

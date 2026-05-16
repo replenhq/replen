@@ -1,5 +1,6 @@
 import type { Fetcher, FetchedCandidate } from "./types";
 import { resolveGithubFromText, stripHtml } from "./resolve-github";
+import { readRunOrEnv } from "../analyzer/run-context";
 
 // Direct profile-HTML scraper for TikTok. Avoids RSSHub's tiktok route which
 // requires Puppeteer + Chrome (not available in our shared RSSHub container).
@@ -96,7 +97,7 @@ function regexFallback(html: string): TTPost[] {
 export const tiktokFetcher: Fetcher = {
   name: "tiktok",
   async run() {
-    const handles = (process.env.TIKTOK_HANDLES ?? "")
+    const handles = (readRunOrEnv("tiktokHandles", "TIKTOK_HANDLES") ?? "")
       .split(",")
       .map((h) => h.trim().replace(/^@/, ""))
       .filter(Boolean);

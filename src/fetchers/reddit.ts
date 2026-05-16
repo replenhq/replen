@@ -1,5 +1,6 @@
 import type { Fetcher, FetchedCandidate } from "./types";
 import { extractGithubRepos } from "../lib/github-url";
+import { readRunOrEnv } from "../analyzer/run-context";
 
 type RedditPost = {
   data: {
@@ -18,7 +19,7 @@ type RedditPost = {
 export const redditFetcher: Fetcher = {
   name: "reddit",
   async run() {
-    const subs = (process.env.REDDIT_SUBS ?? "MachineLearning,LocalLLaMA,selfhosted,programming,opensource")
+    const subs = (readRunOrEnv("redditSubs", "REDDIT_SUBS") ?? "MachineLearning,LocalLLaMA,selfhosted,programming,opensource")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);

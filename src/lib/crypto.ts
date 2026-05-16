@@ -126,26 +126,46 @@ export function unwrapDek(stored: string): Buffer {
   return dek;
 }
 
+// Current DEK generation stamp. Bumped on real DEK rotation (not yet
+// implemented). New ciphertexts emit `g1`; legacy ciphertexts without a
+// generation tag parse as `g0` and resolve to the current DEK.
+export const DEK_GENERATION_CURRENT = 1;
+
 // v2 envelope - encrypts under the user's DEK and stamps the userId in the
-// header so we can route decryption to the right key at read time.
+// header so we can route decryption to the right key at read time. A
+// generation tag (`g1`, `g2`, …) is also stamped so future DEK rotation can
+// route historical ciphertexts to the right historical key without rewriting
+// every row at rotation time.
 export function encryptForUserWithDek(userId: number, dek: Buffer, plaintext: string): string {
   if (!plaintext) return plaintext;
   if (!Number.isInteger(userId) || userId <= 0) throw new Error("encryptForUserWithDek: bad userId");
-  return encryptWith(dek, plaintext, PREFIX_V2, `${userId}:`);
+  return encryptWith(dek, plaintext, PREFIX_V2, `${userId}:g${DEK_GENERATION_CURRENT}:`);
 }
 
-// Parses a v2 ciphertext header and returns the userId + remaining body.
-export function parseV2(stored: string): { userId: number; body: string } {
+// Parses a v2 ciphertext header and returns the userId + generation + body.
+// Backwards-compatible: a header without `:g<n>:` resolves to generation 0
+// (the original v2 format before generation tagging was added).
+export function parseV2(stored: string): { userId: number; generation: number; body: string } {
   if (!stored.startsWith(PREFIX_V2)) throw new Error("not a v2 ciphertext");
   const tail = stored.slice(PREFIX_V2.length);
   const sep = tail.indexOf(":");
   if (sep < 1) throw new Error("malformed v2 header");
   const userId = parseInt(tail.slice(0, sep), 10);
   if (!Number.isInteger(userId) || userId <= 0) throw new Error("malformed v2 userId");
-  return { userId, body: tail.slice(sep + 1) };
+  let rest = tail.slice(sep + 1);
+  let generation = 0;
+  const genMatch = /^g(\d+):/.exec(rest);
+  if (genMatch) {
+    generation = parseInt(genMatch[1], 10);
+    if (!Number.isInteger(generation) || generation < 0) throw new Error("malformed v2 generation");
+    rest = rest.slice(genMatch[0].length);
+  }
+  return { userId, generation, body: rest };
 }
 
-// Decrypts a v2 ciphertext given the user's DEK.
+// Decrypts a v2 ciphertext given the user's DEK. Future rotation will pass a
+// generation-specific DEK; for now there's only one DEK per user so the
+// generation is informational.
 export function decryptWithDek(stored: string, dek: Buffer): string {
   const { body } = parseV2(stored);
   return decryptWith(dek, body);

@@ -1,6 +1,6 @@
 import { db, schema } from "../db/client";
 import { and, eq, desc } from "drizzle-orm";
-import { resolveSafe, validateWebhookUrl } from "../lib/url-guard";
+import { resolveSafeWithPinnedDispatcher, validateWebhookUrl } from "../lib/url-guard";
 
 // Real-time alert for high-relevance matches in a just-finished run. POSTs
 // a JSON payload that Slack and Discord both accept (text + simple blocks /
@@ -76,20 +76,17 @@ export async function sendHighRelevanceWebhook(
     body = { runId, matches: lines };
   }
 
-  // Re-validate the URL right before the fetch. Save-time validation could
-  // have passed (public hostname, https) while DNS now resolves to a private
-  // address (DNS rebinding / DNS hijack). Resolve and reject any private,
-  // loopback, link-local or multicast address. The dns.lookup result is
-  // passed through hostname-resolution only - the actual fetch reuses the
-  // original URL so TLS hostname verification still works against a hostile
-  // resolver only when paired with a hostile CA, which is out of scope.
+  // Validate syntactically, then DNS-resolve and pin the result. A hostile
+  // resolver that returns a public IP at validate-time and a private IP at
+  // fetch-time cannot rebind us because the dispatcher's connect step is
+  // already bound to the address we approved.
   const syntactic = validateWebhookUrl(webhookUrl);
   if (!syntactic.ok) {
     throw new Error(`webhook URL refused: ${syntactic.error}`);
   }
-  const safe = await resolveSafe(syntactic.url);
-  if (!safe.ok) {
-    throw new Error(`webhook URL refused: ${safe.error}`);
+  const pinned = await resolveSafeWithPinnedDispatcher(syntactic.url);
+  if (!pinned.ok) {
+    throw new Error(`webhook URL refused: ${pinned.error}`);
   }
 
   // Body size + status both ignored on response: never reflect the response
@@ -100,7 +97,10 @@ export async function sendHighRelevanceWebhook(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
     redirect: "manual",
-  });
+    // Typed as `any` because the standard fetch RequestInit doesn't surface
+    // undici's `dispatcher` extension. Node's runtime accepts it.
+    dispatcher: pinned.dispatcher,
+  } as any);
   if (!res.ok) {
     throw new Error(`webhook delivery failed: HTTP ${res.status}`);
   }

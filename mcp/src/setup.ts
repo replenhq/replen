@@ -10,7 +10,7 @@
 // exact one-liner with a fresh token already baked in. Users paste it into
 // their terminal once; we never see the token transit.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
 
@@ -48,8 +48,11 @@ function readJson(path: string): Record<string, unknown> {
 function writeJsonAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2));
+  // 0600 because the JSON contains DIGEST_TOKEN. Default 0644 leaks it
+  // to every local user on a multi-user box.
+  writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   renameSync(tmp, path);
+  try { chmodSync(path, 0o600); } catch { /* best-effort on non-POSIX */ }
 }
 
 export async function runSetup(argv: string[]): Promise<void> {

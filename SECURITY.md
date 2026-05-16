@@ -24,9 +24,11 @@ In scope:
 
 Out of scope:
 
-- A compromised user laptop: by design, anyone with shell access to a logged-in machine can read `~/.replen/config.json` and exfiltrate the user's ingest token, plus read the AES-encrypted material on `~/.claude.json`. Local security is the user's responsibility.
+- A compromised laptop: by design, anyone with shell access to a logged-in machine can read `~/.replen/config.json` and exfiltrate the ingest token. Local security is your responsibility.
 - Self-hosted deployments operated outside our control. We document the recommended hardening below; you choose whether to follow it.
-- Issues that require physical access to the VPS hosting `app.replen.dev`.
+- Issues that require physical access to the server hosting `app.replen.dev`.
+
+This policy covers the code in this repo and the hosted instance at `app.replen.dev`. Self-host is designed for **personal use**, not for re-hosting replen as a service for other people; the docs below assume you're running it for yourself.
 
 ## Threat model
 
@@ -34,44 +36,49 @@ What we explicitly defend against:
 
 - **At-rest secret exposure via DB leak.** All user secrets (GitHub PAT, LLM API keys) are encrypted under a per-user Data Encryption Key (DEK), which is itself wrapped by a master KEK held in `ENCRYPTION_KEY`. See [docs/security/secrets.md](docs/security/secrets.md).
 - **Ingest token replay.** Ingest tokens are stored as `sha256(token)` only; the plaintext lives in the user's CLI config and the one-time exchange-code response after authorize.
-- **Cross-tenant data access.** Every Drizzle query that crosses a `userId` boundary carries the `eq(userId, auth.userId)` clause, including secondary fetches of `project_profiles` after a `userId`-scoped `matches` lookup.
-- **Origin-bypass via direct IP.** When `REQUIRE_CLOUDFLARE=1`, the origin rejects any request lacking the `cf-connecting-ip` header (and optionally an `x-cf-origin-secret` shared header set by a Cloudflare Transform Rule). The VPS IP must remain hidden.
+- **Per-user data isolation.** Every Drizzle query that crosses a `userId` boundary carries the `eq(userId, auth.userId)` clause, including secondary fetches of `project_profiles` after a `userId`-scoped `matches` lookup. This is what protects accounts on the hosted instance from seeing each other's data; solo self-host inherits it for free.
+- **Origin-bypass via direct IP.** When `REQUIRE_CLOUDFLARE=1`, the origin rejects any request lacking the `cf-connecting-ip` header (and optionally an `x-replen-edge-secret` shared header set by a Cloudflare Transform Rule). The server IP must remain hidden.
 - **CSRF on server actions.** Next.js's same-origin guard plus a strict CSP including `form-action 'self'` and `frame-ancestors 'none'`.
 - **Prompt injection through scraped READMEs.** Untrusted content is wrapped in `<UNTRUSTED_…>` delimiters; the LLM is told to treat wrapped content as opaque data. Outputs are scanned for system-prompt leaks and URLs outside an allowlist (`github.com`, `*.githubusercontent.com`, etc.). On match, the writeup is discarded.
-- **SSRF via webhook URLs.** User-supplied webhook URLs are validated syntactically (https-only, no IP literals, no `.local`/`.internal` suffixes) and again at fetch time via DNS resolution against private/loopback/link-local/multicast ranges.
+- **SSRF via webhook URLs.** User-supplied webhook URLs are validated syntactically (https-only, no IP literals, no `.local`/`.internal` suffixes) and again at fetch time via DNS resolution against private/loopback/link-local/multicast ranges. The resolved address is pinned through an undici dispatcher so a hostile resolver cannot DNS-rebind between validation and fetch.
+- **SSRF + key exfil via user LLM base URL.** The Primary / Sensitive LLM base URLs accept the same SSRF gauntlet as webhooks (validate-on-save + resolve-and-pin-on-fetch). If the user overrides the base URL without supplying their own API key, we refuse to send the operator's shared env key — otherwise the user's chosen endpoint would receive a credential it shouldn't have.
 - **Token in URL.** The CLI authorize flow uses a 2-minute one-time exchange code, not the long-lived ingest token, in browser-bound redirects.
 - **Plain-text settings dumps.** The settings page shows `•••••` for each secret on every render and only emits the plaintext ingest token once (via a `?newToken=…` redirect param consumed on the next render).
 
 What we explicitly don't defend against (yet):
 
-- A malicious user with an active session in the same tenant. Replen is multi-tenant by row-level filtering; a tenant with admin-granted access can see other admin actions but not other users' data.
 - A backdoored Cloudflare account. Origin pulls authenticated by Cloudflare's origin CA (recommended) reduce but don't eliminate this.
 - LLM-level prompt injection that produces grammatically-correct prose with only allowlisted URLs. The denylist + URL allowlist + system prompt are mitigations, not guarantees.
+- **Magic-link replay within Firebase's TTL.** Sign-in links are valid for ~1 hour and the callback page is intentionally inert until the user clicks "Finish signing in" (so email link-prefetchers don't burn the code). A captured URL — forwarded message, history sync to an unmanaged device, shoulder-surf — can complete sign-in inside that window. Mitigations: shorten the Firebase action-code TTL in the console; users on shared machines should not click the link there. A future server-side single-use nonce stamped at link issue would harden this further.
+- **Prompt injection from social captions surfacing a poison repo.** `resolveGithubFromText` runs an LLM extractor on Threads/TikTok captions; an adversarial caption can drive the model to emit a chosen `owner/repo` candidate. Bounded by the downstream triage / safety scan / writeup-output URL allowlist, but the candidate does enter the queue.
 
-## Recommended deployment hardening
+## Recommended self-host hardening
 
-Production deployments should set every flag below.
+If you run replen for yourself on a public domain, set every flag below. Local-only setups (running on `localhost`, no inbound) can skip the Cloudflare and cookie-rotation rows.
 
 ### Required env vars
 
 | Var | Required | Notes |
 |---|---|---|
 | `ENCRYPTION_KEY` | yes (production) | base64 of 32 random bytes. App refuses to boot without it in `NODE_ENV=production`. |
-| `BOOTSTRAP_ADMIN_EMAIL` | yes | only the verified email matching this string is granted `admin` on first sign-in. Without this, no admin can be created by sign-up. |
-| `REQUIRE_CLOUDFLARE` | yes (`1`) | reject any request lacking `cf-connecting-ip`. |
-| `CF_ORIGIN_SECRET` | recommended | pair with a Cloudflare Transform Rule that injects `x-cf-origin-secret: $secret` on every forwarded request. Defeats header spoofing by direct-IP attackers. |
-| `COOKIE_SECRET_CURRENT` / `COOKIE_SECRET_PREVIOUS` | yes | 32+ random chars each. Rotate by promoting `CURRENT` → `PREVIOUS` and minting a new `CURRENT`. |
-| `SES_SMTP_*` / `EMAIL_FROM_ADDRESS` | yes for email delivery | |
+| `BOOTSTRAP_ADMIN_EMAIL` | yes | the verified email for your account. Only this email is granted access on first sign-in; nothing else will. Set it to the email you use with Firebase Auth. |
+| `REQUIRE_CLOUDFLARE` | yes (`1`) if public | reject any request lacking `cf-connecting-ip`. Skip if you're only ever serving over `localhost`. |
+| `CF_ORIGIN_SECRET` | recommended if public | pair with a Cloudflare Transform Rule that injects `x-replen-edge-secret: $secret` on every forwarded request. Defeats header spoofing by direct-IP attackers. |
+| `COOKIE_SECRET_CURRENT` / `COOKIE_SECRET_PREVIOUS` | yes if public | 32+ random chars each. Rotate by promoting `CURRENT` → `PREVIOUS` and minting a new `CURRENT`. |
+| `EMAIL_PROVIDER` + provider-specific creds | yes for email delivery | see `.env.example` |
 | `PUBLIC_BASE_URL` | yes | used for outbound links + CLI auth callbacks. |
+| `AUTH_COOKIE_DOMAIN` | **no — leave unset** | host-only session cookie by default. Setting `.example.com` sends the cookie to *every* subdomain; only do this when every sibling subdomain is first-party and equally trusted. |
+| `SYNC_USER_ID` | yes if `SYNC_TOKEN` set | numeric `users.id` the laptop sync CLI is authorised to read. Other user_id values return 403 even with the right token. |
 
 ### Cloudflare configuration
 
-1. **Tunnel.** Use `cloudflared` so the VPS has no public ports beyond SSH (and even SSH should be IP-allowlisted to your fixed-IP egress).
-2. **Authenticated Origin Pulls.** Enable for the zone and require `ssl_verify_client on` in nginx. Forces Cloudflare's client cert on every request — direct-IP scans land on a 400.
-3. **WAF rules.** Block requests to `/api/cli-auth/exchange` from anywhere except known CDN-edge IPs (the exchange is server-to-server from the CLI's localhost, then through Cloudflare).
-4. **Rate limiting.** A 50/min cap on `/login`, `/api/login`, `/api/cli-auth/exchange`, `/api/ingest`.
+1. **Tunnel.** Use `cloudflared` so the server has no public ports beyond SSH (and even SSH should be IP-allowlisted to your fixed-IP egress).
+2. **Transform Rule** that injects `x-replen-edge-secret` on every request to `app.replen.dev`. The origin's middleware refuses any request lacking both this header (with the matching `CF_ORIGIN_SECRET` value) AND `cf-connecting-ip`. See `docs/security/operator-runbook.md` for the API call.
+3. **Authenticated Origin Pulls.** Not applicable when using cloudflared tunnel: the tunnel is outbound-only and there's no inbound TLS handshake on origin where AOP could attach. The Transform Rule + `REQUIRE_CLOUDFLARE=1` provides equivalent protection. Enable AOP only if you ever expose nginx on port 443 directly (i.e. abandon the tunnel architecture).
+4. **WAF rules.** Block requests to `/api/cli-auth/exchange` from anywhere except known CDN-edge IPs (the exchange is server-to-server from the CLI's localhost, then through Cloudflare).
+5. **Rate limiting.** A 50/min cap on `/login`, `/api/login`, `/api/cli-auth/exchange`, `/api/ingest`.
 
-### VPS hardening
+### Host hardening
 
 - `ufw default deny incoming; ufw allow 22/tcp` — Cloudflare Tunnel handles 443 without exposing a port.
 - Restrict SSH to publickey-only and 2FA.
@@ -81,7 +88,7 @@ Production deployments should set every flag below.
 
 These hardening steps are documented but not yet implemented in this codebase:
 
-- **AWS Secrets Manager / Cloud KMS for `ENCRYPTION_KEY`.** Today the master KEK lives in the `.env` file on the VPS. Pulling it from a managed KMS at boot (with the IAM grant tied to the VPS instance role) removes the key from disk entirely.
+- **AWS Secrets Manager / Cloud KMS for `ENCRYPTION_KEY`.** Today the master KEK lives in the `.env` file on the server. Pulling it from a managed KMS at boot (with the IAM grant tied to the server instance role) removes the key from disk entirely.
 - **Replace user-scope GitHub PATs with a GitHub App.** Today the recommended PAT scope is `Contents: write` + `Pull requests: write` across **all** of the user's repositories. A GitHub App installation can scope per-repo and uses 1-hour installation tokens. See `docs/security/github-app-migration.md` (planned).
 - **Audit-log forwarding.** `secret_access_log` is read locally only. Forward to a write-only log sink for tamper-evident archival.
 
@@ -103,6 +110,20 @@ SELECT user_id, COUNT(*) FROM secret_access_log
 WHERE reason = 'settings-view' AND accessed_at > strftime('%s','now') - 7*86400
 GROUP BY user_id HAVING COUNT(*) > 50;
 ```
+
+## Token-header conventions
+
+The ingest token is accepted under either `x-ingest-token` (canonical) or
+`x-digest-token` (legacy MCP-side name) on both `/api/ingest` and
+`/api/mcp/*`. Pick `x-ingest-token` for new code; the alias may be removed
+once the MCP package has been on a release that uses the canonical name for
+≥ 6 months.
+
+Neither endpoint emits `Access-Control-Allow-Origin: *`. The bookmarklet's
+browser context bypasses CORS for its own fetch; the MCP server is a Node
+process that doesn't go through a browser preflight at all. Browser
+cross-origin calls therefore fail at preflight even with a stolen token —
+the token check is defence in depth, not the only line.
 
 ## Past audits
 

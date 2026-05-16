@@ -46,8 +46,31 @@ export const userSettings = sqliteTable(
     // Write-scoped GitHub PAT, kept separate so the read-only one used by the
     // pipeline can stay narrowly scoped. Required only for the "create handoff PR" feature.
     githubWriteToken: text("github_write_token"),
+    // Legacy per-provider columns. Kept for backward compatibility with rows
+    // written before the generic slots existed. Read paths fall back to these
+    // when the generic columns are null; writes go to the generic columns only.
     deepseekApiKey: text("deepseek_api_key"),
     anthropicApiKey: text("anthropic_api_key"),
+    // Generic LLM slot config. Provider-agnostic: the same fields work for any
+    // OpenAI-compatible endpoint plus Anthropic's /v1/messages (toggle via
+    // llmSensitiveWireFormat). API keys are encrypted at rest.
+    //   Primary slot   - used for triage + low-sensitivity reasoning.
+    //   Sensitive slot - only used for project_profiles.sensitivity = 'high'.
+    llmPrimaryApiKey: text("llm_primary_api_key"),
+    llmPrimaryBaseUrl: text("llm_primary_base_url"),
+    llmPrimaryModel: text("llm_primary_model"),
+    llmSensitiveApiKey: text("llm_sensitive_api_key"),
+    llmSensitiveBaseUrl: text("llm_sensitive_base_url"),
+    llmSensitiveModel: text("llm_sensitive_model"),
+    // 'anthropic' (default — Anthropic /v1/messages) or 'openai-compatible'
+    // (route through /chat/completions, for e.g. a privately-hosted model).
+    llmSensitiveWireFormat: text("llm_sensitive_wire_format"),
+    // Comma-separated extra doc paths (relative to each project root) for the
+    // loader to read alongside the built-in defaults. Globs like
+    //   docs/architecture/*.md,SPEC/**/*.md,replen-context.md
+    // are accepted. Useful when a project's important context lives outside
+    // the default doc-file list (README, CLAUDE.md, SPEC.md, etc).
+    extraDocPaths: text("extra_doc_paths"),
     // Sources
     threadsHandles: text("threads_handles"), // comma-separated
     redditSubs: text("reddit_subs"), // comma-separated
@@ -199,6 +222,11 @@ export const projectProfiles = sqliteTable(
     readmeMd: text("readme_md"),
     claudeMd: text("claude_md"),
     techSummary: text("tech_summary"),
+    // Comma-separated GitHub-topic-style keywords derived once from the
+    // profile docs (e.g. "computer-vision,object-detection,supervision-lib").
+    // Used by the gh-search fetcher to surface niche-relevant repos beyond
+    // trending feeds. Re-derived when profileHash changes; user-overridable.
+    searchKeywords: text("search_keywords"),
     profileHash: text("profile_hash").notNull(),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),

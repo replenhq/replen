@@ -56,6 +56,15 @@ async function getOrCreateDek(userId: number): Promise<Buffer> {
   return fresh.dek;
 }
 
+// Coalescing window for successful accesses. Without this, a token holder
+// can flood the audit table by triggering thousands of decrypts per minute
+// (each MCP /handoff call decrypts the user's PAT). A single row per
+// (user, column, reason) inside the window is enough for forensics; failures
+// always log because they're rare and important.
+const COALESCE_WINDOW_MS = 60_000;
+type CoalesceKey = string; // `${userId}|${column}|${reason}`
+const lastSuccessAt = new Map<CoalesceKey, number>();
+
 async function logAccess(
   userId: number,
   column: string,
@@ -63,7 +72,19 @@ async function logAccess(
   success: boolean,
   errorMessage?: string,
 ): Promise<void> {
-  // Best-effort. Failure to write the audit row should not break the caller.
+  if (success) {
+    const key: CoalesceKey = `${userId}|${column}|${reason}`;
+    const now = Date.now();
+    const last = lastSuccessAt.get(key);
+    if (last !== undefined && now - last < COALESCE_WINDOW_MS) return;
+    lastSuccessAt.set(key, now);
+    // Lazy GC: every ~1k unique keys, prune entries older than 5 minutes so
+    // the map doesn't grow unbounded on a long-running process.
+    if (lastSuccessAt.size > 1000) {
+      const cutoff = now - 5 * 60_000;
+      for (const [k, t] of lastSuccessAt) if (t < cutoff) lastSuccessAt.delete(k);
+    }
+  }
   try {
     await db.insert(schema.secretAccessLog).values({
       userId,
@@ -74,7 +95,12 @@ async function logAccess(
       accessedAt: new Date(),
     });
   } catch (e) {
-    console.error("[secret-access-log] write failed:", (e as Error).message);
+    // Best-effort, but tee to stderr so an attacker DoS'ing the log table
+    // can't decrypt invisibly. Includes the same fields a row would have.
+    console.error(
+      `[secret-access-log] write failed (userId=${userId} column=${column} reason=${reason} success=${success}):`,
+      (e as Error).message
+    );
   }
 }
 

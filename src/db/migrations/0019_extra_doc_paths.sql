@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `extra_doc_paths` text;

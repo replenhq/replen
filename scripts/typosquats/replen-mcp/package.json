@@ -1,0 +1,16 @@
+{
+  "name": "replen-mcp",
+  "version": "0.0.0",
+  "description": "RENAMED. The replen MCP server is published as `@replen/mcp`. Run `npx @replen/mcp` instead.",
+  "bin": {
+    "replen-mcp": "index.js"
+  },
+  "files": ["index.js"],
+  "homepage": "https://replen.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/replenhq/replen.git"
+  },
+  "license": "MIT",
+  "author": "replen.dev"
+}

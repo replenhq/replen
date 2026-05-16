@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -p 3030",
     "build": "next build",
-    "start": "next start -p 3030",
+    "start": "next start -H 127.0.0.1 -p 3030",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
@@ -19,7 +19,7 @@
     "cheerio": "^1.0.0",
     "drizzle-orm": "^0.45.1",
     "firebase": "^12.10.0",
-    "firebase-admin": "^13.7.0",
+    "firebase-admin": "^13.10.0",
     "next": "^16.2.6",
     "next-firebase-auth-edge": "^1.12.0",
     "node-cron": "^3.0.3",
@@ -34,7 +34,7 @@
     "@types/nodemailer": "^6.4.16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.0",
     "typescript": "^5"
   },

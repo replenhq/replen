@@ -1,8 +1,17 @@
 import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+
+// Options for discoverLocalProjects. Adds the per-user "extra doc paths"
+// feature: globs, relative to each project root, that point at additional
+// docs to fold into the profile. Defaults still apply; this just augments.
+export type DiscoverOpts = {
+  extraDocPaths?: string[]; // glob patterns: "docs/*.md", "SPEC/**/*.md"
+  extraDocsBudget?: number; // max files per pattern (default 5)
+  extraDocCharLimit?: number; // max chars per file (default 20000)
+};
 
 export type LocalProject = {
   slug: string;
@@ -35,15 +44,23 @@ const DOC_NAMES = [
 const CLAUDE_NAMES = ["CLAUDE.md", "Claude.md", "claude.md"];
 const MANIFEST_NAMES = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "requirements.txt"];
 
-export async function discoverLocalProjects(root: string): Promise<LocalProject[]> {
+export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {}): Promise<LocalProject[]> {
   const entries = await readdir(root, { withFileTypes: true });
+  const extraPatterns = (opts.extraDocPaths ?? []).map((s) => s.trim()).filter(Boolean);
   const out: LocalProject[] = [];
   for (const e of entries) {
     if (!e.isDirectory()) continue;
     if (e.name.startsWith(".")) continue;
     const path = join(root, e.name);
     const docMd = await readFirstExisting(path, DOC_NAMES);
-    const claudeMd = await readFirstExisting(path, CLAUDE_NAMES);
+    const claudeMdRaw = await readFirstExisting(path, CLAUDE_NAMES);
+    const extraDocs = extraPatterns.length > 0
+      ? await collectExtraDocs(path, extraPatterns, opts.extraDocsBudget ?? 5, opts.extraDocCharLimit ?? 20_000)
+      : [];
+    // Fold extra docs into the claudeMd field so they ride through to the
+    // reasoner without needing a new column. The separator banner stays in
+    // place so the LLM can tell what's user-authored vs auto-included.
+    const claudeMd = mergeExtraIntoClaudeMd(claudeMdRaw, extraDocs);
     const techSummary = await summarizeTech(path);
     // Discover the project if we have ANY of: a doc file, a CLAUDE.md, or a manifest.
     const hasManifest = await anyExists(path, MANIFEST_NAMES);
@@ -62,6 +79,82 @@ export async function discoverLocalProjects(root: string): Promise<LocalProject[
     });
   }
   return out;
+}
+
+function mergeExtraIntoClaudeMd(claudeMd: string | null, extras: Array<{ path: string; content: string }>): string | null {
+  if (extras.length === 0) return claudeMd;
+  const block = extras
+    .map((d) => `\n\n# === extra-doc: ${d.path} ===\n${d.content}`)
+    .join("");
+  return (claudeMd ?? "") + block;
+}
+
+// Translate a simple glob to a regex. Supports "*" (no slash) and "**"
+// (any depth). Other regex metacharacters are escaped. Patterns are matched
+// against POSIX-style paths relative to the project root.
+function globToRegex(glob: string): RegExp {
+  // NUL is fine here because globs can never legitimately contain raw NUL.
+  // Empty string would build a regex with .* between every char.
+  const placeholder = "\u0000";
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, placeholder)
+    .replace(/\*/g, "[^/]*")
+    .replace(new RegExp(placeholder, "g"), ".*");
+  return new RegExp("^" + escaped + "$");
+}
+
+async function collectExtraDocs(
+  projectRoot: string,
+  patterns: string[],
+  perPatternCap: number,
+  charLimit: number,
+): Promise<Array<{ path: string; content: string }>> {
+  const collected: Array<{ path: string; content: string }> = [];
+  const regexes = patterns.map(globToRegex);
+  // One walk of the tree, gated by perPatternCap counts.
+  const counts: number[] = new Array(patterns.length).fill(0);
+  const seen = new Set<string>();
+  async function walk(rel: string) {
+    const abs = rel ? join(projectRoot, rel) : projectRoot;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        await walk(childRel);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      for (let i = 0; i < regexes.length; i++) {
+        if (counts[i] >= perPatternCap) continue;
+        if (regexes[i].test(childRel) && !seen.has(childRel)) {
+          seen.add(childRel);
+          // Defence in depth against a glob that somehow ranges outside the
+          // project root (symlinks, edge cases in the regex). resolve() the
+          // candidate and refuse to read anything that escapes projectRoot.
+          const absPath = resolve(projectRoot, childRel);
+          const rootWithSep = resolve(projectRoot) + sep;
+          if (!absPath.startsWith(rootWithSep) && absPath !== resolve(projectRoot)) {
+            break;
+          }
+          try {
+            const buf = await readFile(absPath, "utf8");
+            collected.push({ path: childRel, content: buf.slice(0, charLimit) });
+            counts[i]++;
+          } catch { /* unreadable; skip */ }
+          break;
+        }
+      }
+    }
+  }
+  await walk("");
+  return collected;
 }
 
 async function readFirstExisting(dir: string, names: string[]): Promise<string | null> {
@@ -135,6 +228,9 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
       if (existing.profileHash !== p.profileHash || existing.active !== p.active) {
         // NOTE: included + sensitivity are user-managed via the dashboard.
         // The loader never overwrites them.
+        // searchKeywords is wiped on hash change so the gh-search fetcher
+        // re-derives them from the fresh content on its next run.
+        const hashChanged = existing.profileHash !== p.profileHash;
         await db
           .update(schema.projectProfiles)
           .set({
@@ -145,6 +241,7 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
             techSummary: p.techSummary,
             profileHash: p.profileHash,
             active: p.active,
+            ...(hashChanged ? { searchKeywords: null } : {}),
             updatedAt: now,
           })
           .where(eq(schema.projectProfiles.id, existing.id));

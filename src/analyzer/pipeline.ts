@@ -7,6 +7,7 @@ import { discoverLocalProjects, upsertProjects, type LocalProject } from "../pro
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
 import type { UserConfig } from "../scheduler/user-config";
+import { withRunConfig } from "./run-context";
 
 const HOURS = 36;
 
@@ -15,29 +16,40 @@ export async function runAnalysis(
   userId: number,
   cfg: UserConfig
 ): Promise<{ reposAnalyzed: number; matchesCreated: number }> {
-  // Pump per-user keys into env so triage/reason pick them up via their existing reads.
-  const prev = {
-    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-    GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-  };
-  if (cfg.deepseekApiKey) process.env.DEEPSEEK_API_KEY = cfg.deepseekApiKey;
-  if (cfg.anthropicApiKey) process.env.ANTHROPIC_API_KEY = cfg.anthropicApiKey;
-  if (cfg.githubToken) process.env.GITHUB_TOKEN = cfg.githubToken;
-
-  try {
-    return await runAnalysisInner(runId, userId);
-  } finally {
-    for (const [k, v] of Object.entries(prev)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
+  // Carry per-user config via AsyncLocalStorage instead of mutating process.env.
+  // The previous pattern raced across concurrent users — user B's malicious
+  // base URL could receive user A's API key when their pipelines interleaved
+  // around an await. The store binds to the async call tree, so a concurrent
+  // run never sees this run's config (and vice versa).
+  return withRunConfig(
+    {
+      llmPrimaryApiKey: cfg.llmPrimaryApiKey,
+      llmPrimaryBaseUrl: cfg.llmPrimaryBaseUrl,
+      llmPrimaryModel: cfg.llmPrimaryModel,
+      llmSensitiveApiKey: cfg.llmSensitiveApiKey,
+      llmSensitiveBaseUrl: cfg.llmSensitiveBaseUrl,
+      llmSensitiveModel: cfg.llmSensitiveModel,
+      llmSensitiveWireFormat: cfg.llmSensitiveWireFormat,
+      deepseekApiKey: cfg.deepseekApiKey,
+      anthropicApiKey: cfg.anthropicApiKey,
+      githubToken: cfg.githubToken,
+    },
+    () => runAnalysisInner(runId, userId)
+  );
 }
 
 async function runAnalysisInner(runId: number, userId: number) {
   const githubRoot = process.env.GITHUB_ROOT ?? process.cwd();
-  const discovered = await discoverLocalProjects(githubRoot);
+  const settings = await db
+    .select({ extraDocPaths: schema.userSettings.extraDocPaths })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, userId))
+    .get();
+  const extraDocPaths = (settings?.extraDocPaths ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const discovered = await discoverLocalProjects(githubRoot, { extraDocPaths });
   await upsertProjects(discovered, userId);
   // Read back THIS USER's project rows so included/sensitivity flags apply.
   const dbProjects = await db

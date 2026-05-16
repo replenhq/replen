@@ -1,3 +1,5 @@
+import { readRunOrEnv } from "../analyzer/run-context";
+
 const GH_API = "https://api.github.com";
 
 function headers(): Record<string, string> {
@@ -5,7 +7,8 @@ function headers(): Record<string, string> {
     "user-agent": "replen/0.1",
     accept: "application/vnd.github+json",
   };
-  if (process.env.GITHUB_TOKEN) h.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const tok = readRunOrEnv("githubToken", "GITHUB_TOKEN");
+  if (tok) h.authorization = `Bearer ${tok}`;
   return h;
 }
 
@@ -44,13 +47,33 @@ export async function fetchRepoMeta(owner: string, name: string): Promise<RepoMe
   };
 }
 
+// Hard cap on README bytes. Bigger than any legitimate human-written README;
+// the analyzer slices to 15K downstream anyway. Without a cap, a 100MB
+// README would load entirely into memory before slicing.
+const README_MAX_BYTES = 512 * 1024;
+
 export async function fetchReadme(owner: string, name: string): Promise<{ sha: string; md: string } | null> {
   const res = await fetch(`${GH_API}/repos/${owner}/${name}/readme`, {
     headers: { ...headers(), accept: "application/vnd.github.raw+json" },
   });
   if (!res.ok) return null;
-  const md = await res.text();
-  // GH returns a separate metadata endpoint for sha; for now hash content cheaply.
+  // Stream-read up to README_MAX_BYTES then abort. Avoids reading a
+  // gigantic file into memory before slicing.
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const md = (await res.text()).slice(0, README_MAX_BYTES);
+    return { sha: await sha1(md), md };
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (total < README_MAX_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  try { await reader.cancel(); } catch { /* already closed */ }
+  const md = new TextDecoder("utf-8").decode(Buffer.concat(chunks)).slice(0, README_MAX_BYTES);
   const sha = await sha1(md);
   return { sha, md };
 }

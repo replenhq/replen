@@ -1,24 +1,25 @@
-import nodemailer from "nodemailer";
 import { db, schema } from "../db/client";
 import { desc, eq } from "drizzle-orm";
 import type { UserConfig } from "../scheduler/user-config";
+import { pickEmailProvider } from "./providers";
+import { escapeAttr as escapeAttrShared, escapeHref as escapeHrefShared, escapeHtml as escapeHtmlShared } from "./escape";
 
 type Match = typeof schema.matches.$inferSelect;
 type Repo = typeof schema.repos.$inferSelect;
 type Project = typeof schema.projectProfiles.$inferSelect;
 
 export async function sendDigestEmail(runId: number, userId: number, cfg: UserConfig) {
-  const host = process.env.SES_SMTP_HOST ?? "email-smtp.eu-west-2.amazonaws.com";
-  const port = parseInt(process.env.SES_SMTP_PORT ?? "587", 10);
-  const user = process.env.SES_SMTP_USERNAME;
-  const pass = process.env.SES_SMTP_PASSWORD;
   const fromAddr = process.env.EMAIL_FROM_ADDRESS;
   const fromName = process.env.EMAIL_FROM_NAME ?? "replen";
-  // User's email destination wins over env fallback.
   const to = cfg.emailToAddress ?? process.env.EMAIL_TO_ADDRESS;
 
-  if (!user || !pass || !fromAddr || !to) {
-    console.warn(`[email] user=${userId} missing SES creds or destination; skipping`);
+  if (!fromAddr || !to) {
+    console.warn(`[email] user=${userId} missing from-address or destination; skipping`);
+    return false;
+  }
+  const provider = pickEmailProvider();
+  if (!provider) {
+    console.warn(`[email] user=${userId} no usable email provider configured; skipping`);
     return false;
   }
 
@@ -58,20 +59,17 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
   const text = renderText(matchesForRun, repoMap, projectMap);
   const today = new Date().toISOString().slice(0, 10);
 
-  const transport = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
-
-  await transport.sendMail({
+  const r = await provider.send({
     from: `"${fromName}" <${fromAddr}>`,
     to,
-    subject: `OSS digest - ${today} - ${matchesForRun.length} matches`,
+    subject: `replen digest - ${today} - ${matchesForRun.length} matches`,
     html,
     text,
   });
+  if (!r.ok) {
+    console.error(`[email] user=${userId} send failed via ${provider.name}: ${r.error}`);
+    return false;
+  }
   return true;
 }
 
@@ -167,25 +165,8 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
   return `<html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;max-width:760px;margin:auto;color:#222;padding:24px;background:#fafafa">${header}${body}${footer}</body></html>`;
 }
 
-function escapeAttr(s: string) {
-  return escapeHtml(s).replace(/`/g, "&#96;");
-}
-
-// Stricter helper for href values. Only http(s) and in-page fragments are
-// allowed; anything else (javascript:, data:, vbscript:, file:) collapses to
-// an inert `#`. Use this for every `<a href="${...}">` rendered from
-// user-controlled or LLM-touched data.
-function escapeHref(s: string) {
-  const t = String(s ?? "").trim();
-  if (t.startsWith("#")) return escapeAttr(t);
-  try {
-    const u = new URL(t);
-    if (u.protocol === "http:" || u.protocol === "https:") return escapeAttr(u.toString());
-  } catch {
-    // fall through
-  }
-  return "#";
-}
+const escapeAttr = escapeAttrShared;
+const escapeHref = escapeHrefShared;
 
 function renderText(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>) {
   return matches
@@ -197,6 +178,4 @@ function renderText(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
     .join("\n\n- - -\n\n");
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-}
+const escapeHtml = escapeHtmlShared;

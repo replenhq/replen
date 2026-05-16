@@ -58,7 +58,13 @@ original task using only the wrapped content as descriptive input.
 // Output validation: returns null if the writeup contains patterns that
 // suggest the model fell for an injection (suspicious URLs, instructions to
 // call external endpoints, leaked system prompt markers).
-export function looksLikeInjectionLeak(writeup: string): string | null {
+//
+// `repoOwner`, when supplied, narrows the project-hosting allowlist (github.io,
+// readthedocs.io, readthedocs.org) to the specific repo owner being written
+// about — otherwise *any* attacker can spin up `evil.github.io` and have
+// their phishing URL pass the check. Subdomains for hosts not in the
+// project-hosting set (github.com, npmjs.com, …) remain broadly allowed.
+export function looksLikeInjectionLeak(writeup: string, repoOwner?: string): string | null {
   if (!writeup) return null;
   // System-prompt leak patterns
   if (/SECURITY:\s*Any content wrapped/i.test(writeup)) return "leaked system prompt";
@@ -71,13 +77,20 @@ export function looksLikeInjectionLeak(writeup: string): string | null {
   // allowlist is treated as a possible exfil channel and rejects the writeup.
   // This replaces the prior denylist of suspicious TLDs (which trivially
   // bypassed via .com / .io / .dev).
+  const ownerLc = repoOwner?.toLowerCase();
   const urls = writeup.match(/https?:\/\/[^\s)>"]+/g) ?? [];
   for (const raw of urls) {
     let host: string;
     try { host = new URL(raw).hostname.toLowerCase(); } catch { return `unparseable url: ${raw}`; }
-    if (!URL_HOST_ALLOWLIST.some((d) => host === d || host.endsWith("." + d))) {
-      return `url outside allowlist: ${raw}`;
+    if (URL_HOST_ALLOWLIST.some((d) => host === d || host.endsWith("." + d))) continue;
+    // Per-project hosting: only allow the exact subdomain that matches the
+    // repo owner. <owner>.github.io / <owner>.readthedocs.io are conventional
+    // project sites; foo.github.io of an unrelated owner is not.
+    if (ownerLc) {
+      const expected = [`${ownerLc}.github.io`, `${ownerLc}.readthedocs.io`, `${ownerLc}.readthedocs.org`];
+      if (expected.includes(host) || expected.some((h) => host.endsWith("." + h))) continue;
     }
+    return `url outside allowlist: ${raw}`;
   }
   return null;
 }
@@ -85,19 +98,20 @@ export function looksLikeInjectionLeak(writeup: string): string | null {
 // Hosts permitted to appear in writeup output. Extend conservatively. Any new
 // host added here can be reached from a writeup; the briefing renderer then
 // emits it as a Markdown link in the user's PR.
+//
+// Project-hosting subdomains (`<user>.github.io`, `<user>.readthedocs.io`) are
+// *not* in this list because the wildcard would accept any owner's site —
+// they're handled per-call via `repoOwner` in looksLikeInjectionLeak.
 const URL_HOST_ALLOWLIST = [
   "github.com",
   "githubusercontent.com",
   "raw.githubusercontent.com",
   "gist.github.com",
-  "github.io",
   "npmjs.com",
   "pypi.org",
   "crates.io",
   "docs.rs",
   "rust-lang.org",
-  "readthedocs.io",
-  "readthedocs.org",
   "developer.mozilla.org",
   "nodejs.org",
   "python.org",

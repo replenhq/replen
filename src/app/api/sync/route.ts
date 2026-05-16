@@ -4,7 +4,8 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 
 // GET /api/sync?since=<iso8601>&user_id=<id>
 // Token-protected (still keyed on SYNC_TOKEN so the laptop CLI works without Firebase).
-// Always scoped to a specific user_id - required.
+// SYNC_TOKEN is bound to exactly one user_id (SYNC_USER_ID env). Other ids
+// return 403 — this is the laptop-CLI endpoint, not a cross-tenant fetcher.
 export async function GET(req: Request) {
   if (!authorized(req)) return new NextResponse("unauthorized", { status: 401 });
 
@@ -13,6 +14,13 @@ export async function GET(req: Request) {
   if (!userIdParam) return new NextResponse("user_id required", { status: 400 });
   const userId = Number(userIdParam);
   if (!Number.isFinite(userId)) return new NextResponse("user_id must be a number", { status: 400 });
+
+  const allowedUserId = Number(process.env.SYNC_USER_ID);
+  if (!Number.isFinite(allowedUserId)) {
+    console.error("[/api/sync] SYNC_USER_ID env var not set or not numeric — refusing");
+    return new NextResponse("server misconfigured", { status: 503 });
+  }
+  if (userId !== allowedUserId) return new NextResponse("forbidden", { status: 403 });
 
   const sinceParam = searchParams.get("since");
   const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
