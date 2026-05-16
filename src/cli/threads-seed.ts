@@ -30,6 +30,7 @@ import { eq } from "drizzle-orm";
 import { resolveGithubFromText, stripHtml } from "../fetchers/resolve-github";
 import { resolveUserConfig } from "../scheduler/user-config";
 import { parseEmbeddedPosts, type ThreadPost } from "../fetchers/threads-scrape";
+import { errorMsg } from "../lib/error-msg";
 
 const MOBILE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
@@ -45,9 +46,7 @@ type ProfileCtx = {
   embeddedPosts: ThreadPost[];
 };
 
-// ─────────────────────────────────────────────────────────────
 // Stage 1: load profile HTML, extract everything we need
-// ─────────────────────────────────────────────────────────────
 
 async function loadProfileContext(handle: string): Promise<ProfileCtx> {
   const url = `https://www.threads.com/@${encodeURIComponent(handle)}`;
@@ -109,9 +108,7 @@ function extractDocId(html: string): string | null {
 
 // parseEmbeddedPosts is shared with the daily fetcher - see ../fetchers/threads-scrape.ts
 
-// ─────────────────────────────────────────────────────────────
 // Stage 2: paginate via GraphQL
-// ─────────────────────────────────────────────────────────────
 
 async function paginateGraphql(
   ctx: ProfileCtx,
@@ -171,7 +168,7 @@ async function paginateGraphql(
         body: body.toString(),
       });
     } catch (e) {
-      return { posts: [...seen.values()], ok: false, reason: `fetch error: ${(e as any)?.message ?? e}` };
+      return { posts: [...seen.values()], ok: false, reason: `fetch error: ${errorMsg(e)}` };
     }
     if (!res.ok) {
       return { posts: [...seen.values()], ok: false, reason: `HTTP ${res.status}` };
@@ -225,9 +222,7 @@ function extractPostsFromGraphql(json: any): { posts: ThreadPost[]; nextCursor: 
   return { posts, nextCursor, hasNext };
 }
 
-// ─────────────────────────────────────────────────────────────
 // Stage 3: persist posts as candidates
-// ─────────────────────────────────────────────────────────────
 
 async function persistPost(userId: number, handle: string, post: ThreadPost): Promise<boolean> {
   const cleanText = stripHtml(post.text);
@@ -290,9 +285,7 @@ async function seedHandle(
   return { seen: posts.length, gh, inserted, via };
 }
 
-// ─────────────────────────────────────────────────────────────
 // CLI entry
-// ─────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
 const positional = args.filter((a) => !a.startsWith("--"));
@@ -338,7 +331,7 @@ for (const h of handles) {
     totalGh += r.gh;
     totalInserted += r.inserted;
   } catch (e) {
-    console.error(`  ${h}: failed`, (e as any)?.message ?? e);
+    console.error(`  ${h}: failed`, errorMsg(e));
   }
   await new Promise((r) => setTimeout(r, 2000));
 }

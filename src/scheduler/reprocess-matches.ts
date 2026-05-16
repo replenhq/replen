@@ -19,6 +19,7 @@ import { resolveUserConfig } from "./user-config";
 import type { LocalProject } from "../projects/loader";
 import type { SafetyReport } from "../scanner/safety";
 import { withRunConfig } from "../analyzer/run-context";
+import { errorMsg } from "../lib/error-msg";
 
 const DEFAULT_LIMIT = parseInt(process.env.REPROCESS_LIMIT ?? "25", 10);
 const DELETE_REJECTED = process.env.DELETE_REJECTED === "1";
@@ -177,7 +178,7 @@ async function reprocessForUserInner(userId: number, opts: ReprocessOpts): Promi
         fixed++;
         console.log(`  [ok] ${repo.owner}/${repo.name} → ${targetSlug} (${pa.relevance} ${pa.relevanceScore})`);
       } catch (e) {
-        console.error(`  [fail] match ${m.id}:`, (e as any)?.message ?? e);
+        console.error(`  [fail] match ${m.id}:`, errorMsg(e));
         skipped++;
       }
     }

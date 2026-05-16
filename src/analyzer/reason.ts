@@ -3,6 +3,7 @@ import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
+import { errorMsg } from "../lib/error-msg";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -22,9 +23,7 @@ export type ReasoningOutput = {
   perProject: ProjectAssessment[];
 };
 
-// ─────────────────────────────────────────────────────────────
 // Pass A: shortlist
-// ─────────────────────────────────────────────────────────────
 
 const SHORTLIST_SYSTEM = `You are deciding which of a software engineer's projects a newly-discovered open-source repo could plausibly plug into.
 
@@ -77,9 +76,7 @@ ${projectLines}`;
   }
 }
 
-// ─────────────────────────────────────────────────────────────
 // Pass B: deep writeup for a single (project, repo) pair
-// ─────────────────────────────────────────────────────────────
 
 const DEEP_SYSTEM = `You are a senior engineer writing a scoping note that helps your colleague decide whether a newly-discovered open-source repo is worth integrating into their specific project.
 
@@ -132,8 +129,8 @@ async function deepWriteup(safety: SafetyReport, project: LocalProject | null, o
   const isGeneral = !project;
   const projectName = project?.name ?? "_general";
 
-  // The user's OWN project README/CLAUDE.md is trusted by them - but still
-  // wrap it so the model never confuses it with system instructions.
+  // User docs are trusted but still wrapped so the model can't confuse them
+  // with system instructions; candidate README is hostile by default.
   const projectBlock = project
     ? `## Project: ${project.name} (slug: ${project.slug})
 
@@ -142,8 +139,6 @@ ${sanitizeUntrusted((project.readmeMd ?? "").slice(0, 8000), "PROJECT_README")}
 ${project.claudeMd ? sanitizeUntrusted(project.claudeMd.slice(0, 10000), "PROJECT_CLAUDE_MD") + "\n\n" : ""}Tech: ${project.techSummary ?? "(none)"}`
     : `## Target: _general (no specific project - write a general-awareness note)`;
 
-  // Candidate repo README is HOSTILE-by-default (we just discovered it from a
-  // post - could be anyone's). Always wrap.
   const repoBlock = `## Candidate repo: ${safety.meta.owner}/${safety.meta.name}
 
 URL: https://github.com/${safety.meta.owner}/${safety.meta.name}
@@ -242,9 +237,7 @@ function scrubWriteup(s: string): string {
   return sanitizeMarkdown(stripped);
 }
 
-// ─────────────────────────────────────────────────────────────
 // Orchestration
-// ─────────────────────────────────────────────────────────────
 
 export async function reasonAboutRepo(safety: SafetyReport, projects: LocalProject[]): Promise<ReasoningOutput> {
   // Only consider projects the user has explicitly opted in.
@@ -264,17 +257,21 @@ export async function reasonAboutRepo(safety: SafetyReport, projects: LocalProje
     return { oneLiner, safetyNotes: "", perProject: [] };
   }
 
-  const out: ProjectAssessment[] = [];
-  for (const slug of slugs) {
-    const project = slug === "_general" ? null : included.find((p) => p.slug === slug) ?? null;
-    if (slug !== "_general" && !project) continue;
-    try {
-      const result = await deepWriteup(safety, project, oneLiner);
-      if (result) out.push(result);
-    } catch (e) {
-      console.warn(`[deepWriteup] failed for ${slug}:`, (e as any)?.message ?? e);
-    }
-  }
+  // Per-project writeups are independent LLM calls; run them in parallel and
+  // tolerate per-project failure so one bad slug doesn't drop the whole repo.
+  const results = await Promise.all(
+    slugs.map(async (slug) => {
+      const project = slug === "_general" ? null : included.find((p) => p.slug === slug) ?? null;
+      if (slug !== "_general" && !project) return null;
+      try {
+        return await deepWriteup(safety, project, oneLiner);
+      } catch (e) {
+        console.warn(`[deepWriteup] failed for ${slug}:`, errorMsg(e));
+        return null;
+      }
+    })
+  );
+  const out = results.filter((r): r is ProjectAssessment => r !== null);
   return { oneLiner, safetyNotes: "", perProject: out };
 }
 

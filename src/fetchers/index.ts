@@ -28,43 +28,60 @@ export async function runFetchers(userId: number, cfg: UserConfig): Promise<{ in
 }
 
 async function runFetchersInner(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
-  let inserted = 0;
-  let total = 0;
   const now = new Date();
-
   const ctx = { detectedLanguages: cfg.detectedLanguages ?? null, userId };
 
-  for (const f of FETCHERS) {
-    let items: Awaited<ReturnType<Fetcher["run"]>> = [];
-    try {
-      items = await f.run(ctx);
-      console.log(`[fetch] user=${userId} ${f.name}: ${items.length} items`);
-    } catch (e) {
-      console.error(`[fetch] ${f.name} failed`, e);
-      continue;
-    }
-    total += items.length;
-    for (const it of items) {
+  // Fetchers are independent; run them in parallel so a slow one (threads)
+  // doesn't block the rest. Each failure is isolated.
+  const results = await Promise.all(
+    FETCHERS.map(async (f) => {
       try {
-        const result = await db
-          .insert(schema.candidates)
-          .values({
-            userId,
-            source: it.source,
-            sourceItemId: it.sourceItemId,
-            title: it.title,
-            url: it.url,
-            githubUrl: it.githubUrl,
-            author: it.author,
-            score: it.score,
-            postedAt: it.postedAt,
-            fetchedAt: now,
-            rawJson: JSON.stringify(it.raw),
-          })
-          .onConflictDoNothing({ target: [schema.candidates.userId, schema.candidates.source, schema.candidates.sourceItemId] });
-        if (result.rowsAffected > 0) inserted++;
+        const items = await f.run(ctx);
+        console.log(`[fetch] user=${userId} ${f.name}: ${items.length} items`);
+        return items;
       } catch (e) {
-        console.warn(`[fetch] insert failed for ${it.source}:${it.sourceItemId}`, e);
+        console.error(`[fetch] ${f.name} failed`, e);
+        return [];
+      }
+    })
+  );
+  const items = results.flat();
+  const total = items.length;
+  if (total === 0) return { inserted: 0, total: 0 };
+
+  // Single batched insert per run. SQLite ON CONFLICT DO NOTHING handles
+  // duplicate (userId, source, sourceItemId) tuples cheaply.
+  const rows = items.map((it) => ({
+    userId,
+    source: it.source,
+    sourceItemId: it.sourceItemId,
+    title: it.title,
+    url: it.url,
+    githubUrl: it.githubUrl,
+    author: it.author,
+    score: it.score,
+    postedAt: it.postedAt,
+    fetchedAt: now,
+    rawJson: JSON.stringify(it.raw),
+  }));
+  let inserted = 0;
+  try {
+    const result = await db
+      .insert(schema.candidates)
+      .values(rows)
+      .onConflictDoNothing({ target: [schema.candidates.userId, schema.candidates.source, schema.candidates.sourceItemId] });
+    inserted = result.rowsAffected;
+  } catch (e) {
+    console.warn(`[fetch] batch insert failed; falling back to per-row`, e);
+    for (const row of rows) {
+      try {
+        const r = await db
+          .insert(schema.candidates)
+          .values(row)
+          .onConflictDoNothing({ target: [schema.candidates.userId, schema.candidates.source, schema.candidates.sourceItemId] });
+        if (r.rowsAffected > 0) inserted++;
+      } catch (err) {
+        console.warn(`[fetch] insert failed for ${row.source}:${row.sourceItemId}`, err);
       }
     }
   }

@@ -1,5 +1,5 @@
 import { db, schema } from "../db/client";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import type { UserConfig } from "../scheduler/user-config";
 import { pickEmailProvider } from "./providers";
 import { escapeAttr as escapeAttrShared, escapeHref as escapeHrefShared, escapeHtml as escapeHtmlShared } from "./escape";
@@ -43,16 +43,15 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
 
   const repoIds = [...new Set(matchesForRun.map((m) => m.repoId))];
   const repoMap = new Map<number, Repo>();
-  for (const id of repoIds) {
-    const r = await db.select().from(schema.repos).where(eq(schema.repos.id, id)).get();
-    if (r) repoMap.set(id, r);
+  if (repoIds.length > 0) {
+    const rs = await db.select().from(schema.repos).where(inArray(schema.repos.id, repoIds));
+    for (const r of rs) repoMap.set(r.id, r);
   }
+  const projectIds = [...new Set(matchesForRun.map((m) => m.projectId).filter((id): id is number => id !== null))];
   const projectMap = new Map<number, Project>();
-  for (const m of matchesForRun) {
-    if (m.projectId && !projectMap.has(m.projectId)) {
-      const p = await db.select().from(schema.projectProfiles).where(eq(schema.projectProfiles.id, m.projectId)).get();
-      if (p) projectMap.set(m.projectId, p);
-    }
+  if (projectIds.length > 0) {
+    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    for (const p of ps) projectMap.set(p.id, p);
   }
 
   const html = renderHtml(matchesForRun, repoMap, projectMap);

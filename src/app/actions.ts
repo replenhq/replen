@@ -5,6 +5,7 @@ import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
 import { readUserSecret } from "@/lib/user-secrets";
+import { errorMsg } from "@/lib/error-msg";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
 import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
 
@@ -51,7 +52,6 @@ export async function createHandoff(matchId: number): Promise<{ ok: boolean; prU
   const user = await requireUser();
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
 
-  // 1. Validate ownership + gather context.
   const match = await db
     .select()
     .from(schema.matches)
@@ -75,13 +75,11 @@ export async function createHandoff(matchId: number): Promise<{ ok: boolean; prU
   if (!repo) return { ok: false, reason: "repo missing" };
 
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
-  // Single PAT model: prefer githubToken, fall back to githubWriteToken for
-  // anyone still on the old two-field schema.
+  // githubWriteToken fallback for legacy rows on the old two-field schema.
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
   const writeToken = tokenStored ? await safeReadSecret(user.id, "githubToken", tokenStored, "create-handoff") : null;
   if (!writeToken) return { ok: false, reason: "add a GitHub PAT on /settings first (Contents: write + Pull requests: write)" };
 
-  // 2. Render the file + PR metadata.
   const filePath = handoffFilePath(repo.owner, repo.name);
   const branch = handoffBranchName(repo.owner, repo.name);
   const fileContent = renderHandoff(
@@ -105,7 +103,6 @@ Match relevance: ${safeRelevance}${match.relevanceScore != null ? ` (${match.rel
 
 Merge or close - either way the next handoff goes into its own PR.`;
 
-  // 3. Open the PR.
   let result;
   try {
     result = await createHandoffPR({
@@ -119,14 +116,13 @@ Merge or close - either way the next handoff goes into its own PR.`;
     });
   } catch (e) {
     console.error("[createHandoff]", e);
-    return { ok: false, reason: (e as any)?.message ?? "github api error" };
+    return { ok: false, reason: errorMsg(e) || "github api error" };
   }
 
   if (result.skipped === "file_exists") {
     return { ok: false, reason: `${filePath} already exists on the default branch - skipped` };
   }
 
-  // 4. Persist the PR URL so the UI knows not to re-offer the button.
   await db
     .update(schema.matches)
     .set({ handoffPrUrl: result.prUrl, handoffCreatedAt: new Date() })

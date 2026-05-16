@@ -15,6 +15,7 @@
 import { db, schema } from "../db/client";
 import { resolveGithubFromText, stripHtml } from "../fetchers/resolve-github";
 import { resolveUserConfig } from "../scheduler/user-config";
+import { errorMsg } from "../lib/error-msg";
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15";
@@ -170,7 +171,7 @@ for (const h of handles) {
     totalGh += gh;
     totalInserted += inserted;
   } catch (e) {
-    console.error(`  ${h}: failed`, (e as any)?.message ?? e);
+    console.error(`  ${h}: failed`, errorMsg(e));
   }
   await new Promise((r) => setTimeout(r, 1500));
 }

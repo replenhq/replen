@@ -33,7 +33,6 @@ export type SecretReason =
   | "webhook-send"
   | "other";
 
-// Fetch the user's DEK ciphertext (or null) without invoking the master key.
 async function fetchDekCiphertext(userId: number): Promise<string | null> {
   const row = await db
     .select({ dek: schema.users.dekCiphertext })
@@ -43,8 +42,6 @@ async function fetchDekCiphertext(userId: number): Promise<string | null> {
   return row?.dek ?? null;
 }
 
-// Lazily create + persist a per-user DEK if one isn't there yet. Returns the
-// raw key bytes for in-memory use within the caller's stack frame.
 async function getOrCreateDek(userId: number): Promise<Buffer> {
   const existing = await fetchDekCiphertext(userId);
   if (existing) return unwrapDek(existing);

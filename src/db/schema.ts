@@ -1,8 +1,6 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-// ─────────────────────────────────────────────────────────────
 // Phase 2: users + per-user settings
-// ─────────────────────────────────────────────────────────────
 
 export const users = sqliteTable(
   "users",
@@ -334,22 +332,28 @@ export const secretAccessLog = sqliteTable(
   })
 );
 
-export const digestRuns = sqliteTable("digest_runs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
-  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  finishedAt: integer("finished_at", { mode: "timestamp" }),
-  candidatesFound: integer("candidates_found").default(0),
-  reposAnalyzed: integer("repos_analyzed").default(0),
-  matchesCreated: integer("matches_created").default(0),
-  emailSent: integer("email_sent", { mode: "boolean" }).default(false),
-  errorLog: text("error_log"),
-  deepseekInputTokens: integer("deepseek_input_tokens").default(0),
-  deepseekOutputTokens: integer("deepseek_output_tokens").default(0),
-  anthropicInputTokens: integer("anthropic_input_tokens").default(0),
-  anthropicOutputTokens: integer("anthropic_output_tokens").default(0),
-  costUsd: real("cost_usd").default(0),
-  // If the run was skipped/aborted before reaching analysis, the reason.
-  // e.g. 'cost-cap', 'no-candidates', 'no-projects'.
-  pausedReason: text("paused_reason"),
-});
+export const digestRuns = sqliteTable(
+  "digest_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp" }),
+    candidatesFound: integer("candidates_found").default(0),
+    reposAnalyzed: integer("repos_analyzed").default(0),
+    matchesCreated: integer("matches_created").default(0),
+    emailSent: integer("email_sent", { mode: "boolean" }).default(false),
+    errorLog: text("error_log"),
+    deepseekInputTokens: integer("deepseek_input_tokens").default(0),
+    deepseekOutputTokens: integer("deepseek_output_tokens").default(0),
+    anthropicInputTokens: integer("anthropic_input_tokens").default(0),
+    anthropicOutputTokens: integer("anthropic_output_tokens").default(0),
+    costUsd: real("cost_usd").default(0),
+    // If the run was skipped/aborted before reaching analysis, the reason.
+    // e.g. 'cost-cap', 'no-candidates', 'no-projects'.
+    pausedReason: text("paused_reason"),
+  },
+  (t) => ({
+    idxUserTime: index("idx_digest_runs_user_time").on(t.userId, t.startedAt),
+  })
+);

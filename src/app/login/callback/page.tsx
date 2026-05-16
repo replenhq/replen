@@ -63,7 +63,7 @@ export default function CallbackPage() {
         throw new Error(msg);
       }
       router.push("/");
-    } catch (e: any) {
+    } catch (e) {
       setErr(prettyErr(e));
       setState("error");
     }
@@ -132,8 +132,8 @@ export default function CallbackPage() {
   );
 }
 
-function prettyErr(e: any): string {
-  const code = e?.code ?? "";
+function prettyErr(e: unknown): string {
+  const code = (e as { code?: string })?.code ?? "";
   switch (code) {
     case "auth/invalid-action-code":
     case "auth/expired-action-code":
@@ -141,6 +141,6 @@ function prettyErr(e: any): string {
     case "auth/invalid-email":
       return "That email didn't match the one this link was sent to.";
     default:
-      return e?.message ?? "Sign-in failed. Try requesting a new link.";
+      return e instanceof Error ? e.message : "Sign-in failed. Try requesting a new link.";
   }
 }

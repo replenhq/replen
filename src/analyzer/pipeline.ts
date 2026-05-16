@@ -16,11 +16,8 @@ export async function runAnalysis(
   userId: number,
   cfg: UserConfig
 ): Promise<{ reposAnalyzed: number; matchesCreated: number }> {
-  // Carry per-user config via AsyncLocalStorage instead of mutating process.env.
-  // The previous pattern raced across concurrent users — user B's malicious
-  // base URL could receive user A's API key when their pipelines interleaved
-  // around an await. The store binds to the async call tree, so a concurrent
-  // run never sees this run's config (and vice versa).
+  // Carry per-user config via AsyncLocalStorage; mutating process.env raced
+  // concurrent runs and could leak user A's API key to user B's base URL.
   return withRunConfig(
     {
       llmPrimaryApiKey: cfg.llmPrimaryApiKey,
@@ -69,6 +66,7 @@ async function runAnalysisInner(runId: number, userId: number) {
     sensitivity: (p.sensitivity as "low" | "high") ?? "low",
     llmProvider: (p.llmProvider as "auto" | "deepseek" | "anthropic") ?? "auto",
   }));
+  const projectIdBySlug = new Map(dbProjects.map((p) => [p.slug, p.id]));
 
   const since = new Date(Date.now() - HOURS * 3600 * 1000);
   const cands = await db
@@ -77,14 +75,10 @@ async function runAnalysisInner(runId: number, userId: number) {
     .where(and(eq(schema.candidates.userId, userId), gte(schema.candidates.fetchedAt, since), isNotNull(schema.candidates.githubUrl)))
     .orderBy(desc(schema.candidates.score));
 
-  // Per-user source quality multipliers from past feedback. Used to reorder
-  // targets so well-validated sources get analysed first within the run budget
-  // (LLM budget is finite; if we get cut off, we want the best sources first).
   const weights = await getSourceQualityWeights(userId);
 
-  // Pick best source per repo (lowest sourceRank wins) so the match gets the
-  // richest-media attribution. If TikTok and gh-trending both surface a repo,
-  // we credit TikTok.
+  // Pick best source per repo (lowest sourceRank wins) so the match credits
+  // the richest-media discovery (TikTok beats gh-trending, etc.).
   const bestSourceByKey = new Map<string, string>();
   const scoreByKey = new Map<string, number>();
   const targets: { owner: string; name: string; key: string }[] = [];
@@ -212,7 +206,7 @@ async function runAnalysisInner(runId: number, userId: number) {
           pa,
           safety
         );
-        const pid = project ? await getUserProjectId(userId, project.slug) : null;
+        const pid = project ? projectIdBySlug.get(project.slug) ?? null : null;
         await db.insert(schema.matches).values({
           userId,
           repoId: repoRow.id,
@@ -290,11 +284,3 @@ async function upsertRepo(safety: SafetyReport, t: { owner: string; name: string
   return ins!;
 }
 
-async function getUserProjectId(userId: number, slug: string): Promise<number | null> {
-  const r = await db
-    .select({ id: schema.projectProfiles.id })
-    .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.slug, slug)))
-    .get();
-  return r?.id ?? null;
-}

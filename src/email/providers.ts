@@ -22,7 +22,7 @@ export interface EmailProvider {
   send(msg: EmailMessage): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
-// ── SMTP / SES adapter ────────────────────────────────────────
+// SMTP / SES adapter
 
 class SmtpProvider implements EmailProvider {
   readonly name = "smtp";
@@ -49,7 +49,7 @@ class SmtpProvider implements EmailProvider {
   }
 }
 
-// ── Resend adapter ────────────────────────────────────────────
+// Resend adapter
 
 class ResendProvider implements EmailProvider {
   readonly name = "resend";
@@ -82,7 +82,7 @@ class ResendProvider implements EmailProvider {
   }
 }
 
-// ── Provider picker ───────────────────────────────────────────
+// Provider picker
 
 export function pickEmailProvider(): EmailProvider | null {
   const kind = (process.env.EMAIL_PROVIDER ?? "ses").toLowerCase();

@@ -34,7 +34,7 @@ export default function LoginPage() {
       await sendSignInLinkToEmail(auth, email, { url, handleCodeInApp: true });
       window.localStorage.setItem(EMAIL_STORAGE_KEY, email);
       setSent(true);
-    } catch (e: any) {
+    } catch (e) {
       setErr(prettyErr(e));
     } finally {
       setBusy(false);
@@ -88,8 +88,8 @@ export default function LoginPage() {
   );
 }
 
-function prettyErr(e: any): string {
-  const code = e?.code ?? "";
+function prettyErr(e: unknown): string {
+  const code = (e as { code?: string })?.code ?? "";
   switch (code) {
     case "auth/invalid-email":
       return "That doesn't look like a valid email.";
@@ -102,6 +102,6 @@ function prettyErr(e: any): string {
     case "auth/unauthorized-continue-uri":
       return "Sign-in link target isn't authorised. Contact the operator.";
     default:
-      return e?.message ?? "Couldn't send the sign-in email. Try again in a moment.";
+      return e instanceof Error ? e.message : "Couldn't send the sign-in email. Try again in a moment.";
   }
 }

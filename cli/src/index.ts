@@ -64,8 +64,8 @@ async function main() {
     try {
       await unlink(configPath());
       console.log(`Forgot auth at ${configPath()}`);
-    } catch (e: any) {
-      if (e?.code === "ENOENT") {
+    } catch (e) {
+      if ((e as { code?: string })?.code === "ENOENT") {
         console.log(`No saved auth; nothing to forget.`);
       } else {
         throw e;

@@ -1,28 +1,13 @@
-// LLM clients. Provider-agnostic: two slots, swap in any vendor by setting the
-// corresponding env vars. Defaults shown below are convenient starter values,
-// not a recommendation — see README for the full provider list.
-//
-//   Primary slot   - used for triage + low-sensitivity reasoning.
-//                    Env: LLM_PRIMARY_API_KEY, LLM_PRIMARY_BASE_URL, LLM_PRIMARY_MODEL.
-//                    Wire format: OpenAI-compatible /chat/completions JSON.
-//   Sensitive slot - used for high-sensitivity projects (project_profiles.sensitivity='high').
-//                    Env: LLM_SENSITIVE_API_KEY, LLM_SENSITIVE_BASE_URL, LLM_SENSITIVE_MODEL.
-//                    Wire format: Anthropic /v1/messages by default; toggle via
-//                    LLM_SENSITIVE_WIRE_FORMAT=openai-compatible if your provider exposes
-//                    the OpenAI shape instead.
-//
+// Provider-agnostic LLM clients with two slots: Primary (OpenAI-compatible)
+// for triage/low-sensitivity reasoning, Sensitive (Anthropic by default)
+// for high-sensitivity projects. Per-user config flows via AsyncLocalStorage
+// in run-context.ts so concurrent pipelines can't see each other's keys.
 // Legacy env names DEEPSEEK_* / ANTHROPIC_* still work as aliases.
-//
-// Per-user config (key, base URL, model, wire format) is carried via
-// AsyncLocalStorage in run-context.ts — never via process.env mutation.
-// See SECURITY.md "Per-user config" for the cross-tenant risk this avoids.
 
 import { readRunOrEnv, hasUserBaseUrlOverride } from "./run-context";
 import { resolveSafeWithPinnedDispatcher, validateWebhookUrl } from "../lib/url-guard";
 import type { Agent } from "undici";
 
-// Read at request time so per-user overrides (carried via AsyncLocalStorage)
-// take precedence over the operator's shared env vars.
 function primaryBase(): string {
   return (readRunOrEnv("llmPrimaryBaseUrl", "LLM_PRIMARY_BASE_URL", "DEEPSEEK_BASE_URL") ?? "https://api.deepseek.com").replace(/\/$/, "");
 }
@@ -33,13 +18,9 @@ function sensitiveWire(): string {
   return (readRunOrEnv("llmSensitiveWireFormat", "LLM_SENSITIVE_WIRE_FORMAT") ?? "anthropic").toLowerCase();
 }
 
-// SSRF guard: resolve and reject private / loopback / link-local addresses
-// before each outbound LLM fetch. Without this a user could set their base
-// URL to http://169.254.169.254/... and exfiltrate the shared env API key.
-// The returned dispatcher pins the connection to the validated address so a
-// hostile resolver cannot rebind between resolve and fetch.
-// `slot` controls whether a shared/env key is permitted at all: if the user
-// has overridden the base URL, only a per-user key may be sent.
+// SSRF guard + DNS-rebind defence for outbound LLM calls. Without this a
+// user could point their base URL at 169.254.169.254 and exfiltrate the
+// shared env API key.
 async function safeLlmUrl(base: string, path: string, slot: "primary" | "sensitive"): Promise<{ url: URL; dispatcher: Agent }> {
   const target = base.replace(/\/$/, "") + path;
   const syntactic = validateWebhookUrl(target);
@@ -49,9 +30,8 @@ async function safeLlmUrl(base: string, path: string, slot: "primary" | "sensiti
   return { url: pinned.url, dispatcher: pinned.dispatcher };
 }
 
-// Reject the operator's shared env key when the user has pointed the request
-// at their own base URL. Otherwise the shared key would be sent to whatever
-// arbitrary endpoint the user picked, which is an exfil channel.
+// Refuse the operator's shared env key when the user has overridden the base
+// URL — otherwise that key would be sent to whatever endpoint they picked.
 function pickApiKey(slot: "primary" | "sensitive"): string {
   const cfgKey = slot === "primary"
     ? readRunOrEnv("llmPrimaryApiKey")
@@ -62,7 +42,6 @@ function pickApiKey(slot: "primary" | "sensitive"): string {
       `refusing to send shared ${slot} key to a user-overridden base URL — set a per-user API key on /settings to use a custom endpoint`
     );
   }
-  // Legacy aliases + env fallback.
   if (slot === "primary") {
     const k = readRunOrEnv("deepseekApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY");
     if (!k) throw new Error("LLM_PRIMARY_API_KEY (or legacy DEEPSEEK_API_KEY) not set");
@@ -73,16 +52,11 @@ function pickApiKey(slot: "primary" | "sensitive"): string {
   return k;
 }
 
-// Module-load reads kept as fallbacks for callers that don't run inside a
-// withRunConfig() scope (e.g. one-off CLI scripts). Per-user pipelines should
-// always run inside the scope, where the dynamic readers above take over.
+// Module-load fallbacks for callers outside a withRunConfig() scope (CLI scripts).
 export const TRIAGE_MODEL = process.env.TRIAGE_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
 export const REASONING_MODEL = process.env.REASONING_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
 export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? process.env.LLM_SENSITIVE_MODEL ?? "claude-opus-4-7";
 
-// Provider identifiers retained for backward-compatible accounting in
-// digest_runs and the cost dashboard. "primary"/"sensitive" are the new
-// semantic slots; "deepseek"/"anthropic" remain valid aliases.
 export type Provider = "deepseek" | "anthropic";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -104,6 +78,13 @@ export type ChatResponse = {
   };
 };
 
+type AnthropicMessagesResponse = {
+  id: string;
+  stop_reason?: string;
+  content?: Array<{ type: string; text?: string }>;
+  usage?: { input_tokens: number; output_tokens: number };
+};
+
 export async function chatCompletion(
   req: ChatRequest,
   opts: { timeoutMs?: number; retries?: number } = {}
@@ -123,10 +104,8 @@ export async function chatCompletion(
   return res;
 }
 
-// ─────────────────────────────────────────────────────────────
 // Per-run usage tracking. The pipeline calls beginUsageTracking()
 // before doing any LLM work and endUsageTracking() to drain the totals.
-// ─────────────────────────────────────────────────────────────
 
 export type LlmCall = {
   provider: Provider;
@@ -176,11 +155,9 @@ export function hasAnthropicKey(): boolean {
     ?? readRunOrEnv("anthropicApiKey", "ANTHROPIC_API_KEY"));
 }
 
-// ─────────────────────────────────────────────────────────────
 // Primary slot (OpenAI-compatible /chat/completions wire format).
 // Works with DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter,
 // local llama.cpp / ollama servers, anything that speaks OpenAI's chat API.
-// ─────────────────────────────────────────────────────────────
 async function deepseekCompletion(req: ChatRequest, opts: { timeoutMs?: number; retries?: number }): Promise<ChatResponse> {
   const apiKey = pickApiKey("primary");
   const timeoutMs = opts.timeoutMs ?? 90_000;
@@ -209,12 +186,10 @@ async function deepseekCompletion(req: ChatRequest, opts: { timeoutMs?: number; 
   );
 }
 
-// ─────────────────────────────────────────────────────────────
 // Sensitive slot. Wire format defaults to Anthropic's /v1/messages.
 // Set LLM_SENSITIVE_WIRE_FORMAT=openai-compatible to use the same OpenAI-shaped
 // path as the primary slot (lets you route sensitive projects to e.g. a
 // privately-hosted OpenAI-compatible model on infra you control).
-// ─────────────────────────────────────────────────────────────
 async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number; retries?: number }): Promise<ChatResponse> {
   const apiKey = pickApiKey("sensitive");
   const timeoutMs = opts.timeoutMs ?? 180_000;
@@ -275,12 +250,11 @@ async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number;
         body: JSON.stringify(body),
         dispatcher: pinned.dispatcher,
       } as any);
-      // Convert Anthropic shape -> ChatResponse before returning to the retry helper.
-      // We need to make this fetch return JSON the helper can parse uniformly, so wrap.
+      // Convert Anthropic /v1/messages shape into ChatResponse for the retry helper.
       if (!res.ok) return res;
-      const j = (await res.json()) as any;
-      const text = (j.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
-      const adapted = {
+      const j = (await res.json()) as AnthropicMessagesResponse;
+      const text = (j.content ?? []).map((c) => (c.type === "text" ? c.text ?? "" : "")).join("");
+      const adapted: ChatResponse = {
         id: j.id,
         choices: [
           {
@@ -300,9 +274,7 @@ async function anthropicCompletion(req: ChatRequest, opts: { timeoutMs?: number;
   );
 }
 
-// ─────────────────────────────────────────────────────────────
 // Shared retry helper
-// ─────────────────────────────────────────────────────────────
 async function doWithRetry(
   fetchFn: () => Promise<Response>,
   label: string,

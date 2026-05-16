@@ -65,7 +65,7 @@ export function isEncrypted(s: string | null | undefined): boolean {
   return typeof s === "string" && (s.startsWith(PREFIX_V1) || s.startsWith(PREFIX_V2));
 }
 
-// ── v1 raw envelope (used for the DEK ciphertext and legacy rows) ──────────
+// v1 raw envelope (used for the DEK ciphertext and legacy rows)
 
 function encryptWith(key: Buffer, plaintext: string, prefix: string, header = ""): string {
   const iv = randomBytes(12);
@@ -107,7 +107,7 @@ export function decryptSecret(stored: string | null | undefined): string | null 
   return stored; // legacy unencrypted - returned as-is
 }
 
-// ── per-tenant DEK helpers ────────────────────────────────────────────────
+// per-tenant DEK helpers
 
 // Returns a freshly generated 32-byte DEK and its v1 ciphertext (encrypted
 // under the master KEK). Caller persists the ciphertext on users.dek_ciphertext.

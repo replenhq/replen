@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     return NextResponse.json({ user });
-  } catch (e: any) {
+  } catch (e) {
     console.error("[/api/whoami]", e);
     return NextResponse.json({ error: "internal" }, { status: 500 });
   }

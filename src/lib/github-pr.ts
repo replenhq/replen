@@ -51,7 +51,6 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
 
   const client: GhClient = { token: input.token };
 
-  // 1. Get the repo (default_branch + permissions check)
   const repoInfo = await ghJson<{ default_branch: string; permissions?: { push?: boolean } }>(
     client,
     `/repos/${owner}/${repo}`
@@ -61,7 +60,6 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
   }
   const defaultBranch = repoInfo.default_branch;
 
-  // 2. Check whether the file already exists on the default branch - skip if so.
   const existsRes = await gh(
     client,
     `/repos/${owner}/${repo}/contents/${encodeURIPathSegments(input.filePath)}?ref=${encodeURIComponent(defaultBranch)}`
@@ -70,13 +68,12 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
     return { prUrl: "", skipped: "file_exists" };
   }
 
-  // 3. Resolve the default-branch tip SHA so we can create our branch from it.
   const tip = await ghJson<{ object: { sha: string } }>(
     client,
     `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(defaultBranch)}`
   );
 
-  // 4. Create the branch. If it already exists (idempotency on retry), keep going.
+  // 422 here means the branch already exists — fine on retry.
   const branchRes = await gh(client, `/repos/${owner}/${repo}/git/refs`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -87,7 +84,6 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
     throw new Error(`branch create failed: ${branchRes.status} ${body.slice(0, 300)}`);
   }
 
-  // 5. Commit the file onto the new branch.
   await ghJson(client, `/repos/${owner}/${repo}/contents/${encodeURIPathSegments(input.filePath)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -98,7 +94,6 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
     }),
   });
 
-  // 6. Open the PR.
   const pr = await ghJson<{ html_url: string }>(client, `/repos/${owner}/${repo}/pulls`, {
     method: "POST",
     headers: { "content-type": "application/json" },

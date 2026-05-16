@@ -105,13 +105,22 @@ export async function runPipeline() {
     return;
   }
 
-  for (const u of activeUsers) {
-    try {
-      await runPipelineForUser(u.id);
-    } catch (e) {
-      console.error(`[pipeline] user=${u.id} (${u.email}) failed`, e);
+  // Parallelise with a small cap so a slow user doesn't stall the queue, but
+  // we don't thunder on GitHub / LLM quota either.
+  const CONCURRENCY = parseInt(process.env.PIPELINE_USER_CONCURRENCY ?? "3", 10);
+  const queue = [...activeUsers];
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const u = queue.shift();
+      if (!u) return;
+      try {
+        await runPipelineForUser(u.id);
+      } catch (e) {
+        console.error(`[pipeline] user=${u.id} (${u.email}) failed`, e);
+      }
     }
-  }
+  });
+  await Promise.all(workers);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

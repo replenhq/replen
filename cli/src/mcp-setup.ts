@@ -43,8 +43,9 @@ export async function setupMcp(token: string, base: string): Promise<void> {
   let config: Record<string, unknown>;
   try {
     config = readJson(CONFIG_PATH);
-  } catch (e: any) {
-    console.error(`  ✗ ${CONFIG_PATH} is not valid JSON: ${e.message}`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`  ✗ ${CONFIG_PATH} is not valid JSON: ${msg}`);
     console.error(`    Fix the file manually and run \`replen mcp setup\`.`);
     process.exit(1);
   }

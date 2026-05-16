@@ -1,5 +1,5 @@
 import { db, schema } from "../db/client";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 import { resolveSafeWithPinnedDispatcher, validateWebhookUrl } from "../lib/url-guard";
 
 // Real-time alert for high-relevance matches in a just-finished run. POSTs
@@ -28,16 +28,15 @@ export async function sendHighRelevanceWebhook(
 
   const repoIds = [...new Set(matches.map((m) => m.repoId))];
   const repos = new Map<number, typeof schema.repos.$inferSelect>();
-  for (const id of repoIds) {
-    const r = await db.select().from(schema.repos).where(eq(schema.repos.id, id)).get();
-    if (r) repos.set(id, r);
+  if (repoIds.length > 0) {
+    const rs = await db.select().from(schema.repos).where(inArray(schema.repos.id, repoIds));
+    for (const r of rs) repos.set(r.id, r);
   }
+  const projectIds = [...new Set(matches.map((m) => m.projectId).filter((id): id is number => id !== null))];
   const projects = new Map<number, typeof schema.projectProfiles.$inferSelect>();
-  for (const m of matches) {
-    if (m.projectId && !projects.has(m.projectId)) {
-      const p = await db.select().from(schema.projectProfiles).where(eq(schema.projectProfiles.id, m.projectId)).get();
-      if (p) projects.set(m.projectId, p);
-    }
+  if (projectIds.length > 0) {
+    const ps = await db.select().from(schema.projectProfiles).where(inArray(schema.projectProfiles.id, projectIds));
+    for (const p of ps) projects.set(p.id, p);
   }
 
   const lines = matches.map((m) => {

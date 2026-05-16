@@ -87,7 +87,7 @@ export async function resolveGithubFromText(text: string): Promise<Resolution | 
       headers: ghHeaders(),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { items?: any[] };
+    const data = (await res.json()) as GhSearchResponse;
     const top = data.items?.[0];
     if (!top) return null;
     return {
@@ -103,17 +103,27 @@ export async function resolveGithubFromText(text: string): Promise<Resolution | 
   return null;
 }
 
+type GhRepo = {
+  html_url: string;
+  name: string;
+  owner?: { login?: string };
+  stargazers_count?: number;
+  description?: string | null;
+};
+
+type GhSearchResponse = { items?: GhRepo[] };
+
 async function tryRepo(owner: string, name: string) {
   const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
     headers: ghHeaders(),
   });
   if (!res.ok) return null;
-  const j: any = await res.json();
+  const j = (await res.json()) as GhRepo;
   return {
-    url: j.html_url as string,
-    owner: j.owner?.login as string,
-    name: j.name as string,
-    stars: j.stargazers_count as number,
-    description: (j.description as string | null) ?? null,
+    url: j.html_url,
+    owner: j.owner?.login ?? "",
+    name: j.name,
+    stars: j.stargazers_count ?? 0,
+    description: j.description ?? null,
   };
 }
