@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
 import { NavLink } from "@/components/NavLink";
+import { UserMenu } from "@/components/UserMenu";
 
 export const metadata = { title: "Replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
@@ -97,8 +98,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Wordmark />
             </a>
             <NavLink href="/">today</NavLink>
-            <NavLink href="/projects">projects</NavLink>
-            <NavLink href="/sources">sources</NavLink>
             <form className="search" action="/search" method="get" role="search">
               <Icon name="search" size={14} />
               <input name="q" placeholder="search…" aria-label="Search" />
@@ -123,12 +122,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               </a>
             )}
             <div className="spacer" />
-            <NavLink href="/settings">settings</NavLink>
-            {user.role === "admin" && <NavLink href="/admin">admin</NavLink>}
-            <NavLink href="/runs">runs</NavLink>
-            <span className="user">
-              {user.email} · <a href="/api/logout">sign out</a>
-            </span>
+            <UserMenu email={user.email} isAdmin={user.role === "admin"} />
           </header>
         )}
         {user && !isActive && (
@@ -137,9 +131,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Wordmark />
             </span>
             <div className="spacer" />
-            <span className="user">
-              {user.email} · <a href="/api/logout">sign out</a>
-            </span>
+            <UserMenu email={user.email} isAdmin={false} />
           </header>
         )}
         <main>{children}</main>

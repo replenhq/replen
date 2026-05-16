@@ -27,12 +27,14 @@ body {
   font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   font-size: 14.5px; line-height: 1.55;
   min-height: 100vh;
+  isolation: isolate;
 }
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1;
   background:
-    radial-gradient(900px 600px at 12% -5%, rgba(255, 200, 87, 0.05) 0%, transparent 60%),
-    radial-gradient(800px 500px at 92% 0%, rgba(255, 255, 255, 0.025) 0%, transparent 60%),
+    radial-gradient(900px 700px at 8% -10%, rgba(255, 200, 87, 0.18) 0%, transparent 60%),
+    radial-gradient(800px 600px at 95% 0%, rgba(111, 206, 130, 0.10) 0%, transparent 60%),
+    radial-gradient(600px 500px at 50% 110%, rgba(255, 200, 87, 0.08) 0%, transparent 60%),
     var(--bg);
 }
 
@@ -48,9 +50,9 @@ a:hover { color: var(--amber); }
 header {
   position: sticky; top: 12px; z-index: 5;
   margin: 14px 16px 24px;
-  background: rgba(18, 19, 21, 0.6);
-  backdrop-filter: saturate(160%) blur(20px);
-  -webkit-backdrop-filter: saturate(160%) blur(20px);
+  background: rgba(18, 19, 21, 0.35);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  backdrop-filter: saturate(180%) blur(10px);
   border: 1px solid var(--line-strong);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   border-radius: 18px;
@@ -98,13 +100,74 @@ header .counter:hover { background: var(--surface-2); color: var(--fg); }
 header .user { color: var(--faint); font-size: 12px; margin-left: 12px; }
 header .user a { padding: 0 4px; }
 
+/* User menu: avatar + dropdown */
+.user-menu { position: relative; margin-left: 6px; }
+.avatar-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; background: transparent; border: 0; cursor: pointer;
+  border-radius: 999px;
+}
+.avatar-btn:hover { background: transparent; }
+.avatar-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid var(--amber-line);
+  font-weight: 600; font-size: 13px;
+  user-select: none;
+}
+.dropdown {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  min-width: 220px;
+  background: rgba(22, 23, 25, 0.88);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 6px;
+  z-index: 50;
+  display: flex; flex-direction: column;
+}
+.dropdown-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.dropdown-head .avatar { width: 28px; height: 28px; font-size: 12px; }
+.dropdown-email {
+  font-size: 12px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dropdown-item {
+  display: inline-flex !important; align-items: center; gap: 10px;
+  padding: 8px 10px !important;
+  color: var(--fg) !important;
+  text-decoration: none;
+  font-size: 13.5px;
+  border-radius: 7px;
+  background: transparent !important;
+  margin: 0 !important;
+}
+.dropdown-item:hover { background: var(--surface-2) !important; color: var(--fg) !important; }
+.dropdown-item svg { width: 16px; height: 16px; color: var(--dim); flex-shrink: 0; }
+.dropdown-item:hover svg { color: var(--amber); }
+.dropdown-divider {
+  border: 0; border-top: 1px solid var(--line);
+  margin: 6px 0;
+}
+
 h1 { margin-top: 0; font-size: 24px; letter-spacing: -0.02em; }
 h2 { font-size: 17px; color: var(--fg); }
 
 .match {
   background: var(--surface-1);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px 20px;

@@ -35,9 +35,10 @@ export function KeyboardShortcuts() {
       if (focusIdx < 0 || focusIdx >= rows.length) return null;
       const row = rows[focusIdx];
       const buttons = Array.from(row.querySelectorAll<HTMLButtonElement>("button"));
-      // Match by visible text - star uses ★/☆, hide uses "hide".
-      if (label === "star") return buttons.find((b) => /★|☆/.test(b.textContent ?? "")) ?? null;
-      if (label === "hide") return buttons.find((b) => /^hide$/i.test(b.textContent ?? "")) ?? null;
+      // Match the consolidated star button by its .primary class (only one
+      // per match row); the hide button by visible "Hide" text.
+      if (label === "star") return row.querySelector<HTMLButtonElement>("button.primary");
+      if (label === "hide") return buttons.find((b) => /\bhide\b/i.test(b.textContent ?? "")) ?? null;
       return null;
     }
 
