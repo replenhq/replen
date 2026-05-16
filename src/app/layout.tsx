@@ -4,6 +4,8 @@ import { db, schema } from "@/db/client";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { IconSprite, Icon } from "@/components/Icons";
+import { NavLink } from "@/components/NavLink";
 
 export const metadata = { title: "Replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
@@ -16,32 +18,39 @@ function Wordmark() {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 8,
-        fontSize: 18,
+        gap: 9,
+        fontSize: 17,
         fontWeight: 700,
-        letterSpacing: "-0.02em",
+        letterSpacing: "-0.01em",
+        color: "var(--fg)",
       }}
     >
       <svg
-        width="28"
-        height="18"
-        viewBox="0 0 160 100"
+        width="30"
+        height="20"
+        viewBox="0 0 200 130"
         aria-hidden="true"
         style={{ flexShrink: 0 }}
       >
         <defs>
           <mask id="replen-screen-mask-header">
-            <rect width="160" height="100" fill="#fff" />
+            <rect width="200" height="130" fill="#fff" />
             <path
               fill="#000"
-              d="M 36 36 H 124 a 6 6 0 0 1 6 6 V 64 c 0 4 -4 8 -10 8 c -6 0 -10 2 -14 4 c -2 1 -4 2 -6 2 c -3 0 -5 -2 -8 -4 c -3 -2 -5 -4 -8 -4 c -3 0 -5 2 -8 4 c -3 2 -5 4 -8 4 c -2 0 -4 -1 -6 -2 c -4 -2 -8 -4 -14 -4 c -6 0 -10 -4 -10 -8 V 42 a 6 6 0 0 1 6 -6 Z"
+              d="M 36 36 H 164 a 7 7 0 0 1 7 7 V 87 a 5 5 0 0 1 -5 5 H 122 c -3 0 -5 1 -7 4 c -3 5 -8 8 -15 8 c -7 0 -12 -3 -15 -8 c -2 -3 -4 -4 -7 -4 H 34 a 5 5 0 0 1 -5 -5 V 43 a 7 7 0 0 1 7 -7 Z"
             />
           </mask>
         </defs>
         <g fill="currentColor" mask="url(#replen-screen-mask-header)">
-          <rect x="18" y="20" width="124" height="60" rx="10" />
-          <rect x="2" y="28" width="20" height="44" rx="9" />
-          <rect x="138" y="28" width="20" height="44" rx="9" />
+          <rect x="40" y="4" width="120" height="24" rx="11" />
+          <rect x="40" y="102" width="120" height="24" rx="11" />
+          <rect x="0" y="42" width="26" height="46" rx="12" />
+          <rect x="174" y="42" width="26" height="46" rx="12" />
+          <rect x="20" y="20" width="160" height="90" rx="13" />
+        </g>
+        <g fill="currentColor">
+          <rect x="48" y="48" width="20" height="6" rx="3" />
+          <rect x="76" y="48" width="76" height="6" rx="3" />
         </g>
       </svg>
       Replen
@@ -81,47 +90,54 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <IconSprite />
         {user && isActive && (
           <header>
-            <a href="/" style={{ marginRight: 16 }}>
+            <a href="/" style={{ background: "transparent", marginRight: 14, padding: 0 }}>
               <Wordmark />
             </a>
-            <a href="/">today</a>
-            <a href="/projects">projects</a>
-            <a href="/sources">sources</a>
-            <form action="/search" method="get" style={{ display: "inline-flex", gap: 4, marginRight: 8, verticalAlign: "middle" }}>
-              <input
-                name="q"
-                placeholder="search…"
-                aria-label="Search"
-                style={{ padding: "2px 6px", fontSize: 13, border: "1px solid #ccc4", borderRadius: 4, width: 140 }}
-              />
+            <NavLink href="/">today</NavLink>
+            <NavLink href="/projects">projects</NavLink>
+            <NavLink href="/sources">sources</NavLink>
+            <form className="search" action="/search" method="get" role="search">
+              <Icon name="search" size={14} />
+              <input name="q" placeholder="search…" aria-label="Search" />
             </form>
             {starredCount > 0 && (
-              <a href="/starred" title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
-                ⭐ {starredCount}
-                {starredAwaitingHandoff > 0 && <span style={{ color: "#f5a623", marginLeft: 4 }}>· {starredAwaitingHandoff} →</span>}
+              <a className="counter" href="/starred" title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
+                <Icon name="star-fill" size={13} />
+                {starredCount}
+                {starredAwaitingHandoff > 0 && (
+                  <>
+                    <span style={{ color: "var(--faint)" }}>·</span>
+                    <span style={{ color: "var(--amber)" }}>{starredAwaitingHandoff}</span>
+                    <Icon name="arrow-right" size={11} />
+                  </>
+                )}
               </a>
             )}
             {integratedCount > 0 && (
-              <a href="/integrated" title={`${integratedCount} integrated OSS packages`}>
-                ✅ {integratedCount}
+              <a className="counter" href="/integrated" title={`${integratedCount} integrated OSS packages`}>
+                <Icon name="check" size={13} />
+                {integratedCount}
               </a>
             )}
-            <a href="/settings">settings</a>
-            {user.role === "admin" && <a href="/admin">admin</a>}
-            <a href="/runs">runs</a>
-            <span style={{ float: "right" }}>
+            <div className="spacer" />
+            <NavLink href="/settings">settings</NavLink>
+            {user.role === "admin" && <NavLink href="/admin">admin</NavLink>}
+            <NavLink href="/runs">runs</NavLink>
+            <span className="user">
               {user.email} · <a href="/api/logout">sign out</a>
             </span>
           </header>
         )}
         {user && !isActive && (
           <header>
-            <span style={{ marginRight: 16 }}>
+            <span style={{ marginRight: 16, padding: 0 }}>
               <Wordmark />
             </span>
-            <span style={{ float: "right" }}>
+            <div className="spacer" />
+            <span className="user">
               {user.email} · <a href="/api/logout">sign out</a>
             </span>
           </header>

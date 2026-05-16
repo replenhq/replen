@@ -5,6 +5,7 @@ import { createHandoff, setMatchFeedback, setMatchStatus, setPersonalNote } from
 import { requireUser } from "@/lib/auth/current-user";
 import { sourceKind, sourceRank } from "@/lib/source-rank";
 import { LocalTime } from "@/components/LocalTime";
+import { Icon } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -196,41 +197,64 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
               // (set at insert time), fall back to deriving it from the picked
               // candidate for rows from before the migration.
               const srcKind = m.sourceKind ?? (candidate ? sourceKind(candidate.source) : null);
+              const isStarred = m.userStatus === "starred";
+              const canHandoff = isStarred && !m.handoffPrUrl && !!project;
               return (
                 <div className="match" key={m.id}>
                   <div className="match-head">
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
                     <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
-                    {srcKind && <span className="tag" style={{ background: "#eef", color: "#225" }}>via {srcKind}</span>}
+                    {srcKind && <span className="tag">via {srcKind}</span>}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
-                    <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "good" ? "clear" : "good"); }}>
-                      <button title="Useful (feeds source ranking)" style={{ opacity: m.userFeedback === "good" ? 1 : 0.5 }}>👍</button>
-                    </form>
-                    <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "bad" ? "clear" : "bad"); }}>
-                      <button title="Not useful (feeds source ranking)" style={{ opacity: m.userFeedback === "bad" ? 1 : 0.5 }}>👎</button>
-                    </form>
-                    <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "hidden"); }}>
-                      <button>hide</button>
-                    </form>
-                    <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, m.userStatus === "starred" ? "unread" : "starred"); }}>
-                      <button>{m.userStatus === "starred" ? "★" : "☆"}</button>
-                    </form>
-                    {m.userStatus === "starred" && !m.handoffPrUrl && project && (
-                      <form className="inline" action={async () => { "use server"; await createHandoff(m.id); }}>
-                        <button title={`Open a PR in this project's repo with handoff notes for ${repo.owner}/${repo.name}`}>
-                          → handoff PR
-                        </button>
-                      </form>
-                    )}
-                    {m.handoffPrUrl && (
-                      <a href={m.handoffPrUrl} target="_blank" rel="noreferrer" className="tag" style={{ background: "#a4d8a4", color: "#1a1a1a", textDecoration: "none" }}>
-                        ↗ handoff PR
-                      </a>
-                    )}
                   </div>
                   <div className="writeup">{writeup}</div>
                   {candidate && <SourcePost candidate={candidate} />}
                   <PersonalNote matchId={m.id} value={m.personalNote ?? ""} />
+                  <div className="actions">
+                    {/* Primary path: star (and on second click on a starred row, open the handoff PR). */}
+                    {!isStarred && (
+                      <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "starred"); }}>
+                        <button className="primary" type="submit" title="Star to open a handoff PR in your project's repo">
+                          <Icon name="star" /> Star &amp; open handoff PR
+                        </button>
+                      </form>
+                    )}
+                    {canHandoff && (
+                      <form className="inline" action={async () => { "use server"; await createHandoff(m.id); }}>
+                        <button className="primary" type="submit" title={`Open a PR in this project's repo with handoff notes for ${repo.owner}/${repo.name}`}>
+                          <Icon name="arrow-right" /> Open handoff PR
+                        </button>
+                      </form>
+                    )}
+                    {isStarred && (
+                      <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "unread"); }}>
+                        <button type="submit" title="Unstar">
+                          <Icon name="star-fill" /> Starred
+                        </button>
+                      </form>
+                    )}
+                    {m.handoffPrUrl && (
+                      <a className="btn selected" href={m.handoffPrUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                        <Icon name="external" /> Handoff PR
+                      </a>
+                    )}
+                    <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "good" ? "clear" : "good"); }}>
+                      <button type="submit" className={m.userFeedback === "good" ? "selected" : ""} title="Useful (feeds source ranking)" aria-label="Useful">
+                        <Icon name="thumbs-up" />
+                      </button>
+                    </form>
+                    <form className="inline" action={async () => { "use server"; await setMatchFeedback(m.id, m.userFeedback === "bad" ? "clear" : "bad"); }}>
+                      <button type="submit" className={m.userFeedback === "bad" ? "selected" : ""} title="Not useful (feeds source ranking)" aria-label="Not useful">
+                        <Icon name="thumbs-down" />
+                      </button>
+                    </form>
+                    <span className="spacer" />
+                    <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "hidden"); }}>
+                      <button type="submit" className="ghost" title="Hide this match">
+                        <Icon name="hide" /> Hide
+                      </button>
+                    </form>
+                  </div>
                 </div>
               );
             })}
