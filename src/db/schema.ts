@@ -236,6 +236,14 @@ export const projectProfiles = sqliteTable(
     summaryHash: text("summary_hash"),
     summaryGeneratedAt: integer("summary_generated_at", { mode: "timestamp" }),
     summaryPromptVersion: text("summary_prompt_version"),
+    // Stage-2 search vectors. JSON blob conforming to ProjectSearchVectors in
+    // src/projects/search-vectors.ts. Cached. Regenerated when summaryHash
+    // changes, the 7-day ceiling expires, or VECTORS_PROMPT_VERSION bumps.
+    // Feeds Stage-3 (targeted GitHub search) — see docs/stage-2-scope.md.
+    searchVectorsJson: text("search_vectors_json"),
+    searchVectorsSummaryHash: text("search_vectors_summary_hash"),
+    searchVectorsGeneratedAt: integer("search_vectors_generated_at", { mode: "timestamp" }),
+    searchVectorsPromptVersion: text("search_vectors_prompt_version"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),
     sensitivity: text("sensitivity").notNull().default("low"),

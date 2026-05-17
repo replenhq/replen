@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { assessDocSparsity } from "@/projects/self-improvement";
 import type { ProjectSummary } from "@/projects/summarize";
-import { openDocsImprovementPR, recomputeProjectSummary } from "@/app/actions";
+import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
+import { RecomputeSummaryButton } from "@/components/RecomputeSummaryButton";
 
 export const dynamic = "force-dynamic";
 
@@ -64,9 +65,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
               : " Set this project's GitHub repo (owner/name) below, then we can open a docs PR to it. Without a GitHub repo set, Replen can flag the issue but can't action it."}
           </p>
           {hasGithubName && (
-            <form action={openDocsImprovementPRAction.bind(null, project.id)}>
-              <button type="submit">Open docs PR on {project.githubFullName}</button>
-            </form>
+            <OpenDocsPRButton projectId={project.id} projectRepo={project.githubFullName!} />
           )}
         </div>
       )}
@@ -75,9 +74,9 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
       {!summary && !sparsity.sparse && (
         <div style={{ margin: "12px 0", padding: "12px 16px", border: "1px solid var(--line, rgba(255,255,255,0.1))", borderRadius: 10 }}>
           <p style={{ margin: 0 }}>No Replen summary computed yet. It will land on the next pipeline run.</p>
-          <form action={recomputeProjectSummaryAction.bind(null, project.id)} style={{ marginTop: 8 }}>
-            <button type="submit">Compute now</button>
-          </form>
+          <div style={{ marginTop: 8 }}>
+            <RecomputeSummaryButton projectId={project.id} label="Compute now" />
+          </div>
         </div>
       )}
 
@@ -139,9 +138,9 @@ function SummaryCard({
           {summary.sourceFiles.length > 0 ? `from ${summary.sourceFiles.join(" + ")} · ` : ""}
           computed {ageLabel}
         </span>
-        <form action={recomputeProjectSummaryAction.bind(null, project.id)} style={{ marginLeft: "auto" }}>
-          <button type="submit" style={{ fontSize: 12 }}>Recompute</button>
-        </form>
+        <div style={{ marginLeft: "auto" }}>
+          <RecomputeSummaryButton projectId={project.id} size="small" />
+        </div>
       </div>
 
       <p style={{ marginTop: 0 }}>{summary.purpose}</p>
@@ -217,13 +216,3 @@ function SummaryCard({
   );
 }
 
-// Form-action wrappers (return void to satisfy <form action> typing).
-async function recomputeProjectSummaryAction(projectId: number): Promise<void> {
-  "use server";
-  await recomputeProjectSummary(projectId);
-}
-
-async function openDocsImprovementPRAction(projectId: number): Promise<void> {
-  "use server";
-  await openDocsImprovementPR(projectId);
-}

@@ -162,6 +162,13 @@
       "when": 1779033600000,
       "tag": "0022_project_summary_json",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1779037200000,
+      "tag": "0023_project_search_vectors",
+      "breakpoints": true
     }
   ]
 }
