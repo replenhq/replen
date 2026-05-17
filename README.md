@@ -324,7 +324,7 @@ replen/
 - **You can't run Replen as a commercial service that competes with us** (e.g. offering "Hosted Replen" to other people) until the 2-year window expires for that version.
 - **After 2 years, each version auto-converts to MIT** — same permissive licence as before, just delayed.
 
-Commits made before 2026-05-17 (`d6052c8` and earlier) remain available under the previous MIT licence; the FSL terms apply to subsequent commits.
+The FSL terms apply to all commits from `1361647` onward (2026-05-17). The public mirror at [replenhq/replen](https://github.com/replenhq/replen) is FSL-1.1-MIT from its first commit.
 
 If you want to use Replen in a way that might cross the "competing use" line, get in touch via [replen.dev](https://replen.dev) and we'll sort out a commercial licence.
 

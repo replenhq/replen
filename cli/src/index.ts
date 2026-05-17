@@ -3,17 +3,30 @@ import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
 import { runProjectInit } from "./project-init.js";
+import { runFeed, runHandoff, runProgress, runRun, runSearch, runStarred } from "./commands.js";
 
 const HELP = `replen: Smart AI Development workflows
 
 Usage:
   npx replen                 Sign up / sign in + wire MCP into Claude Code
-  npx replen status          Show current config
+  npx replen status          Show CLI auth + config
   npx replen mcp setup       Re-wire MCP using saved auth
   npx replen project-init    Print a prompt your AI coding tool uses to draft
                              a CLAUDE.md tuned for replen
   npx replen logout          Forget saved auth
   npx replen --help          This help
+
+Use replen from a plain shell (no Claude Code / Codex needed):
+  npx replen run                       Trigger a fresh pipeline run
+  npx replen progress                  Live tail of the current run; exits when done
+  npx replen feed [--days N]           Today's matches (default 2 days)
+                  [--project SLUG]     Limit to one project
+                  [--relevance high,medium]
+  npx replen search <query>            Full-text search across past matches
+  npx replen starred                   Starred matches + handoff PR status
+  npx replen handoff <matchId>         Open the handoff PR for a starred match
+
+Every data command accepts --json to dump raw JSON for scripting / jq.
 
 Env:
   REPLEN_BASE             Override dashboard URL (default https://app.replen.dev)
@@ -74,6 +87,13 @@ async function main() {
     console.log(`Note: this only clears local auth. The token is still valid until you rotate it on /settings.`);
     return;
   }
+
+  if (cmd === "run") return runRun(argv);
+  if (cmd === "progress") return runProgress(argv);
+  if (cmd === "feed") return runFeed(argv);
+  if (cmd === "search") return runSearch(argv);
+  if (cmd === "starred") return runStarred(argv);
+  if (cmd === "handoff") return runHandoff(argv);
 
   if (cmd === undefined) {
     // Default: if already signed in, just rerun mcp setup. Otherwise, full flow.
