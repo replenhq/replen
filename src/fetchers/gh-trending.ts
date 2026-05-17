@@ -22,11 +22,19 @@ function langToSlug(lang: string): string {
 // derived from the user's detected languages, or fall back to a sensible
 // default if the user hasn't connected a PAT yet.
 const FALLBACK_LANGS = ["typescript", "python", "rust", "go"];
-// Cap per language so trending doesn't dominate the run.
+// Cap per language so trending doesn't dominate the run. Applied AFTER the
+// daily+weekly+monthly union so we pick the freshest N per language across
+// all three windows, not N from each.
 const PER_LANG_CAP = parseInt(process.env.GH_TRENDING_PER_LANG ?? "8", 10);
 // Hard ceiling on language slices - without this a polyglot user could
 // trigger 10+ trending fetches per run.
 const MAX_LANGS = 5;
+// Trending windows. `daily` is what's hot today, `weekly` catches anything
+// that trended in the last 7 days but might've dropped off today's chart,
+// `monthly` captures sustained-attention repos. We try them in this order
+// and stop once PER_LANG_CAP is filled — so "today's hot stuff" still wins,
+// but we top up from older windows when daily is sparse.
+const WINDOWS = ["daily", "weekly", "monthly"] as const;
 
 export const ghTrendingFetcher: Fetcher = {
   name: "gh-trending",
@@ -42,44 +50,112 @@ export const ghTrendingFetcher: Fetcher = {
 
     const out: FetchedCandidate[] = [];
     for (const lang of langs) {
-      const url = `https://github.com/trending/${lang}?since=daily`;
-      const res = await fetch(url, { headers: { "user-agent": "replen/0.1" } });
-      if (!res.ok) {
-        console.warn(`[gh-trending] ${lang || "all"} -> ${res.status}`);
-        continue;
-      }
-      const html = await res.text();
-      const $ = cheerio.load(html);
-      let kept = 0;
-      $("article.Box-row").each((_, el) => {
-        if (kept >= PER_LANG_CAP) return;
-        const repoPath = $(el).find("h2 a").attr("href")?.trim();
-        if (!repoPath) return;
-        const [, owner, name] = repoPath.split("/");
-        if (!owner || !name) return;
-        const desc = $(el).find("p").first().text().trim();
-        const starsText = $(el).find("a.Link--muted").first().text().trim();
-        const stars = parseInt(starsText.replace(/[^\d]/g, ""), 10) || null;
-        // Drop big-co accounts and over-established repos before they consume
-        // any downstream triage tokens.
-        const verdict = shouldSkip(owner, stars);
-        if (verdict.skip) {
-          console.log(`[gh-trending] skip ${owner}/${name}: ${verdict.reason}`);
-          return;
+      // Pull all three windows in parallel, then score by window-membership.
+      // A repo on daily+weekly+monthly is "viral AND sustained" = ideal.
+      // A repo on weekly+monthly = "proven, not just today's hype" = goldilocks.
+      // A repo on daily only = "today's spike, probably untested" = lowest.
+      // This inverts the previous priority (daily-first) because daily alone
+      // optimises for star-velocity, which correlates with hype more than
+      // utility. See docs/active-scouting-plan.md for the broader rethink.
+      const perWindow = await Promise.all(
+        WINDOWS.map(async (since) => {
+          const url = `https://github.com/trending/${lang}?since=${since}`;
+          const res = await fetch(url, { headers: { "user-agent": "replen/0.1" } });
+          if (!res.ok) {
+            console.warn(`[gh-trending] ${lang || "all"}/${since} -> ${res.status}`);
+            return [] as Array<{ owner: string; name: string; desc: string; stars: number | null }>;
+          }
+          const html = await res.text();
+          const $ = cheerio.load(html);
+          const rows: Array<{ owner: string; name: string; desc: string; stars: number | null }> = [];
+          $("article.Box-row").each((_, el) => {
+            const repoPath = $(el).find("h2 a").attr("href")?.trim();
+            if (!repoPath) return;
+            const [, owner, name] = repoPath.split("/");
+            if (!owner || !name) return;
+            const desc = $(el).find("p").first().text().trim();
+            const starsText = $(el).find("a.Link--muted").first().text().trim();
+            const stars = parseInt(starsText.replace(/[^\d]/g, ""), 10) || null;
+            rows.push({ owner, name, desc, stars });
+          });
+          return rows;
+        }),
+      );
+
+      // Build per-repo membership map: which windows did it appear on, and
+      // capture the metadata once (any window's row has the same desc/stars
+      // within a few hours).
+      type Entry = { owner: string; name: string; desc: string; stars: number | null; windows: Set<string> };
+      const byKey = new Map<string, Entry>();
+      WINDOWS.forEach((since, idx) => {
+        for (const r of perWindow[idx]) {
+          const key = `${r.owner}/${r.name}`;
+          const existing = byKey.get(key);
+          if (existing) {
+            existing.windows.add(since);
+          } else {
+            byKey.set(key, { ...r, windows: new Set([since]) });
+          }
         }
+      });
+
+      // Apply big-co skip ONCE per repo (not per window). Score by membership
+      // pattern, break ties by star count.
+      const scored: Array<{ entry: Entry; score: number }> = [];
+      for (const entry of byKey.values()) {
+        const verdict = shouldSkip(entry.owner, entry.stars);
+        if (verdict.skip) {
+          console.log(`[gh-trending] skip ${entry.owner}/${entry.name}: ${verdict.reason}`);
+          continue;
+        }
+        // Score: 3 if on all three windows; +2 for the weekly+monthly pair
+        // (the goldilocks band); +1 for monthly-or-weekly singletons; +0 for
+        // daily-only. Higher = better signal.
+        const hasD = entry.windows.has("daily");
+        const hasW = entry.windows.has("weekly");
+        const hasM = entry.windows.has("monthly");
+        let score = 0;
+        if (hasD && hasW && hasM) score = 4;
+        else if (hasW && hasM) score = 3;
+        else if (hasM) score = 2;
+        else if (hasW) score = 2;
+        else if (hasD) score = 1;
+        scored.push({ entry, score });
+      }
+
+      // Sort by membership score desc, then stars desc as tiebreak.
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (b.entry.stars ?? 0) - (a.entry.stars ?? 0);
+      });
+
+      const picked = scored.slice(0, PER_LANG_CAP);
+      for (const { entry, score } of picked) {
         out.push({
           source: lang ? `gh-trending:${lang}` : "gh-trending:all",
-          sourceItemId: `${owner}/${name}`,
-          title: `${owner}/${name} - ${desc}`,
-          url: `https://github.com/${owner}/${name}`,
-          githubUrl: `https://github.com/${owner}/${name}`,
-          author: owner,
-          score: stars,
+          sourceItemId: `${entry.owner}/${entry.name}`,
+          title: `${entry.owner}/${entry.name} - ${entry.desc}`,
+          url: `https://github.com/${entry.owner}/${entry.name}`,
+          githubUrl: `https://github.com/${entry.owner}/${entry.name}`,
+          author: entry.owner,
+          score: entry.stars,
           postedAt: new Date(),
-          raw: { owner, name, desc, stars, lang },
+          // membership stored so the source-ranking layer can boost
+          // weekly+monthly hits over daily-only ones if we want to.
+          raw: {
+            owner: entry.owner,
+            name: entry.name,
+            desc: entry.desc,
+            stars: entry.stars,
+            lang,
+            windows: [...entry.windows].sort(),
+            membershipScore: score,
+          },
         });
-        kept++;
-      });
+      }
+      console.log(
+        `[gh-trending] ${lang || "all"}: ${byKey.size} unique across ${WINDOWS.length} windows, kept top ${picked.length}`,
+      );
     }
     return out;
   },

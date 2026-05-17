@@ -65,6 +65,9 @@ export function LivePipelineStatus({ initial }: { initial: Status }) {
         /* transient — keep polling */
       }
     };
+    // Fire the first tick immediately — otherwise users see the strip with
+    // "Waiting for first event…" for the full 2.5s before any progress shows.
+    void tick();
     const id = setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;

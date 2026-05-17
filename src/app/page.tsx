@@ -7,6 +7,7 @@ import { sourceKind, sourceRank } from "@/lib/source-rank";
 import { LocalTime } from "@/components/LocalTime";
 import { Icon } from "@/components/Icons";
 import { LivePipelineStatus } from "@/components/LivePipelineStatus";
+import { RefreshButton } from "@/components/RefreshButton";
 
 export const dynamic = "force-dynamic";
 
@@ -180,16 +181,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <h1 style={{ margin: 0, flex: 1 }}>Today&apos;s digest</h1>
         <form action={runPipelineNow}>
-          <button
-            type="submit"
-            disabled={!!inFlightRun}
-            title={inFlightRun
-              ? `Pipeline running (started ${inFlightRun.startedAt.toISOString().slice(11, 16)} UTC).`
-              : "Fetch new candidates, score them against your projects, write up the matches. 5–10 minutes."}
-          >
-            <Icon name="refresh" />
-            {inFlightRun ? "Running…" : "Refresh"}
-          </button>
+          <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
         </form>
       </div>
       <LivePipelineStatus

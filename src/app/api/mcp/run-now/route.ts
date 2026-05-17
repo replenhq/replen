@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, desc, eq, gte, isNull } from "drizzle-orm";
-import { runPipelineForUser } from "@/scheduler/run-once";
+import { startPipelineForUser } from "@/scheduler/run-once";
 import { authenticate, corsHeaders } from "../_auth";
 
 const MIN_RUN_GAP_MS = 60_000;
@@ -41,9 +41,11 @@ export async function POST(req: Request) {
     );
   }
 
-  void runPipelineForUser(auth.userId).catch((e) => console.error("[mcp/run-now]", e));
-
-  return NextResponse.json({ ok: true, status: "started" }, { headers: corsHeaders });
+  const result = await startPipelineForUser(auth.userId);
+  if ("skipped" in result) {
+    return NextResponse.json({ ok: false, status: "skipped", reason: result.skipped }, { status: 409, headers: corsHeaders });
+  }
+  return NextResponse.json({ ok: true, status: "started", runId: result.runId }, { headers: corsHeaders });
 }
 
 export async function OPTIONS() {

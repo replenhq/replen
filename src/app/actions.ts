@@ -8,7 +8,7 @@ import { readUserSecret } from "@/lib/user-secrets";
 import { errorMsg } from "@/lib/error-msg";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
 import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
-import { runPipelineForUser } from "@/scheduler/run-once";
+import { startPipelineForUser } from "@/scheduler/run-once";
 
 const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred"]);
 const ALLOWED_FEEDBACK = new Set(["good", "bad", "clear"]);
@@ -40,7 +40,10 @@ export async function runPipelineNow(): Promise<void> {
     console.warn(`[runPipelineNow] user=${user.id} ran within last ${MIN_RUN_GAP_MS / 1000}s; rejecting`);
     return;
   }
-  void runPipelineForUser(user.id).catch((e) => console.error("[runPipelineNow]", e));
+  // Await the row insert (not the full pipeline) so revalidatePath sees the
+  // in-flight run on the very next render and the LivePipelineStatus strip
+  // appears immediately instead of waiting up to 2.5s for the first poll.
+  await startPipelineForUser(user.id);
   revalidatePath("/");
   revalidatePath("/runs");
 }

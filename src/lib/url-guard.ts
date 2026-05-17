@@ -118,8 +118,25 @@ export async function resolveSafeWithPinnedDispatcher(url: URL): Promise<PinnedR
   const picked = pickable[0];
   const dispatcher = new Agent({
     connect: {
-      lookup: (_hostname, _opts, cb) =>
-        cb(null, picked.address, picked.family as 4 | 6),
+      // undici's connect.lookup follows Node's net.LookupFunction signature, which
+      // has TWO callback shapes depending on options.all:
+      //   - opts.all === true  → cb(err, [{address, family}])
+      //   - opts.all !== true  → cb(err, address, family)
+      // Newer undici (>= ~6.x bundled by Next.js) sets all: true and reads
+      // result[0].address. If we always call the second shape, that read yields
+      // undefined and undici throws ERR_INVALID_IP_ADDRESS *before* any network
+      // call — which is exactly the "TypeError: fetch failed" you see in logs.
+      // Handle both shapes to stay compatible across undici versions.
+      lookup: (_hostname, opts, cb) => {
+        if ((opts as { all?: boolean } | null | undefined)?.all) {
+          (cb as (err: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: number }>) => void)(
+            null,
+            [{ address: picked.address, family: picked.family }],
+          );
+        } else {
+          cb(null, picked.address, picked.family as 4 | 6);
+        }
+      },
     },
   });
   return { ok: true, url, dispatcher };
