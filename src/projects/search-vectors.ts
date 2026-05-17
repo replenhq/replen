@@ -12,7 +12,7 @@ import type { ProjectSummary } from "./summarize";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing vector sets — they regenerate on next pipeline run.
-export const VECTORS_PROMPT_VERSION = "1";
+export const VECTORS_PROMPT_VERSION = "3";
 
 // Max age before we force-regenerate even if the summary hasn't changed.
 // Looser than the summary ceiling (3 days) because vectors are derived from
@@ -31,7 +31,11 @@ export type SearchVector = {
   // dashboard can say "surfaced because you said you want <outcome>".
   outcome: string;
   outcomeSource: "user" | "inferred";
-  outcomeConfidence: "high" | "medium" | "low";
+  // "high" is the default. "medium" appears only as a per-project fallback
+  // when a project has zero high-confidence outcomes — returning nothing is
+  // worse than searching with the LLM's best guess, as long as the UI labels
+  // the lower confidence so Stage 4 can apply a stricter relevance bar.
+  outcomeConfidence: "high" | "medium";
   // 1-4 distinct search phrases. Each is a concrete tool name, technical
   // term, or capability that would appear in the README of a tool that
   // solves the outcome. Vague phrases ("AI tools", "modern libraries") are
@@ -58,6 +62,11 @@ export type ProjectSearchVectors = {
   // in the UI as passive info ("Replen could search for these if you make
   // them explicit in CLAUDE.md"). No CTA — the user fixes by editing docs.
   skippedLowConfidence: SkippedGoal[];
+  // Which confidence floor produced these vectors. "high" is the normal case;
+  // "medium" means the project had zero high-confidence outcomes so we
+  // fell back to medium. UI surfaces this so the user knows their docs are
+  // thin and Stage 4 can tighten the relevance bar.
+  confidenceFloor: "high" | "medium";
   generatedAt: string;
   sourceSummaryHash: string;
   llmModel: string;
@@ -76,17 +85,31 @@ and provides 1-4 concrete GitHub search phrases.
 
 RULES (these are not optional):
 
-1. Skip any outcome goal with confidence != "high". The user hasn't endorsed
-   it, and burning search budget on speculation contradicts the conservative
-   bias. Add it to "skippedLowConfidence" with its confidence level.
+1. A "confidence floor" is set per-project in the user message. Skip any
+   outcome whose effective confidence is below the floor:
+   - floor=high: emit vectors for source=user OR confidence=high only.
+     Skip medium and low (add to "skippedLowConfidence").
+   - floor=medium: emit vectors for source=user OR confidence in (high, medium).
+     Skip only low (add to "skippedLowConfidence").
+   The floor=medium case fires only when the project has zero
+   high-confidence outcomes — without it Replen returns nothing.
 
-2. Each query phrase must be CONCRETE. A concrete phrase is either:
-   - a known tool name ("scrapling", "playwright stealth", "argon2id")
-   - a specific technical term ("cloudflare bypass", "headless chromium", "nullifier system")
-   - a specific capability ("incremental static regeneration alternative")
-   Vague phrases are FORBIDDEN. Examples of forbidden phrases: "AI tools",
-   "modern libraries", "scraping" (alone), "performance improvements",
-   "better alternatives". If you can't name a concrete phrase, drop the vector.
+2. Each query phrase must be CONCRETE *and* SHORT. GitHub search matches
+   against repo name/description/topics — long sentence-like phrases never
+   appear verbatim there. Rules:
+   - Tool names: 1-3 words ("scrapling", "playwright stealth", "argon2id")
+   - Technical terms: 2-4 words ("cloudflare bypass", "concept drift",
+     "Bayesian inference", "model monitoring")
+   - Capabilities: 2-4 words ("incremental static regeneration",
+     "explainable AI", "decision support")
+   FORBIDDEN: sentences or 5+ word compound phrases like
+   "explainable AI for course of action selection",
+   "pairwise operator comparison UI",
+   "operator benchmarking dashboard for SOP".
+   Also FORBIDDEN: vague single terms — "AI tools", "modern libraries",
+   "scraping" (alone), "performance improvements", "better alternatives".
+   If you can't compress an idea to ≤4 words, find a related broader term
+   that real repos actually use in their descriptions, or drop the phrase.
 
 3. If you cannot generate at least ONE concrete phrase for an outcome, omit
    that vector entirely. Returning fewer high-quality vectors beats returning
@@ -114,7 +137,7 @@ Output JSON only. No prose before or after. Schema:
     {
       "outcome": "verbatim outcome from summary",
       "outcomeSource": "user" | "inferred",
-      "outcomeConfidence": "high",
+      "outcomeConfidence": "high" | "medium",
       "queryTerms": ["concrete phrase 1", "concrete phrase 2"],
       "languageConstraint": null | ["ts", "js"],
       "reasoning": "1-2 sentences"
@@ -125,12 +148,12 @@ Output JSON only. No prose before or after. Schema:
   ]
 }`;
 
-function buildUserPrompt(summary: ProjectSummary): string {
+function buildUserPrompt(summary: ProjectSummary, confidenceFloor: "high" | "medium"): string {
   // We pass the summary as JSON, not as prose. The schema is the contract.
   // Cap at 8000 chars defensively — a typical summary is well under 2000.
   const json = JSON.stringify(summary, null, 2);
   const body = json.length > 8000 ? json.slice(0, 8000) : json;
-  return `Project summary:\n\n${body}\n\nGenerate search vectors per the rules.`;
+  return `Confidence floor for this project: ${confidenceFloor}\n\nProject summary:\n\n${body}\n\nGenerate search vectors per the rules.`;
 }
 
 // Coerce arbitrary LLM JSON into a validated ProjectSearchVectors. The LLM
@@ -141,6 +164,7 @@ function coerceVectors(
   summary: ProjectSummary,
   summaryHash: string,
   model: string,
+  confidenceFloor: "high" | "medium",
 ): ProjectSearchVectors {
   const o = (raw ?? {}) as Record<string, unknown>;
   const validOutcomeStatements = new Set(summary.outcomeGoals.map((g) => g.statement));
@@ -160,13 +184,21 @@ function coerceVectors(
       ?? summary.outcomeGoals.find((g) => normalize(g.statement) === normalize(outcome));
     if (!matchedGoal) continue;
 
-    // Hard rule: only emit vectors for high-confidence goals. If the LLM
-    // ignored the conservative bias, we enforce it server-side.
-    const confidence = matchedGoal.source === "user" ? "high" : matchedGoal.confidence;
-    if (confidence !== "high") continue;
+    // Enforce the floor server-side regardless of what the LLM emitted.
+    // user-sourced goals are always treated as "high" (the user wrote it down).
+    const effectiveConfidence: "high" | "medium" | "low" =
+      matchedGoal.source === "user" ? "high" : matchedGoal.confidence;
+    const accept = confidenceFloor === "high"
+      ? effectiveConfidence === "high"
+      : effectiveConfidence === "high" || effectiveConfidence === "medium";
+    if (!accept) continue;
+    // Vectors only carry high|medium — low is always skipped.
+    const vectorConfidence: "high" | "medium" =
+      effectiveConfidence === "high" ? "high" : "medium";
 
     // queryTerms: keep only non-empty strings, dedupe, cap. Reject obvious
-    // vague phrases as a safety net even though the prompt forbids them.
+    // vague phrases AND phrases longer than 4 words (GitHub search would
+    // return 0) as a safety net even though the prompt forbids them.
     const queryTerms = Array.isArray(vv.queryTerms)
       ? Array.from(
           new Set(
@@ -174,7 +206,8 @@ function coerceVectors(
               .filter((t): t is string => typeof t === "string")
               .map((t) => t.trim())
               .filter((t) => t.length >= 2 && t.length <= 80)
-              .filter((t) => !isVaguePhrase(t)),
+              .filter((t) => !isVaguePhrase(t))
+              .filter((t) => !isTooLong(t)),
           ),
         ).slice(0, MAX_TERMS_PER_VECTOR)
       : [];
@@ -189,23 +222,25 @@ function coerceVectors(
     vectors.push({
       outcome: matchedGoal.statement,
       outcomeSource: matchedGoal.source,
-      outcomeConfidence: "high",
+      outcomeConfidence: vectorConfidence,
       queryTerms,
       languageConstraint,
       reasoning,
     });
   }
 
-  // Reconcile skippedLowConfidence with the summary. The truth is: any goal
-  // not represented in `vectors` AND that has confidence != "high" is
-  // skipped. Trust the summary; don't let the LLM omit goals it should have
-  // surfaced as skipped.
+  // Reconcile skippedLowConfidence with the summary. Any goal not represented
+  // in `vectors` AND whose effective confidence is below the floor is skipped.
+  // Trust the summary; don't let the LLM omit goals it should have surfaced.
   const usedOutcomes = new Set(vectors.map((v) => v.outcome));
   const skippedLowConfidence: SkippedGoal[] = [];
   for (const g of summary.outcomeGoals) {
     if (usedOutcomes.has(g.statement)) continue;
     const confidence = g.source === "user" ? "high" : g.confidence;
-    if (confidence === "high") continue; // high-confidence goal not in vectors = LLM dropped it; not "skipped"
+    const wasEligible = confidenceFloor === "high"
+      ? confidence === "high"
+      : confidence === "high" || confidence === "medium";
+    if (wasEligible) continue; // eligible-but-dropped = LLM judgement, not "skipped due to confidence"
     skippedLowConfidence.push({
       outcome: g.statement,
       confidence: confidence as "medium" | "low",
@@ -215,6 +250,7 @@ function coerceVectors(
   return {
     vectors,
     skippedLowConfidence,
+    confidenceFloor,
     generatedAt: new Date().toISOString(),
     sourceSummaryHash: summaryHash,
     llmModel: model,
@@ -249,20 +285,38 @@ function isVaguePhrase(s: string): boolean {
   return VAGUE_PATTERNS.some((re) => re.test(t));
 }
 
+// Phrases longer than 4 words rarely appear verbatim in GitHub repo
+// name/description/topics, so the search always returns 0. Drop them.
+function isTooLong(s: string): boolean {
+  return s.trim().split(/\s+/).length > 4;
+}
+
 export async function generateSearchVectors(
   summary: ProjectSummary,
   summaryHash: string,
 ): Promise<ProjectSearchVectors | null> {
-  // Bail early if the summary has no high-confidence goals at all — there's
-  // nothing to generate. Return an empty-vectors object so callers can still
-  // persist + the UI can render "Replen has nothing high-confidence to search".
-  const hasEligible = summary.outcomeGoals.some((g) => g.source === "user" || g.confidence === "high");
-  if (!hasEligible) {
+  // Pick the confidence floor: prefer high (conservative bias), but fall back
+  // to medium when the project has zero high-confidence outcomes — without
+  // the fallback, rich-doc-but-inferred projects (e.g. acme-web with 3
+  // medium-confidence outcomes) get no vectors and Stage 3 returns nothing.
+  const hasHigh = summary.outcomeGoals.some((g) => g.source === "user" || g.confidence === "high");
+  const confidenceFloor: "high" | "medium" = hasHigh ? "high" : "medium";
+
+  // If even the lowered floor wouldn't catch anything (no medium-or-better
+  // goals at all), bail early with an empty result so the UI can render
+  // "Replen has nothing concrete enough to search".
+  const hasEligibleAtFloor = summary.outcomeGoals.some((g) => {
+    const c = g.source === "user" ? "high" : g.confidence;
+    return confidenceFloor === "high" ? c === "high" : c === "high" || c === "medium";
+  });
+  if (!hasEligibleAtFloor) {
     return {
       vectors: [],
-      skippedLowConfidence: summary.outcomeGoals
-        .filter((g) => g.confidence !== "high")
-        .map((g) => ({ outcome: g.statement, confidence: g.confidence as "medium" | "low" })),
+      skippedLowConfidence: summary.outcomeGoals.map((g) => ({
+        outcome: g.statement,
+        confidence: (g.source === "user" ? "high" : g.confidence) as "medium" | "low",
+      })),
+      confidenceFloor,
       generatedAt: new Date().toISOString(),
       sourceSummaryHash: summaryHash,
       llmModel: TRIAGE_MODEL,
@@ -276,11 +330,11 @@ export async function generateSearchVectors(
       model,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(summary) },
+        { role: "user", content: buildUserPrompt(summary, confidenceFloor) },
       ],
       response_format: { type: "json_object" },
       temperature: 0.2,
-      max_tokens: 1500,
+      max_tokens: 2500,
     },
     { timeoutMs: 60_000, retries: 1 },
   );
@@ -292,7 +346,7 @@ export async function generateSearchVectors(
     console.warn(`[search-vectors] returned non-JSON: ${(e as Error).message}; sample: ${text.slice(0, 200)}`);
     return null;
   }
-  return coerceVectors(parsed, summary, summaryHash, model);
+  return coerceVectors(parsed, summary, summaryHash, model, confidenceFloor);
 }
 
 // Hybrid cache-invalidation predicate, matching the Stage-1 pattern. True if

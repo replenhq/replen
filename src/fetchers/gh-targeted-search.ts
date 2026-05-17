@@ -1,6 +1,7 @@
 // Stage 3: targeted GitHub search. Reads each project's persisted
-// ProjectSearchVectors (from Stage 2), runs ONE GitHub search per vector,
-// and produces candidates tagged with the originating project + outcome.
+// ProjectSearchVectors (from Stage 2), runs one GitHub search per query
+// term within each vector, and produces candidates tagged with the
+// originating project + outcome + which specific term matched.
 // See docs/stage-2-scope.md for the upstream contract, and
 // docs/active-scouting-plan.md for where this fits.
 //
@@ -19,16 +20,18 @@ import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../analyzer/run-context";
 import { shouldSkip } from "./big-co";
-import type { ProjectSearchVectors, SearchVector } from "../projects/search-vectors";
+import type { ProjectSearchVectors } from "../projects/search-vectors";
 
 // Conservative caps.
-const PER_VECTOR_RESULTS = parseInt(process.env.GH_TARGETED_PER_VECTOR ?? "6", 10);
+const PER_TERM_RESULTS = parseInt(process.env.GH_TARGETED_PER_TERM ?? "5", 10);
 const FRESHNESS_DAYS = parseInt(process.env.GH_TARGETED_FRESHNESS_DAYS ?? "365", 10);
 const MIN_STARS = parseInt(process.env.GH_TARGETED_MIN_STARS ?? "30", 10);
 // Budget across the user's whole run. GitHub authenticated search is
-// 30 req/min, so 20 leaves headroom for other fetchers (gh-search uses some).
-const PER_USER_SEARCH_BUDGET = parseInt(process.env.GH_TARGETED_BUDGET ?? "20", 10);
-// Skip projects without included=true OR active=true.
+// 30 req/min, so 25 leaves headroom for other fetchers (gh-search uses some).
+const PER_USER_SEARCH_BUDGET = parseInt(process.env.GH_TARGETED_BUDGET ?? "25", 10);
+// Cap how many projects we hit per run. With per-term queries the budget
+// gets eaten fast — 3 vectors × 3 terms = 9 queries/project. Adjust upward
+// only when budget allows.
 const MAX_PROJECTS = parseInt(process.env.GH_TARGETED_MAX_PROJECTS ?? "10", 10);
 
 export const ghTargetedSearchFetcher: Fetcher = {
@@ -37,13 +40,18 @@ export const ghTargetedSearchFetcher: Fetcher = {
     if (!ctx?.userId) return [];
     const userId = ctx.userId;
 
+    // Note: we filter on `included` but NOT on `active`. The `active` flag is
+    // set by the loader based on CLAUDE.md presence; Stage-3 only fires when
+    // a project has actual search vectors (gated by Stage 2's conservative
+    // bias), which is itself proof the project has high-confidence outcome
+    // goals — a stronger signal than "has a CLAUDE.md file". So vectors-exist
+    // is the new gate.
     const projects = await db
       .select()
       .from(schema.projectProfiles)
       .where(
         and(
           eq(schema.projectProfiles.userId, userId),
-          eq(schema.projectProfiles.active, true),
           eq(schema.projectProfiles.included, true),
         ),
       )
@@ -81,74 +89,86 @@ export const ghTargetedSearchFetcher: Fetcher = {
 
       for (const vector of parsed.vectors) {
         if (budgetRemaining <= 0) break;
-        const q = buildQuery(vector, pushedAfter);
-        if (!q) continue;
-        const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=${PER_VECTOR_RESULTS}`;
 
-        budgetRemaining--;
-        let items: Array<Record<string, unknown>> = [];
-        try {
-          const res = await fetch(url, { headers });
-          if (!res.ok) {
-            const body = await res.text().catch(() => "");
-            console.warn(`[gh-targeted] ${project.slug} "${vector.outcome.slice(0, 50)}…": HTTP ${res.status} ${body.slice(0, 200)}`);
+        // One search per term. Earlier design used a single OR-joined query
+        // per vector, but GitHub's repo search parser handles multi-word OR
+        // unpredictably (4×2-word OR returns 0 for some term orderings while
+        // 2×2-word OR with the same terms returns 100+). Per-term queries
+        // have predictable semantics: each is an implicit-AND match.
+        let keptForVector = 0;
+        const queriesForVector: string[] = [];
+        for (const term of vector.queryTerms) {
+          if (budgetRemaining <= 0) break;
+          const q = buildSingleTermQuery(term, vector.languageConstraint, pushedAfter);
+          if (!q) continue;
+          queriesForVector.push(q);
+          const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=${PER_TERM_RESULTS}`;
+
+          budgetRemaining--;
+          let items: Array<Record<string, unknown>> = [];
+          try {
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+              const body = await res.text().catch(() => "");
+              console.warn(`[gh-targeted] ${project.slug} "${term}": HTTP ${res.status} ${body.slice(0, 200)}`);
+              continue;
+            }
+            const json = (await res.json()) as { items?: Array<Record<string, unknown>> };
+            items = json.items ?? [];
+          } catch (e) {
+            console.warn(`[gh-targeted] ${project.slug} "${term}": fetch failed`, e);
             continue;
           }
-          const json = (await res.json()) as { items?: Array<Record<string, unknown>> };
-          items = json.items ?? [];
-        } catch (e) {
-          console.warn(`[gh-targeted] ${project.slug}: fetch failed`, e);
-          continue;
+
+          for (const item of items) {
+            const fullName = String(item.full_name ?? "");
+            const [owner, name] = fullName.split("/");
+            if (!owner || !name) continue;
+            // Dedupe within this run — same repo surfacing for multiple terms
+            // or outcomes shouldn't multiply Stage-4's workload.
+            if (seenOwnerName.has(fullName)) continue;
+            const stars = typeof item.stargazers_count === "number" ? item.stargazers_count : null;
+            const verdict = shouldSkip(owner, stars);
+            if (verdict.skip) continue;
+            seenOwnerName.add(fullName);
+
+            const description = String(item.description ?? "").trim();
+            const pushedAt = item.pushed_at ? new Date(String(item.pushed_at)) : null;
+            const primaryLanguage = typeof item.language === "string" ? item.language : null;
+
+            out.push({
+              source: `gh-targeted:${project.slug}`,
+              sourceItemId: fullName,
+              title: `${fullName} - ${description}`.slice(0, 280),
+              url: `https://github.com/${fullName}`,
+              githubUrl: `https://github.com/${fullName}`,
+              author: owner,
+              score: stars,
+              postedAt: pushedAt,
+              // Attribution carried into raw for Stage 4 + UI:
+              //   - which project surfaced this
+              //   - which outcome statement (verbatim, lifted from summary)
+              //   - source/confidence of the originating outcome
+              //   - which specific term hit (for debugging poorly-performing terms)
+              raw: {
+                owner,
+                name,
+                description,
+                stars,
+                primaryLanguage,
+                projectSlug: project.slug,
+                projectId: project.id,
+                outcome: vector.outcome,
+                outcomeSource: vector.outcomeSource,
+                outcomeConfidence: vector.outcomeConfidence,
+                matchedTerm: term,
+                query: q,
+              },
+            });
+            keptForVector++;
+          }
         }
-
-        let kept = 0;
-        for (const item of items) {
-          const fullName = String(item.full_name ?? "");
-          const [owner, name] = fullName.split("/");
-          if (!owner || !name) continue;
-          // Dedupe within this run — same repo surfacing for multiple outcomes
-          // would inflate Stage-4's workload without adding signal.
-          if (seenOwnerName.has(fullName)) continue;
-          const stars = typeof item.stargazers_count === "number" ? item.stargazers_count : null;
-          const verdict = shouldSkip(owner, stars);
-          if (verdict.skip) continue;
-          seenOwnerName.add(fullName);
-
-          const description = String(item.description ?? "").trim();
-          const pushedAt = item.pushed_at ? new Date(String(item.pushed_at)) : null;
-          const primaryLanguage = typeof item.language === "string" ? item.language : null;
-
-          out.push({
-            source: `gh-targeted:${project.slug}`,
-            sourceItemId: fullName,
-            title: `${fullName} - ${description}`.slice(0, 280),
-            url: `https://github.com/${fullName}`,
-            githubUrl: `https://github.com/${fullName}`,
-            author: owner,
-            score: stars,
-            postedAt: pushedAt,
-            // Attribution carried into raw for Stage 4 + UI:
-            //   - which project surfaced this
-            //   - which outcome statement (verbatim, lifted from summary)
-            //   - source/confidence of the originating outcome
-            //   - the actual query that hit GitHub (debugging)
-            raw: {
-              owner,
-              name,
-              description,
-              stars,
-              primaryLanguage,
-              projectSlug: project.slug,
-              projectId: project.id,
-              outcome: vector.outcome,
-              outcomeSource: vector.outcomeSource,
-              outcomeConfidence: vector.outcomeConfidence,
-              query: q,
-            },
-          });
-          kept++;
-        }
-        console.log(`[gh-targeted] user=${userId} ${project.slug} "${vector.outcome.slice(0, 60)}…": ${kept} kept (q="${q.slice(0, 120)}…")`);
+        console.log(`[gh-targeted] user=${userId} ${project.slug} "${vector.outcome.slice(0, 60)}…": ${keptForVector} kept across ${queriesForVector.length} terms`);
       }
     }
 
@@ -157,40 +177,29 @@ export const ghTargetedSearchFetcher: Fetcher = {
   },
 };
 
-// Build a single GitHub search query for one vector. Returns null when the
-// vector has no usable query terms (defensive — Stage 2 should have filtered
-// these out, but we don't trust upstream).
+// Build a single GitHub search query for ONE term. Returns null if the term
+// is empty after cleaning.
 //
-// Query shape: `(t1 OR "phrase 2" OR "phrase 3") pushed:>YYYY-MM-DD stars:>=N archived:false language:X`
-// - Single-word terms are bare (allows GitHub to match in name/desc/topics)
-// - Multi-word terms are quoted (treated as a phrase)
+// Query shape: `term words pushed:>YYYY-MM-DD stars:>=N archived:false language:X`
+// - Multi-word terms stay unquoted so GitHub treats them as implicit-AND
+//   tokens against repo name/description/topics. Quoted phrases ("drift
+//   detection") almost never match repo metadata; unquoted (drift detection)
+//   means "both words somewhere in metadata" which is what we want.
 // - Language constraint: GitHub search ANDs `language:X` so multi-language
 //   constraints require multiple queries. Conservative-first: pick the FIRST
 //   language. We can broaden later if Stage 4 rejects valid cross-language
 //   candidates often.
-export function buildQuery(vector: SearchVector, pushedAfter: string): string | null {
-  const terms = vector.queryTerms
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2 && t.length <= 80)
-    .slice(0, 4);
-  if (terms.length === 0) return null;
-
-  // Wrap multi-word terms in quotes so GitHub treats them as a phrase.
-  // Strip any quote chars the LLM might have left in.
-  const wrapped = terms.map((t) => {
-    const clean = t.replace(/["']/g, "").trim();
-    return /\s/.test(clean) ? `"${clean}"` : clean;
-  });
-  const orClause = wrapped.length === 1 ? wrapped[0] : `(${wrapped.join(" OR ")})`;
-
-  let q = `${orClause} pushed:>${pushedAfter} stars:>=${MIN_STARS} archived:false`;
-  if (vector.languageConstraint && vector.languageConstraint.length > 0) {
-    // Take the first allowed language. See note above on why this is
-    // conservative-first.
-    q += ` language:${vector.languageConstraint[0]}`;
+export function buildSingleTermQuery(
+  term: string,
+  languageConstraint: string[] | null,
+  pushedAfter: string,
+): string | null {
+  const clean = term.replace(/["']/g, "").trim();
+  if (clean.length < 2 || clean.length > 80) return null;
+  let q = `${clean} pushed:>${pushedAfter} stars:>=${MIN_STARS} archived:false`;
+  if (languageConstraint && languageConstraint.length > 0) {
+    q += ` language:${languageConstraint[0]}`;
   }
-  // GitHub search has a 256-char limit on q; truncate defensively if we
-  // somehow blew it (shouldn't happen with our caps).
   return q.length > 250 ? q.slice(0, 250) : q;
 }
 

@@ -144,7 +144,10 @@ function VectorsCard({
       <p className="meta" style={{ marginTop: 0, fontSize: 12 }}>
         {hasVectors
           ? `${vectors.vectors.length} outcome${vectors.vectors.length === 1 ? "" : "s"} mapped to GitHub queries.`
-          : `No high-confidence outcomes to search on yet — add specifics to your CLAUDE.md.`}
+          : `No outcomes concrete enough to search on yet — add specifics to your CLAUDE.md.`}
+        {hasVectors && vectors.confidenceFloor === "medium" && (
+          <> Working from inferred outcomes (no high-confidence ones found) — Stage 4 applies a stricter relevance bar.</>
+        )}
       </p>
 
       {vectors.vectors.map((v, i) => (
