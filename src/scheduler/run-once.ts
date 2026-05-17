@@ -6,8 +6,13 @@ import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking, LlmQuotaError } from "../analyzer/llm";
-import { generateProjectSummary, needsRegeneration, PROMPT_VERSION } from "../projects/summarize";
+import { generateProjectSummary, needsRegeneration, PROMPT_VERSION, type ProjectSummary } from "../projects/summarize";
 import { assessDocSparsity } from "../projects/self-improvement";
+import {
+  generateSearchVectors,
+  vectorsNeedRegeneration,
+  VECTORS_PROMPT_VERSION,
+} from "../projects/search-vectors";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 
@@ -115,6 +120,12 @@ async function executePipeline(
     // Summary persisted now feeds Stage-2 (when built) on the NEXT run.
     await refreshStaleProjectSummaries(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} summary refresh failed:`, e),
+    );
+    // Stage-2: generate search vectors from each project's fresh summary.
+    // Runs AFTER summaries because vectors derive from them (chain:
+    // profileHash → summary → vectors).
+    await refreshStaleSearchVectors(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} vectors refresh failed:`, e),
     );
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;
@@ -271,6 +282,66 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
   await Promise.allSettled(
     Array.from({ length: Math.min(SUMMARY_CONCURRENCY, projects.length) }, () => refreshOne()),
   );
+}
+
+// Stage-2 hook. Iterates the user's active projects with a fresh Stage-1
+// summary, regenerates SearchVectors for any whose vectors are stale, and
+// persists. Records a "scan" event per regen and a "match" event count
+// summary at the end. Capped concurrency 3 (same as summary refresh).
+async function refreshStaleSearchVectors(runId: number, userId: number): Promise<void> {
+  const projects = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+  if (projects.length === 0) return;
+
+  let regenerated = 0;
+  const VECTOR_CONCURRENCY = 3;
+  let cursor = 0;
+  const refreshOne = async () => {
+    while (cursor < projects.length) {
+      const idx = cursor++;
+      const p = projects[idx];
+      const decision = vectorsNeedRegeneration({
+        searchVectorsJson: p.searchVectorsJson ?? null,
+        searchVectorsSummaryHash: p.searchVectorsSummaryHash ?? null,
+        searchVectorsGeneratedAt: p.searchVectorsGeneratedAt ?? null,
+        searchVectorsPromptVersion: p.searchVectorsPromptVersion ?? null,
+        currentSummaryHash: p.summaryHash ?? null,
+      });
+      if (!decision.regen) continue;
+      if (!p.summaryJson || !p.summaryHash) continue; // no summary → skip silently
+      let summary: ProjectSummary;
+      try {
+        summary = JSON.parse(p.summaryJson) as ProjectSummary;
+      } catch {
+        continue;
+      }
+      void recordEvent(runId, userId, "scan", `Generating search vectors for ${p.slug} (${decision.reason})`);
+      try {
+        const vectors = await generateSearchVectors(summary, p.summaryHash);
+        if (!vectors) continue;
+        await db
+          .update(schema.projectProfiles)
+          .set({
+            searchVectorsJson: JSON.stringify(vectors),
+            searchVectorsSummaryHash: p.summaryHash,
+            searchVectorsGeneratedAt: new Date(),
+            searchVectorsPromptVersion: VECTORS_PROMPT_VERSION,
+          })
+          .where(eq(schema.projectProfiles.id, p.id));
+        regenerated++;
+      } catch (e) {
+        console.warn(`[pipeline] user=${userId} vectors for ${p.slug} failed:`, e);
+      }
+    }
+  };
+  await Promise.allSettled(
+    Array.from({ length: Math.min(VECTOR_CONCURRENCY, projects.length) }, () => refreshOne()),
+  );
+  if (regenerated > 0) {
+    void recordEvent(runId, userId, "scan", `Search vectors refreshed for ${regenerated} project(s)`);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
