@@ -6,6 +6,8 @@ import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking, LlmQuotaError } from "../analyzer/llm";
+import { generateProjectSummary, needsRegeneration, PROMPT_VERSION } from "../projects/summarize";
+import { assessDocSparsity } from "../projects/self-improvement";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 
@@ -107,6 +109,13 @@ async function executePipeline(
     candidatesFound = fetched.inserted;
     void recordEvent(runId, userId, "fetch_done", `Fetched ${fetched.inserted} new candidates (${fetched.total} total seen)`);
     const analysis = await runAnalysis(runId, userId, cfg);
+    // Stage-1 project understanding. runs AFTER analysis because analysis is
+    // what populates / refreshes project_profiles.readmeMd / claudeMd /
+    // techSummary / profileHash via discoverLocalProjects + upsertProjects.
+    // Summary persisted now feeds Stage-2 (when built) on the NEXT run.
+    await refreshStaleProjectSummaries(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} summary refresh failed:`, e),
+    );
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;
     emailSent = await sendDigestEmail(runId, userId, cfg);
@@ -189,6 +198,79 @@ export async function runPipeline() {
     }
   });
   await Promise.all(workers);
+}
+
+// Stage-1 hook. Iterates the user's active projects, regenerates the
+// structured summary for any that are stale (per the hybrid invalidation
+// policy in summarize.ts), and persists. Also records a `summary` event for
+// each refresh and an explicit "sparse docs" event for projects where the
+// summary inputs are too thin — that surfaces a hint on the dashboard
+// activity log so the user knows to open a docs PR via /projects/[slug].
+//
+// Capped concurrency to avoid LLM rate-limit issues when the user has many
+// projects. Errors per-project are swallowed; one bad project doesn't kill
+// the whole refresh.
+async function refreshStaleProjectSummaries(runId: number, userId: number): Promise<void> {
+  const projects = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+  if (projects.length === 0) return;
+
+  const SUMMARY_CONCURRENCY = 3;
+  let cursor = 0;
+  const refreshOne = async () => {
+    while (cursor < projects.length) {
+      const idx = cursor++;
+      const p = projects[idx];
+      const decision = needsRegeneration({
+        summaryJson: p.summaryJson ?? null,
+        summaryHash: p.summaryHash ?? null,
+        summaryGeneratedAt: p.summaryGeneratedAt ?? null,
+        summaryPromptVersion: p.summaryPromptVersion ?? null,
+        currentProfileHash: p.profileHash,
+      });
+      // Always assess sparsity even when summary is fresh — surfaces hint on
+      // the activity log every run so users see it.
+      const sparsity = assessDocSparsity(p);
+      if (sparsity.sparse) {
+        void recordEvent(
+          runId,
+          userId,
+          "skip",
+          `Sparse docs in ${p.slug} — ${sparsity.reasons.join("; ")}. Open a docs PR on /projects/${p.slug}.`,
+        );
+      }
+      if (!decision.regen) continue;
+      void recordEvent(runId, userId, "scan", `Refreshing project context for ${p.slug} (${decision.reason})`);
+      try {
+        const summary = await generateProjectSummary({
+          name: p.name,
+          slug: p.slug,
+          readmeMd: p.readmeMd,
+          claudeMd: p.claudeMd,
+          techSummary: p.techSummary,
+        });
+        if (!summary) continue; // project has no docs at all — skip silently
+        await db
+          .update(schema.projectProfiles)
+          .set({
+            summaryJson: JSON.stringify(summary),
+            summaryHash: p.profileHash,
+            summaryGeneratedAt: new Date(),
+            summaryPromptVersion: PROMPT_VERSION,
+          })
+          .where(eq(schema.projectProfiles.id, p.id));
+      } catch (e) {
+        // Quota errors here are NOT terminal for the run — the analyzer
+        // already ran successfully. Just record and continue.
+        console.warn(`[pipeline] user=${userId} summary refresh for ${p.slug} failed:`, e);
+      }
+    }
+  };
+  await Promise.allSettled(
+    Array.from({ length: Math.min(SUMMARY_CONCURRENCY, projects.length) }, () => refreshOne()),
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

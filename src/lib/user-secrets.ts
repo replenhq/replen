@@ -30,6 +30,7 @@ export type SecretReason =
   | "migration"
   | "redetect-languages"
   | "create-handoff"
+  | "propose-docs-improvement"
   | "webhook-send"
   | "other";
 

@@ -9,6 +9,10 @@ import { errorMsg } from "@/lib/error-msg";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
 import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
 import { startPipelineForUser } from "@/scheduler/run-once";
+import { proposeDocsImprovement } from "@/projects/self-improvement";
+import { generateProjectSummary, PROMPT_VERSION } from "@/projects/summarize";
+import { resolveUserConfig } from "@/scheduler/user-config";
+import { withRunConfig } from "@/analyzer/run-context";
 
 const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred"]);
 const ALLOWED_FEEDBACK = new Set(["good", "bad", "clear"]);
@@ -277,3 +281,66 @@ export async function refreshHandoffStatuses(): Promise<{ ok: boolean; checked: 
   revalidatePath("/");
   return { ok: true, checked: candidates.length, merged };
 }
+
+// Manually regenerate the Stage-1 project summary for one project. Used by
+// the "Recompute" button on /projects/[slug]. Returns the resulting summary
+// (or null if the project has no docs at all).
+export async function recomputeProjectSummary(projectId: number): Promise<{ ok: boolean; reason?: string }> {
+  const user = await requireUser();
+  if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("invalid projectId");
+  const project = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.id, projectId), eq(schema.projectProfiles.userId, user.id)))
+    .get();
+  if (!project) return { ok: false, reason: "project not found" };
+
+  const cfg = await resolveUserConfig(user.id);
+  const summary = await withRunConfig(
+    {
+      llmPrimaryApiKey: cfg.llmPrimaryApiKey,
+      llmPrimaryBaseUrl: cfg.llmPrimaryBaseUrl,
+      llmPrimaryModel: cfg.llmPrimaryModel,
+      deepseekApiKey: cfg.deepseekApiKey,
+    },
+    () =>
+      generateProjectSummary({
+        name: project.name,
+        slug: project.slug,
+        readmeMd: project.readmeMd,
+        claudeMd: project.claudeMd,
+        techSummary: project.techSummary,
+      }),
+  );
+  if (!summary) {
+    return { ok: false, reason: "project has no docs and no techSummary — nothing to summarize" };
+  }
+  await db
+    .update(schema.projectProfiles)
+    .set({
+      summaryJson: JSON.stringify(summary),
+      summaryHash: project.profileHash,
+      summaryGeneratedAt: new Date(),
+      summaryPromptVersion: PROMPT_VERSION,
+    })
+    .where(eq(schema.projectProfiles.id, project.id));
+  revalidatePath(`/projects/${project.slug}`);
+  revalidatePath("/projects");
+  return { ok: true };
+}
+
+// "Open a docs-improvement PR for this project" — triggered from the
+// /projects/[slug] callout when Replen has detected sparse docs.
+// Thin wrapper over proposeDocsImprovement so the UI gets a server action
+// with the same shape as createHandoff.
+export async function openDocsImprovementPR(projectId: number): Promise<{ ok: boolean; prUrl?: string; reason?: string }> {
+  const user = await requireUser();
+  if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("invalid projectId");
+  const result = await proposeDocsImprovement(user.id, projectId);
+  if (result.ok) {
+    revalidatePath(`/projects`);
+    return { ok: true, prUrl: result.prUrl };
+  }
+  return { ok: false, reason: result.reason };
+}
+
