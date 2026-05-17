@@ -301,6 +301,14 @@ export const matches = sqliteTable(
     // Soft-delete timestamp - set by aging policy on old hidden matches so
     // the dashboard skips them without losing the history outright.
     archivedAt: integer("archived_at", { mode: "timestamp" }),
+    // Stage-4 attribution. Set only for matches produced from gh-targeted
+    // candidates (the targeted-search path). The UI surfaces this as
+    // "Replen found this because you said you want <outcome>" so users
+    // can see why a given repo surfaced. Null for general (HN/Reddit/
+    // trending) matches, which don't have outcome-level attribution.
+    matchedOutcome: text("matched_outcome"),
+    matchedOutcomeSource: text("matched_outcome_source"), // 'user' | 'inferred'
+    matchedOutcomeConfidence: text("matched_outcome_confidence"), // 'high' | 'medium'
   },
   (t) => ({
     idxRepoProject: index("idx_match_repo_project").on(t.repoId, t.projectId),

@@ -3,6 +3,7 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { scanRepo, type SafetyReport } from "../scanner/safety";
 import { triage } from "./triage";
 import { reasonAboutRepo, renderWriteup } from "./reason";
+import { scoreTargetedCandidate, type TargetedAttribution } from "./score-targeted";
 import { discoverLocalProjects, upsertProjects, type LocalProject } from "../projects/loader";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
@@ -84,6 +85,12 @@ async function runAnalysisInner(runId: number, userId: number) {
   const bestSourceByKey = new Map<string, string>();
   const scoreByKey = new Map<string, number>();
   const targets: { owner: string; name: string; key: string }[] = [];
+  // gh-targeted attribution per repo. When a repo was surfaced by Stage 3
+  // we already know which project + outcome it's meant to serve. Stage 4
+  // (score-targeted.ts) uses this to skip the existing shortlist pass and
+  // ask a sharper question: "does this repo serve outcome X for project Y?".
+  type AttribWithProjectId = TargetedAttribution & { projectId: number };
+  const targetedAttribByKey = new Map<string, AttribWithProjectId[]>();
   for (const c of cands) {
     const m = c.githubUrl?.match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
     if (!m) continue;
@@ -98,6 +105,37 @@ async function runAnalysisInner(runId: number, userId: number) {
     if (weighted > prevScore) scoreByKey.set(key, weighted);
     if (!targets.find((x) => x.key === key)) {
       targets.push({ owner: m[1], name: m[2].replace(/\.git$/, ""), key });
+    }
+    // Capture Stage-3 attribution (gh-targeted:<slug> sources only).
+    if (c.source.startsWith("gh-targeted:") && c.rawJson) {
+      try {
+        const raw = JSON.parse(c.rawJson) as {
+          projectId?: number;
+          outcome?: string;
+          outcomeSource?: string;
+          outcomeConfidence?: string;
+          matchedTerm?: string;
+        };
+        if (
+          typeof raw.projectId === "number" &&
+          typeof raw.outcome === "string" &&
+          (raw.outcomeSource === "user" || raw.outcomeSource === "inferred") &&
+          (raw.outcomeConfidence === "high" || raw.outcomeConfidence === "medium")
+        ) {
+          const arr = targetedAttribByKey.get(key) ?? [];
+          arr.push({
+            projectId: raw.projectId,
+            outcome: raw.outcome,
+            outcomeSource: raw.outcomeSource,
+            outcomeConfidence: raw.outcomeConfidence,
+            matchedTerm: typeof raw.matchedTerm === "string" ? raw.matchedTerm : "",
+          });
+          targetedAttribByKey.set(key, arr);
+        }
+      } catch {
+        // Malformed raw: just skip the attribution; the repo can still be
+        // processed via the general analyzer path if other candidates pull it in.
+      }
     }
   }
   // Reorder targets by their best weighted score, descending.
@@ -202,6 +240,86 @@ async function runAnalysisInner(runId: number, userId: number) {
       if (!t1.shouldReason) {
         void recordEvent(runId, userId, "triage_skip", `Triaged ${label} → skip: ${t1.oneLiner}`);
         return;
+      }
+
+      // Stage 4 path: when Stage 3 already attributed this repo to specific
+      // (project, outcome) pairs, skip the shortlist+writeup pass and run the
+      // outcome-attributed scorer instead. One LLM call per unique attribution.
+      // Per design lock: don't spillover-score against non-attributed projects.
+      const attribs = targetedAttribByKey.get(t.key) ?? [];
+      if (attribs.length > 0) {
+        // Dedupe by (projectId, outcome) — the same vector firing twice (e.g.
+        // matched via multiple query terms) shouldn't double-score.
+        const uniqAttribs = new Map<string, AttribWithProjectId>();
+        for (const a of attribs) {
+          const k = `${a.projectId}:${a.outcome}`;
+          if (!uniqAttribs.has(k)) uniqAttribs.set(k, a);
+        }
+        void recordEvent(runId, userId, "score", `Scoring ${label} against ${uniqAttribs.size} attributed outcome(s)`);
+
+        for (const attr of uniqAttribs.values()) {
+          const project = projectsForReasoning.find((p) => projectIdBySlug.get(p.slug) === attr.projectId);
+          if (!project) {
+            console.warn(`[score-targeted] attribution references missing projectId=${attr.projectId}`);
+            continue;
+          }
+          if (!project.included) {
+            console.warn(`[score-targeted] dropping ${label} → ${project.slug}: not included`);
+            continue;
+          }
+          let ta;
+          try {
+            ta = await scoreTargetedCandidate(safety, project, {
+              outcome: attr.outcome,
+              outcomeSource: attr.outcomeSource,
+              outcomeConfidence: attr.outcomeConfidence,
+              matchedTerm: attr.matchedTerm,
+            });
+          } catch (e) {
+            if (e instanceof LlmQuotaError) throw e;
+            console.warn(`[score-targeted] ${label} → ${project.slug} failed`, e);
+            continue;
+          }
+          if (!ta) continue;
+          // Drop low-score non-general matches. General-awareness rows are
+          // bookmarks — keep them at any score so they can resurface when a
+          // future project picks them up.
+          if (ta.relevance !== "general-awareness" && (ta.relevanceScore ?? 0) < 50) continue;
+          const writeup = renderWriteup(
+            { owner: safety.meta.owner, name: safety.meta.name, url: `https://github.com/${safety.meta.owner}/${safety.meta.name}` },
+            { oneLiner: "", safetyNotes: "", perProject: [ta] },
+            ta,
+            safety
+          );
+          await db.insert(schema.matches).values({
+            userId,
+            repoId: repoRow.id,
+            projectId: attr.projectId,
+            runId,
+            relevance: ta.relevance,
+            relevanceScore: ta.relevanceScore,
+            summary: ta.summary,
+            whyUseful: ta.whyUseful,
+            suggestedUse: ta.suggestedUse,
+            integrationApproach: ta.integrationApproach,
+            risks: ta.risks,
+            writeupMd: writeup,
+            userStatus: "unread",
+            createdAt: new Date(),
+            sourceKind: bestSourceByKey.get(t.key) ?? null,
+            matchedOutcome: ta.matchedOutcome,
+            matchedOutcomeSource: ta.matchedOutcomeSource,
+            matchedOutcomeConfidence: ta.matchedOutcomeConfidence,
+          });
+          matchesCreated++;
+          void recordEvent(
+            runId,
+            userId,
+            "match",
+            `Match: ${label} → ${project.slug} (${ta.relevance} · ${ta.relevanceScore ?? "—"} · outcome: ${ta.matchedOutcome.slice(0, 50)}…)`
+          );
+        }
+        return; // Don't fall through to reasonAboutRepo — attribution wins.
       }
 
       void recordEvent(runId, userId, "reason", `Reasoning about ${label} against ${projectsForReasoning.length} projects`);

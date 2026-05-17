@@ -1,11 +1,11 @@
 // One-shot: run Stage-3's gh-targeted-search fetcher for one user and print
-// what it would have returned. Does NOT insert into candidates — pure
-// observation. Useful for validating the search vectors actually surface
-// useful repos before letting the full pipeline ingest them.
+// what it would have returned. Defaults to read-only; pass --persist to also
+// insert the candidates so Stage 4 (inspect-targeted-score) can pick them up.
 //
 // Usage:
 //   tsx src/cli/inspect-targeted-search.ts --user=1
 //   tsx src/cli/inspect-targeted-search.ts --user=1 --slug=nexus    (filter to one project)
+//   tsx src/cli/inspect-targeted-search.ts --user=1 --persist       (also insert to candidates)
 
 import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
@@ -18,11 +18,16 @@ function arg(name: string): string | undefined {
   return hit ? hit.slice(name.length + 3) : undefined;
 }
 
+function flag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
+
 async function main() {
   const userIdStr = arg("user");
   const slugFilter = arg("slug");
+  const persist = flag("persist");
   if (!userIdStr) {
-    console.error(`Usage: tsx src/cli/inspect-targeted-search.ts --user=<id> [--slug=<project-slug>]`);
+    console.error(`Usage: tsx src/cli/inspect-targeted-search.ts --user=<id> [--slug=<project-slug>] [--persist]`);
     process.exit(1);
   }
   const userId = parseInt(userIdStr, 10);
@@ -95,6 +100,28 @@ async function main() {
   }
 
   console.log(`\n--- total: ${filtered.length} candidates`);
+
+  if (persist && filtered.length > 0) {
+    const now = new Date();
+    const rows = filtered.map((it) => ({
+      userId,
+      source: it.source,
+      sourceItemId: it.sourceItemId,
+      title: it.title,
+      url: it.url,
+      githubUrl: it.githubUrl,
+      author: it.author,
+      score: it.score,
+      postedAt: it.postedAt,
+      fetchedAt: now,
+      rawJson: JSON.stringify(it.raw),
+    }));
+    const result = await db
+      .insert(schema.candidates)
+      .values(rows)
+      .onConflictDoNothing({ target: [schema.candidates.userId, schema.candidates.source, schema.candidates.sourceItemId] });
+    console.error(`[inspect-targeted] persisted ${result.rowsAffected ?? "?"} of ${rows.length} candidates`);
+  }
 }
 
 main().catch((e) => {

@@ -95,6 +95,24 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
               <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
               <span className="meta">{r.stars ?? 0}★</span>
             </div>
+            {m.matchedOutcome && (
+              <div
+                className="meta"
+                style={{
+                  fontSize: 12,
+                  marginTop: 4,
+                  padding: "4px 8px",
+                  background: "rgba(120, 180, 255, 0.06)",
+                  borderLeft: "2px solid rgba(120, 180, 255, 0.4)",
+                  borderRadius: 4,
+                }}
+              >
+                Surfaced because you want: <em>{m.matchedOutcome}</em>
+                {m.matchedOutcomeSource === "inferred" && (
+                  <> · <span className="meta">(inferred, {m.matchedOutcomeConfidence})</span></>
+                )}
+              </div>
+            )}
             <div className="writeup">{writeup}</div>
           </div>
         );

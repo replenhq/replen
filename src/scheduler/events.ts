@@ -7,6 +7,7 @@ export type EventKind =
   | "skip"
   | "triage_skip"
   | "reason"
+  | "score"
   | "match"
   | "error";
 
