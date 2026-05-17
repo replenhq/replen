@@ -8,6 +8,7 @@ import { LocalTime } from "@/components/LocalTime";
 import { Icon } from "@/components/Icons";
 import { LivePipelineStatus } from "@/components/LivePipelineStatus";
 import { RefreshButton } from "@/components/RefreshButton";
+import { formatTimestampToMinute } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -156,16 +157,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     .orderBy(desc(schema.digestRuns.id))
     .get();
 
-  // Latest finished run — used to surface terminal failure reasons (e.g. an
-  // LLM provider running out of credits) as a sticky banner so the user
-  // doesn't just see "Refresh" silently producing no new matches.
+  // Latest finished run — used both as the source for the terminal-failure
+  // banner (when an LLM provider runs out of credits, etc.) and the "Last run"
+  // timestamp shown beside the Refresh button so the user can tell how fresh
+  // the feed is without checking /runs.
   const latestRun = await db
-    .select({ id: schema.digestRuns.id, pausedReason: schema.digestRuns.pausedReason })
+    .select({ id: schema.digestRuns.id, pausedReason: schema.digestRuns.pausedReason, finishedAt: schema.digestRuns.finishedAt })
     .from(schema.digestRuns)
     .where(and(eq(schema.digestRuns.userId, user.id), isNotNull(schema.digestRuns.finishedAt)))
     .orderBy(desc(schema.digestRuns.id))
     .get();
   const quotaSlot = parseQuotaReason(latestRun?.pausedReason ?? null);
+  const lastRunAt = latestRun?.finishedAt ?? null;
 
   // Group matches by project slug - matches the email digest layout. Order
   // groups by max relevanceScore so the highest-conviction project goes first.
@@ -190,10 +193,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ margin: 0, flex: 1 }}>Today&apos;s digest</h1>
-        <form action={runPipelineNow}>
-          <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
-        </form>
+        <h1 style={{ margin: 0, flex: 1 }}>Your feed</h1>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          <form action={runPipelineNow}>
+            <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
+          </form>
+          <div className="meta" style={{ fontSize: 12 }}>
+            {lastRunAt
+              ? `Last run: ${formatTimestampToMinute(lastRunAt)}`
+              : "No runs yet"}
+          </div>
+        </div>
       </div>
       <LivePipelineStatus
         initial={{

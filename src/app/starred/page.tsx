@@ -1,6 +1,7 @@
 import { db, schema } from "@/db/client";
-import { desc, eq, and, inArray } from "drizzle-orm";
+import { desc, eq, and, inArray, isNotNull, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
+import { formatTimestampToMinute } from "@/lib/format-date";
 import { createHandoff, refreshHandoffStatuses, setMatchStatus } from "../actions";
 import { BulkBar, RowCheck } from "./BulkBar";
 
@@ -107,6 +108,17 @@ export default async function Starred() {
   const openPr = starred.filter((m) => m.handoffPrUrl && !m.integratedAt && m.handoffPrStatus !== "merged");
   const integrated = starred.filter((m) => m.integratedAt || m.handoffPrStatus === "merged");
 
+  // When was the most recent PR poll? This is the timestamp the "Last refresh"
+  // label shows next to the refresh button — useful so the user can tell at a
+  // glance how fresh the displayed PR state is. Pulled across all matches with
+  // a handoff PR (the only rows the refresh action touches).
+  const lastRefreshRow = await db
+    .select({ at: sql<number>`MAX(${schema.matches.handoffPrCheckedAt})` })
+    .from(schema.matches)
+    .where(and(eq(schema.matches.userId, user.id), isNotNull(schema.matches.handoffPrUrl)))
+    .get();
+  const lastRefreshAt = lastRefreshRow?.at ? new Date(Number(lastRefreshRow.at) * 1000) : null;
+
   async function refresh() {
     "use server";
     await refreshHandoffStatuses();
@@ -122,6 +134,11 @@ export default async function Starred() {
         <form action={refresh} style={{ margin: "8px 0 16px" }}>
           <button type="submit">↻ Refresh PR statuses</button>
           <span className="meta" style={{ marginLeft: 8 }}>polls open handoff PRs (last checked &gt; 30m ago)</span>
+          <div className="meta" style={{ marginTop: 4, fontSize: 12 }}>
+            {lastRefreshAt
+              ? `Last refresh: ${formatTimestampToMinute(lastRefreshAt)}`
+              : "Last refresh: never"}
+          </div>
         </form>
       )}
 
