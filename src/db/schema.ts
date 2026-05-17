@@ -332,6 +332,30 @@ export const secretAccessLog = sqliteTable(
   })
 );
 
+// Append-only activity log for a pipeline run. Each significant decision
+// (fetch start/done, scan, triage skip, match, etc.) is written here so the
+// dashboard can render a live, line-by-line progress feed during an
+// in-flight run. Reads are cheap (indexed by run_id) and the table is
+// purged with the run itself via FK cascade.
+export const pipelineEvents = sqliteTable(
+  "pipeline_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: integer("run_id").notNull(),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    // 'fetch_start' | 'fetch_done' | 'scan' | 'skip' | 'triage_skip'
+    // | 'reason' | 'match' | 'error'
+    kind: text("kind").notNull(),
+    // Pre-formatted display string. The UI doesn't have to know about kinds
+    // — it just renders the message verbatim and uses kind for styling.
+    message: text("message").notNull(),
+  },
+  (t) => ({
+    idxRunTime: index("idx_pipeline_events_run_time").on(t.runId, t.createdAt),
+  })
+);
+
 export const digestRuns = sqliteTable(
   "digest_runs",
   {

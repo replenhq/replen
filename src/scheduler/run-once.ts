@@ -7,6 +7,7 @@ import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking } from "../analyzer/llm";
 import { totalCostUsd } from "../lib/pricing";
+import { recordEvent } from "./events";
 
 export async function runPipelineForUser(userId: number) {
   const cfg = await resolveUserConfig(userId);
@@ -48,8 +49,10 @@ export async function runPipelineForUser(userId: number) {
 
   beginUsageTracking();
   try {
+    void recordEvent(run!.id, userId, "fetch_start", "Fetching candidates from your sources…");
     const fetched = await runFetchers(userId, cfg);
     candidatesFound = fetched.inserted;
+    void recordEvent(run!.id, userId, "fetch_done", `Fetched ${fetched.inserted} new candidates (${fetched.total} total seen)`);
     const analysis = await runAnalysis(run!.id, userId, cfg);
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;

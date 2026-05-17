@@ -148,6 +148,13 @@
       "when": 1779026400000,
       "tag": "0020_digest_runs_user_time_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779013556583,
+      "tag": "0021_next_fenris",
+      "breakpoints": true
     }
   ]
 }

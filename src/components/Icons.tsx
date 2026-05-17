@@ -59,6 +59,12 @@ export function IconSprite() {
           <path d="M16 17l5-5-5-5" />
           <path d="M21 12H9" />
         </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 4v6h-6" />
+          <path d="M3 20v-6h6" />
+          <path d="M3.5 9a9 9 0 0114.85-3.36L21 8" />
+          <path d="M20.5 15a9 9 0 01-14.85 3.36L3 16" />
+        </symbol>
       </defs>
     </svg>
   );

@@ -1,11 +1,12 @@
 import { db, schema } from "@/db/client";
 import { desc, eq, gte, and, ne, inArray, sql, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { createHandoff, setMatchFeedback, setMatchStatus, setPersonalNote } from "./actions";
+import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPersonalNote } from "./actions";
 import { requireUser } from "@/lib/auth/current-user";
 import { sourceKind, sourceRank } from "@/lib/source-rank";
 import { LocalTime } from "@/components/LocalTime";
 import { Icon } from "@/components/Icons";
+import { LivePipelineStatus } from "@/components/LivePipelineStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     newSinceVisit = Number(newRow?.c ?? 0);
   }
 
+  // In-flight pipeline run for the refresh button. The action layer is the
+  // authoritative gate; this just controls the visual state.
+  const inFlightRun = await db
+    .select({ id: schema.digestRuns.id, startedAt: schema.digestRuns.startedAt })
+    .from(schema.digestRuns)
+    .where(and(eq(schema.digestRuns.userId, user.id), isNull(schema.digestRuns.finishedAt)))
+    .orderBy(desc(schema.digestRuns.id))
+    .get();
+
   // Group matches by project slug - matches the email digest layout. Order
   // groups by max relevanceScore so the highest-conviction project goes first.
   const groups = new Map<string, typeof matches>();
@@ -156,18 +166,45 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 
   return (
     <>
-      <h1>Today's digest</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <h1 style={{ margin: 0, flex: 1 }}>Today&apos;s digest</h1>
+        <form action={runPipelineNow}>
+          <button
+            type="submit"
+            disabled={!!inFlightRun}
+            title={inFlightRun
+              ? `Pipeline running (started ${inFlightRun.startedAt.toISOString().slice(11, 16)} UTC).`
+              : "Fetch new candidates, score them against your projects, write up the matches. 5–10 minutes."}
+          >
+            <Icon name="refresh" />
+            {inFlightRun ? "Running…" : "Refresh"}
+          </button>
+        </form>
+      </div>
+      <LivePipelineStatus
+        initial={{
+          inFlight: !!inFlightRun,
+          runId: inFlightRun?.id,
+          startedAt: inFlightRun?.startedAt?.toISOString(),
+          candidates: 0,
+          matches: 0,
+          events: [],
+        }}
+      />
       {newSinceVisit > 0 && (
         <div style={{
-          margin: "8px 0 12px", padding: "6px 12px", background: "#fffbe6", border: "1px solid #f5d76e",
-          borderRadius: 6, fontSize: 13, display: "inline-block",
+          margin: "8px 0 12px", padding: "6px 12px",
+          background: "var(--amber-soft)", border: "1px solid var(--amber-line)",
+          borderRadius: 8, fontSize: 13, display: "inline-block", color: "var(--amber)",
         }}>
-          ✨ {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
+          {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
         </div>
       )}
       <FilterBar relFilter={relFilter} days={days} projectFilter={projectFilter} countMap={countMap} />
       <p className="meta">{matches.length} matches shown · {orderedGroups.length} projects · window: last {days}d</p>
-      {matches.length === 0 && <p>No matches in this window. Try widening filters or run <code>npm run pipeline:run</code>.</p>}
+      {matches.length === 0 && (
+        <p>No matches in this window. Try widening the day filter, or click <b>Refresh</b> above to run the pipeline now.</p>
+      )}
       {orderedGroups.map(([slug, list]) => {
         const project = list[0].projectId ? projectMap.get(list[0].projectId) : null;
         const isGeneral = slug === "_general" || slug === "_unknown";

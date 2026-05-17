@@ -1,16 +1,49 @@
 "use server";
 
 import { db, schema } from "@/db/client";
-import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
 import { readUserSecret } from "@/lib/user-secrets";
 import { errorMsg } from "@/lib/error-msg";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
 import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
+import { runPipelineForUser } from "@/scheduler/run-once";
 
 const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred"]);
 const ALLOWED_FEEDBACK = new Set(["good", "bad", "clear"]);
+const MIN_RUN_GAP_MS = 60_000;
+
+// Manually triggers the pipeline for the current user. Used by the dashboard
+// refresh button and the /runs "Run now" button. Silently no-ops if a run is
+// already in flight or if the previous run finished less than 60s ago — the
+// dashboard query controls the visual gate, so the user doesn't see a
+// confusing error.
+export async function runPipelineNow(): Promise<void> {
+  const user = await requireUser();
+  const inFlight = await db
+    .select({ id: schema.digestRuns.id })
+    .from(schema.digestRuns)
+    .where(and(eq(schema.digestRuns.userId, user.id), isNull(schema.digestRuns.finishedAt)))
+    .get();
+  if (inFlight) {
+    console.warn(`[runPipelineNow] user=${user.id} already has run ${inFlight.id} in flight`);
+    return;
+  }
+  const cutoff = new Date(Date.now() - MIN_RUN_GAP_MS);
+  const recent = await db
+    .select({ id: schema.digestRuns.id })
+    .from(schema.digestRuns)
+    .where(and(eq(schema.digestRuns.userId, user.id), gte(schema.digestRuns.startedAt, cutoff)))
+    .get();
+  if (recent) {
+    console.warn(`[runPipelineNow] user=${user.id} ran within last ${MIN_RUN_GAP_MS / 1000}s; rejecting`);
+    return;
+  }
+  void runPipelineForUser(user.id).catch((e) => console.error("[runPipelineNow]", e));
+  revalidatePath("/");
+  revalidatePath("/runs");
+}
 
 export async function setMatchFeedback(matchId: number, value: string) {
   const user = await requireUser();

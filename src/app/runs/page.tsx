@@ -1,46 +1,11 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
-import { runPipelineForUser } from "@/scheduler/run-once";
+import { runPipelineNow } from "@/app/actions";
 import { LocalTime } from "@/components/LocalTime";
 import { sourceKind } from "@/lib/source-rank";
 
 export const dynamic = "force-dynamic";
-
-// Minimum gap between user-initiated runs. Prevents a malicious or buggy client
-// from rapid-firing the "Run pipeline now" button to burn LLM budget - the
-// front-end disables the button visually but the action endpoint is the
-// authoritative gate.
-const MIN_RUN_GAP_MS = 60_000;
-
-async function runNow() {
-  "use server";
-  const user = await requireUser();
-  // Reject if a run is already in flight for this user.
-  const inFlight = await db
-    .select({ id: schema.digestRuns.id })
-    .from(schema.digestRuns)
-    .where(and(eq(schema.digestRuns.userId, user.id), isNull(schema.digestRuns.finishedAt)))
-    .get();
-  if (inFlight) {
-    console.warn(`[/runs run-now] user=${user.id} already has run ${inFlight.id} in flight; ignoring`);
-    return;
-  }
-  // Reject if the previous run finished too recently.
-  const cutoff = new Date(Date.now() - MIN_RUN_GAP_MS);
-  const recent = await db
-    .select({ id: schema.digestRuns.id })
-    .from(schema.digestRuns)
-    .where(and(eq(schema.digestRuns.userId, user.id), gte(schema.digestRuns.startedAt, cutoff)))
-    .get();
-  if (recent) {
-    console.warn(`[/runs run-now] user=${user.id} ran within last ${MIN_RUN_GAP_MS / 1000}s; rejecting`);
-    return;
-  }
-  void runPipelineForUser(user.id).catch((e) => console.error("[/runs run-now]", e));
-  revalidatePath("/runs");
-}
 
 function fmtTokens(n: number | null | undefined): string {
   const v = Number(n ?? 0);
@@ -189,7 +154,7 @@ export default async function Runs() {
         response; cost is computed from a local pricing table (cross-check{" "}
         <a href="https://artificialanalysis.ai/leaderboards/models" target="_blank" rel="noreferrer">artificialanalysis.ai</a>).
       </p>
-      <form action={runNow} style={{ margin: "8px 0 16px" }}>
+      <form action={runPipelineNow} style={{ margin: "8px 0 16px" }}>
         <button type="submit" disabled={!!inFlight}>
           {inFlight ? `running (started ${inFlight.startedAt.toISOString().slice(11, 16)})…` : "Run pipeline now"}
         </button>

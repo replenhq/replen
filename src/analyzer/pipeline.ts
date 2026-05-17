@@ -8,6 +8,7 @@ import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "./run-context";
+import { recordEvent } from "../scheduler/events";
 
 const HOURS = 36;
 
@@ -135,7 +136,16 @@ async function runAnalysisInner(runId: number, userId: number) {
   let reposAnalyzed = 0;
   let matchesCreated = 0;
 
-  for (const t of targets) {
+  // Process targets with a worker-pool. Each target is independent
+  // (scanRepo → triage → reasonAboutRepo → match inserts) so they can run
+  // concurrently; we cap at REPO_CONCURRENCY to stay under LLM rate limits
+  // and avoid hammering the GitHub API. SQLite serialises writes itself.
+  const REPO_CONCURRENCY = Number(process.env.ANALYZER_REPO_CONCURRENCY) || 4;
+
+  async function processTarget(t: typeof targets[number]) {
+    const label = `${t.owner}/${t.name}`;
+    void recordEvent(runId, userId, "scan", `Scanning ${label}`);
+
     const existing = await db
       .select()
       .from(schema.repos)
@@ -143,26 +153,28 @@ async function runAnalysisInner(runId: number, userId: number) {
       .get();
     const oneDayAgo = Date.now() - 24 * 3600 * 1000;
     if (existing && existing.lastSeenAt && +existing.lastSeenAt > oneDayAgo) {
-      // Has THIS user already had this repo analysed today?
       const recentMatch = await db
         .select()
         .from(schema.matches)
         .where(and(eq(schema.matches.repoId, existing.id), eq(schema.matches.userId, userId)))
         .orderBy(desc(schema.matches.createdAt))
         .get();
-      if (recentMatch && +recentMatch.createdAt > oneDayAgo) continue;
+      if (recentMatch && +recentMatch.createdAt > oneDayAgo) {
+        void recordEvent(runId, userId, "skip", `Already analysed today: ${label}`);
+        return;
+      }
     }
 
     try {
       const safety = await scanRepo(t.owner, t.name);
-      if (!safety) continue;
-      // Second-line filter: same big-co/established check we apply at fetch
-      // time for gh-trending. Catches Anthropic, Vercel, etc. discovered via
-      // Threads / Reddit / HN where we don't have owner+stars until after scan.
+      if (!safety) {
+        void recordEvent(runId, userId, "skip", `Scan failed: ${label}`);
+        return;
+      }
       const verdict = shouldSkipBigCo(safety.meta.owner, safety.meta.stars);
       if (verdict.skip) {
-        console.log(`[pipeline] skip ${safety.meta.owner}/${safety.meta.name}: ${verdict.reason}`);
-        continue;
+        void recordEvent(runId, userId, "skip", `Skipped ${label} — ${verdict.reason}`);
+        return;
       }
       reposAnalyzed++;
 
@@ -184,18 +196,16 @@ async function runAnalysisInner(runId: number, userId: number) {
 
       const t1 = await triage(safety);
       if (!t1.shouldReason) {
-        console.log(`[triage] skip ${t.owner}/${t.name} - ${t1.oneLiner}`);
-        continue;
+        void recordEvent(runId, userId, "triage_skip", `Triaged ${label} → skip: ${t1.oneLiner}`);
+        return;
       }
 
+      void recordEvent(runId, userId, "reason", `Reasoning about ${label} against ${projectsForReasoning.length} projects`);
       const reasoning = await reasonAboutRepo(safety, projectsForReasoning);
 
       for (const pa of reasoning.perProject) {
         if ((pa.relevanceScore ?? 0) < 50) continue;
         const project = projectsForReasoning.find((p) => p.slug === pa.projectSlug);
-        // Hard guard: never persist a match against an excluded project, even if
-        // the LLM somehow returned its slug (e.g. hallucination, or a fix that
-        // regresses the filter).
         if (project && !project.included) {
           console.warn(`[analyze] dropping match: project ${project.slug} not included`);
           continue;
@@ -225,11 +235,31 @@ async function runAnalysisInner(runId: number, userId: number) {
           sourceKind: bestSourceByKey.get(t.key) ?? null,
         });
         matchesCreated++;
+        const projSlug = project?.slug ?? "_general";
+        void recordEvent(
+          runId,
+          userId,
+          "match",
+          `Match: ${label} → ${projSlug} (${pa.relevance} · ${pa.relevanceScore ?? "—"})`
+        );
       }
     } catch (e) {
       console.error(`[analyze] ${t.owner}/${t.name} failed`, e);
+      void recordEvent(runId, userId, "error", `Failed: ${t.owner}/${t.name}`);
     }
   }
+
+  let cursor = 0;
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(REPO_CONCURRENCY, targets.length); i++) {
+    workers.push((async () => {
+      while (cursor < targets.length) {
+        const idx = cursor++;
+        await processTarget(targets[idx]);
+      }
+    })());
+  }
+  await Promise.all(workers);
 
   return { reposAnalyzed, matchesCreated };
 }
