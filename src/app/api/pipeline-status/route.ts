@@ -96,6 +96,7 @@ export async function GET(req: Request) {
       runId: run.id,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      pausedReason: run.pausedReason,
       candidates,
       matches,
       phase,

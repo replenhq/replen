@@ -59,6 +59,43 @@ export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? process.
 
 export type Provider = "deepseek" | "anthropic";
 
+// Thrown when the LLM provider responds with a clear out-of-credits / quota
+// signal (HTTP 402, "insufficient_balance", "insufficient_quota", etc.).
+// These errors are NOT transient — retrying just wastes more calls — so the
+// retry loop bails out immediately when it sees one. Callers (pipeline,
+// scheduler) special-case this type to set pausedReason and surface a
+// "add credits / switch provider" message in the UI + CLI.
+export class LlmQuotaError extends Error {
+  readonly slot: "primary" | "sensitive";
+  readonly httpStatus: number;
+  readonly detail: string;
+  constructor(slot: "primary" | "sensitive", httpStatus: number, detail: string) {
+    super(`${slot} LLM out of credits (HTTP ${httpStatus}): ${detail.slice(0, 200)}`);
+    this.name = "LlmQuotaError";
+    this.slot = slot;
+    this.httpStatus = httpStatus;
+    this.detail = detail.slice(0, 500);
+  }
+}
+
+// Heuristic match across providers (DeepSeek, OpenAI, Anthropic, OpenRouter,
+// Together, Groq). HTTP 402 is the universal billing-failure status; the body
+// markers catch providers that prefer 429/400 for the same condition.
+function isQuotaError(status: number, body: string): boolean {
+  if (status === 402) return true;
+  const lower = body.toLowerCase();
+  return (
+    lower.includes("insufficient_quota") ||
+    lower.includes("insufficient balance") ||
+    lower.includes("insufficient_balance") ||
+    lower.includes("exceeded your current quota") ||
+    lower.includes("credit_balance_too_low") ||
+    lower.includes("billing_hard_limit_reached") ||
+    lower.includes("you have run out of credits") ||
+    lower.includes("no_credit_balance")
+  );
+}
+
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 export type ChatRequest = {
   model: string;
@@ -290,12 +327,18 @@ async function doWithRetry(
       clearTimeout(t);
       if (!res.ok) {
         const text = await res.text().catch(() => "");
+        if (isQuotaError(res.status, text)) {
+          throw new LlmQuotaError(label as "primary" | "sensitive", res.status, text);
+        }
         throw new Error(`${label} ${res.status}: ${text.slice(0, 300)}`);
       }
       return (await res.json()) as ChatResponse;
     } catch (e) {
       clearTimeout(t);
       lastErr = e;
+      // Quota errors are not transient — fail fast so the pipeline can stop
+      // and the UI can prompt the user to top up.
+      if (e instanceof LlmQuotaError) throw e;
       if (attempt === retries) break;
       const backoff = 1500 * (attempt + 1);
       console.warn(`[llm:${label}] attempt ${attempt + 1}/${retries + 1} failed: ${describe(e)}; retrying in ${backoff}ms`);

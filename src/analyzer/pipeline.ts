@@ -9,6 +9,7 @@ import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from 
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "./run-context";
 import { recordEvent } from "../scheduler/events";
+import { LlmQuotaError } from "./llm";
 
 const HOURS = 36;
 
@@ -135,6 +136,9 @@ async function runAnalysisInner(runId: number, userId: number) {
 
   let reposAnalyzed = 0;
   let matchesCreated = 0;
+  // Set when any worker hits an LlmQuotaError. Other workers see it on their
+  // next loop iteration and exit so we don't fire dozens of failing LLM calls.
+  let abortReason: LlmQuotaError | null = null;
 
   // Process targets with a worker-pool. Each target is independent
   // (scanRepo → triage → reasonAboutRepo → match inserts) so they can run
@@ -244,6 +248,13 @@ async function runAnalysisInner(runId: number, userId: number) {
         );
       }
     } catch (e) {
+      // Quota errors are terminal for the whole run — flag and re-throw so the
+      // worker pool stops scheduling new targets. Other errors are per-repo
+      // and shouldn't poison the rest of the analysis.
+      if (e instanceof LlmQuotaError) {
+        abortReason = e;
+        throw e;
+      }
       console.error(`[analyze] ${t.owner}/${t.name} failed`, e);
       void recordEvent(runId, userId, "error", `Failed: ${t.owner}/${t.name}`);
     }
@@ -254,12 +265,22 @@ async function runAnalysisInner(runId: number, userId: number) {
   for (let i = 0; i < Math.min(REPO_CONCURRENCY, targets.length); i++) {
     workers.push((async () => {
       while (cursor < targets.length) {
+        if (abortReason) return;
         const idx = cursor++;
-        await processTarget(targets[idx]);
+        try {
+          await processTarget(targets[idx]);
+        } catch {
+          // Quota errors are already captured in abortReason; processTarget's
+          // catch handles per-repo errors. Swallow here so allSettled doesn't
+          // surface duplicates — we re-throw abortReason after the pool drains.
+        }
       }
     })());
   }
-  await Promise.all(workers);
+  await Promise.allSettled(workers);
+  // If any worker hit quota mid-run, surface it now so runPipelineForUser
+  // can flag the digest_runs row with pausedReason='llm-quota'.
+  if (abortReason) throw abortReason;
 
   return { reposAnalyzed, matchesCreated };
 }

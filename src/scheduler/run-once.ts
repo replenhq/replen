@@ -5,7 +5,7 @@ import { runAnalysis } from "../analyzer/pipeline";
 import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
-import { beginUsageTracking, endUsageTracking } from "../analyzer/llm";
+import { beginUsageTracking, endUsageTracking, LlmQuotaError } from "../analyzer/llm";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 
@@ -42,6 +42,7 @@ export async function runPipelineForUser(userId: number) {
     .get();
 
   let errorLog: string | null = null;
+  let pausedReason: string | null = null;
   let candidatesFound = 0;
   let reposAnalyzed = 0;
   let matchesCreated = 0;
@@ -65,7 +66,20 @@ export async function runPipelineForUser(userId: number) {
     }
   } catch (e) {
     errorLog = e instanceof Error ? e.stack ?? e.message : String(e);
-    console.error(`[pipeline] user=${userId} failed`, e);
+    if (e instanceof LlmQuotaError) {
+      // Out of LLM credits — flag the run so the dashboard + CLI can prompt the
+      // user to top up or switch providers, instead of just showing a generic fail.
+      pausedReason = `llm-quota:${e.slot}`;
+      void recordEvent(
+        run!.id,
+        userId,
+        "error",
+        `${e.slot === "primary" ? "Primary" : "Sensitive"} LLM out of credits. Top up your API balance or switch providers on /settings.`,
+      );
+      console.warn(`[pipeline] user=${userId} stopped: ${e.message}`);
+    } else {
+      console.error(`[pipeline] user=${userId} failed`, e);
+    }
   }
   const usage = endUsageTracking();
   const cost = totalCostUsd(usage.calls);
@@ -84,6 +98,7 @@ export async function runPipelineForUser(userId: number) {
       anthropicInputTokens: usage.anthropicInputTokens,
       anthropicOutputTokens: usage.anthropicOutputTokens,
       costUsd: cost,
+      pausedReason,
     })
     .where(eq(schema.digestRuns.id, run!.id));
 

@@ -55,6 +55,7 @@ export async function runProgress(argv: string[]): Promise<void> {
     candidates?: number;
     matches?: number;
     phase?: string;
+    pausedReason?: string | null;
     events?: Event[];
   };
 
@@ -86,7 +87,15 @@ export async function runProgress(argv: string[]): Promise<void> {
     }
     if (!status.inFlight) {
       if (!json) {
-        console.log(`— done · ${status.matches ?? 0} matches · run #${status.runId ?? "?"}`);
+        const quota = parseQuotaReason(status.pausedReason ?? null);
+        if (quota) {
+          console.log("");
+          console.log(`✗ ${quota === "primary" ? "Primary" : "Sensitive"} LLM is out of credits.`);
+          console.log("  Top up your API key's balance, or rotate to a different provider on /settings.");
+          process.exitCode = 1;
+        } else {
+          console.log(`— done · ${status.matches ?? 0} matches · run #${status.runId ?? "?"}`);
+        }
       }
       return;
     }
@@ -224,6 +233,13 @@ function renderMatchLine(m: Match, opts: { showHandoff?: boolean } = {}): void {
   const handoff = opts.showHandoff && m.handoffPrUrl ? `\n      PR: ${m.handoffPrUrl}` : "";
   const repo = m.repo ?? "(no repo)";
   console.log(`  ${star} #${m.matchId} ${repo} → ${m.project} · ${m.relevance}${score}${stars}${lic}${handoff}`);
+}
+
+function parseQuotaReason(reason: string | null): "primary" | "sensitive" | null {
+  if (!reason) return null;
+  if (reason.startsWith("llm-quota:primary")) return "primary";
+  if (reason.startsWith("llm-quota:sensitive")) return "sensitive";
+  return null;
 }
 
 function marker(kind: string): string {

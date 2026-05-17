@@ -153,7 +153,8 @@ const TOOLS: Tool[] = [
   {
     name: "replen_status",
     description:
-      "Live status of the user's current or most-recent replen pipeline run. Returns inFlight, runId, candidates/matches counts, phase (fetching/scoring/writing/done), and a tail of pipeline events (the same line-by-line activity stream you see in the web UI). " +
+      "Live status of the user's current or most-recent replen pipeline run. Returns inFlight, runId, candidates/matches counts, phase (fetching/scoring/writing/done), pausedReason (when a run stopped early), and a tail of pipeline events. " +
+      "When pausedReason starts with 'llm-quota:', the user's LLM provider returned an out-of-credits response; tell the user to top up their API key or switch providers on /settings — do NOT call replen_run again. " +
       "Pass since=<event_id> to fetch only new events for incremental polling. Use after replen_run to wait for results.",
     inputSchema: {
       type: "object",

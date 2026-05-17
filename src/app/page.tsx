@@ -1,5 +1,5 @@
 import { db, schema } from "@/db/client";
-import { desc, eq, gte, and, ne, inArray, sql, isNull } from "drizzle-orm";
+import { desc, eq, gte, and, ne, inArray, sql, isNull, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPersonalNote } from "./actions";
 import { requireUser } from "@/lib/auth/current-user";
@@ -144,6 +144,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     .orderBy(desc(schema.digestRuns.id))
     .get();
 
+  // Latest finished run — used to surface terminal failure reasons (e.g. an
+  // LLM provider running out of credits) as a sticky banner so the user
+  // doesn't just see "Refresh" silently producing no new matches.
+  const latestRun = await db
+    .select({ id: schema.digestRuns.id, pausedReason: schema.digestRuns.pausedReason })
+    .from(schema.digestRuns)
+    .where(and(eq(schema.digestRuns.userId, user.id), isNotNull(schema.digestRuns.finishedAt)))
+    .orderBy(desc(schema.digestRuns.id))
+    .get();
+  const quotaSlot = parseQuotaReason(latestRun?.pausedReason ?? null);
+
   // Group matches by project slug - matches the email digest layout. Order
   // groups by max relevanceScore so the highest-conviction project goes first.
   const groups = new Map<string, typeof matches>();
@@ -191,6 +202,23 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           events: [],
         }}
       />
+      {quotaSlot && !inFlightRun && (
+        <div
+          role="alert"
+          style={{
+            margin: "12px 0",
+            padding: "12px 16px",
+            background: "rgba(255, 99, 99, 0.08)",
+            border: "1px solid rgba(255, 99, 99, 0.35)",
+            borderRadius: 10,
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>{quotaSlot === "primary" ? "Primary" : "Sensitive"} LLM is out of credits.</strong>{" "}
+          Your last run stopped because the provider returned an insufficient-balance response. Top up the API key&apos;s balance with your provider, or rotate to a different provider on <a href="/settings">/settings</a>, then hit <b>Refresh</b>.
+        </div>
+      )}
       {newSinceVisit > 0 && (
         <div style={{
           margin: "8px 0 12px", padding: "6px 12px",
@@ -315,6 +343,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       })}
     </>
   );
+}
+
+// pausedReason values used for quota failures look like `llm-quota:primary` or
+// `llm-quota:sensitive`. Returns the slot name or null if this is some other
+// kind of pause (cost-cap, no-candidates, etc.).
+function parseQuotaReason(reason: string | null): "primary" | "sensitive" | null {
+  if (!reason) return null;
+  if (reason.startsWith("llm-quota:primary")) return "primary";
+  if (reason.startsWith("llm-quota:sensitive")) return "sensitive";
+  return null;
 }
 
 function PersonalNote({ matchId, value }: { matchId: number; value: string }) {
