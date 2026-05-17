@@ -13,12 +13,16 @@ Run the morning replen triage. **Two output modes, default is terminal markdown:
 **Decide which mode** before fetching data. If the user's prompt mentions HTML / share / export / team / report file → HTML mode. Otherwise → markdown.
 
 You have access to the `replen` MCP server with these tools:
-- `digest_today`: fetch matches from the last N days
-- `digest_search`: full-text search prior matches
-- `digest_starred`: view starred items + handoff state
-- `digest_analyze_repo`: pull raw README + repo meta + project profiles (does not run our LLM analyzer; you judge fit yourself with the user's codebase in context)
-- `digest_create_handoff`: open a handoff PR in the matched project's repo
-- `digest_feedback`: record good/bad/star/unstar/hide
+- `replen_today`: fetch matches from the last N days
+- `replen_search`: full-text search prior matches
+- `replen_starred`: view starred items + handoff state
+- `replen_analyze`: pull raw README + repo meta + project profiles (does not run our LLM analyzer; you judge fit yourself with the user's codebase in context)
+- `replen_handoff`: open a handoff PR in the matched project's repo
+- `replen_feedback`: record good/bad/star/unstar/hide
+- `replen_run`: trigger a fresh pipeline run (rate-limited; returns immediately with status)
+- `replen_status`: live progress of the current/most-recent run — phase, candidate/match counts, and the same event stream the web UI shows. Pass `since=<event_id>` for incremental polling.
+
+**Triggering a fresh run from chat:** if the user says "run replen now" / "refresh the digest" before triaging, call `replen_run`, then poll `replen_status` (every ~3s, passing the last event id back as `since`) until `inFlight: false`, then proceed to step 1. If `replen_run` returns `status: "rate_limited"` or `"in_flight"`, just skip to step 1 — there's already fresh data.
 
 ## Protocol
 
@@ -27,7 +31,7 @@ You have access to the `replen` MCP server with these tools:
 Default: last 1 day, relevance `high` + `medium`. If the user said "this week" widen to 7 days. If they said "everything" widen to 30 + add `general-awareness`.
 
 ```
-digest_today({ days: 1, relevance: ["high", "medium"] })
+replen_today({ days: 1, relevance: ["high", "medium"] })
 ```
 
 If `count === 0`, say so in chat and stop. Do **not** generate an empty HTML file.
@@ -37,13 +41,13 @@ If `count === 0`, say so in chat and stop. Do **not** generate an empty HTML fil
 - **High-fit:** score ≥ 75 AND `project !== "_general"`. These get deep evaluation.
 - **Worth a glance:** score 60 to 74.
 - **Skipped:** score < 60 OR project is `_general`.
-- **Bad:** matches whose subject is actively off-topic for the user's stack; propose `digest_feedback(..., 'bad')` to train the source down.
+- **Bad:** matches whose subject is actively off-topic for the user's stack; propose `replen_feedback(..., 'bad')` to train the source down.
 
 ### 3. Evaluate the high-fit bucket
 
 For each match in score order:
 
-1. Call `digest_analyze_repo({ owner, name })`.
+1. Call `replen_analyze({ owner, name })`.
 2. Read README + the matched project's `techSummary`. **Use your own judgment**; don't just echo the cached writeup. You have the user's open codebase in context; the pipeline didn't.
 3. Decide one of: **KEEP** (+ handoff suggestion), **KEEP → revisit** (project's `githubFullName` not set), **SKIP**, **BAD**.
 4. Hold a 2 to 3 sentence verdict per match in your head; you'll use it in the HTML.
@@ -84,7 +88,7 @@ Read `reference-triage.html` in this skill's directory; that is **the visual ref
 **Hard constraints on the HTML:**
 - Single file, all CSS inline in `<style>`, no external assets, no CDN links, no remote fonts.
 - Mobile-responsive (the reference already is; keep it).
-- Buttons in the report **copy a Claude Code prompt to clipboard**, they do NOT call any API. Pattern: `<button class="copy-prompt" data-prompt="use replen to digest_create_handoff with matchId 96">Open handoff PR</button>`. The reference's `<script>` block at the bottom does the copy-to-clipboard wiring; include it verbatim.
+- Buttons in the report **copy a Claude Code prompt to clipboard**, they do NOT call any API. Pattern: `<button class="copy-prompt" data-prompt="use replen to replen_handoff with matchId 96">Open handoff PR</button>`. The reference's `<script>` block at the bottom does the copy-to-clipboard wiring; include it verbatim.
 - Include a tiny source-attribution bar chart at the top (the reference shows the pattern: pure CSS bars, no JS).
 - The "Bad" section has a single "Apply both 👎" button that chains the feedback calls.
 - The footer mentions when the next triage is and how to re-run.
@@ -113,14 +117,14 @@ In markdown mode (default), step 4a *was* the deliverable; no separate summary s
 
 Do **not** open handoff PRs or apply feedback automatically. The HTML report has buttons that copy the right prompts to clipboard; the user pastes back into Claude when ready.
 
-When the user says "open the PRs" / "do the handoffs": call `digest_create_handoff({ matchId })` for each high-fit match.
-When the user says "apply the bad feedback": call `digest_feedback({ matchId, action: 'bad' })` for each.
+When the user says "open the PRs" / "do the handoffs": call `replen_handoff({ matchId })` for each high-fit match.
+When the user says "apply the bad feedback": call `replen_feedback({ matchId, action: 'bad' })` for each.
 
 ## Briefing sub-protocol: deep dive on one repo
 
 When the user asks for a deep evaluation of a single repo ("brief me on roboflow/supervision", "is this worth integrating into &lt;project&gt;"), don't run the full triage. Instead:
 
-1. Call `digest_analyze_repo({ owner, name })`.
+1. Call `replen_analyze({ owner, name })`.
 2. Read `reference-briefing.html` for the visual reference.
 3. Write `~/replen/briefings/<owner>-<name>-YYYYMMDD.html` matching that style.
 4. The briefing **must** include:
@@ -154,6 +158,6 @@ Briefings are the natural Karpathy-style artifact: rich, single-file, shareable,
 
 ## When NOT to run this skill
 
-- If the user asks about a single specific repo (no comparison, no triage), use the briefing sub-protocol or just call `digest_analyze_repo` once and answer in chat; don't run the full protocol.
+- If the user asks about a single specific repo (no comparison, no triage), use the briefing sub-protocol or just call `replen_analyze` once and answer in chat; don't run the full protocol.
 - If the user is mid-task on something else and casually mentions digest, acknowledge and offer to run the triage when they want.
 - If the user says "just give me a list" or "no HTML, just text", skip the HTML write. The chat summary becomes the deliverable.

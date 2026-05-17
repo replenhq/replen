@@ -215,12 +215,12 @@ Self-contained npm package (`@replen/mcp`) that exposes six tools to Claude Code
 
 | Tool | Returns |
 |---|---|
-| `digest_today` | Recent matches in JSON, filterable by days / relevance / project |
-| `digest_search` | Full-text search results |
-| `digest_starred` | Starred matches with handoff state |
-| `digest_analyze_repo` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
-| `digest_create_handoff` | Opens a handoff PR for a starred match |
-| `digest_feedback` | Records good/bad/star/unstar/hide |
+| `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
+| `replen_search` | Full-text search results |
+| `replen_starred` | Starred matches with handoff state |
+| `replen_analyze` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
+| `replen_handoff` | Opens a handoff PR for a starred match |
+| `replen_feedback` | Records good/bad/star/unstar/hide |
 
 **Install:** `npx replen` (does the OAuth flow + wires this into Claude Code in one command; see Quickstart above).
 

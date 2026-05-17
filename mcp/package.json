@@ -1,6 +1,6 @@
 {
   "name": "@replen/mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "MCP server for replen - Smart AI Development workflows. Brings replen's proactive 'can we do this better?' research into Claude Code / Codex / any MCP host, so your AI coding workflow can act on the day's matches without ever leaving the chat.",
   "type": "module",
   "bin": {
@@ -13,6 +13,7 @@
   },
   "files": [
     "dist",
+    "extras",
     "README.md",
     "LICENSE"
   ],

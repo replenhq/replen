@@ -10,9 +10,10 @@
 // exact one-liner with a fresh token already baked in. Users paste it into
 // their terminal once; we never see the token transit.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync, copyFileSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 type Args = {
   token: string | null;
@@ -119,7 +120,31 @@ After running this, restart Claude Code. The "${args.name}" MCP server will be a
 
   writeJsonAtomic(args.configPath, { ...config, mcpServers });
 
+  installSlashCommand();
+
   console.error("\n✔ Installed.");
   console.error("→ Restart Claude Code to activate.");
-  console.error(`→ Then try:  use replen to show me today's matches`);
+  console.error(`→ Then try:  /replen   (lists available commands)`);
+}
+
+// Drops a `/replen` slash command into ~/.claude/commands/ so users get a
+// discoverable menu of MCP tools. Best-effort: failures are warnings, never
+// fatal — the MCP server still works without the slash command.
+function installSlashCommand(): void {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const src = join(here, "..", "extras", "replen.md");
+    if (!existsSync(src)) {
+      console.error(`  (slash command source missing at ${src}; skipping)`);
+      return;
+    }
+    const commandsDir = join(homedir(), ".claude", "commands");
+    mkdirSync(commandsDir, { recursive: true });
+    const dest = join(commandsDir, "replen.md");
+    const exists = existsSync(dest);
+    copyFileSync(src, dest);
+    console.error(`  ${exists ? "↻ updated" : "+ installed"} /replen command at ${dest}`);
+  } catch (e) {
+    console.error(`  (couldn't install /replen slash command: ${(e as Error).message})`);
+  }
 }

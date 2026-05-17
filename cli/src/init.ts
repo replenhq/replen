@@ -154,7 +154,7 @@ export async function runInit(): Promise<void> {
   console.log("");
   console.log("  All set. Restart Claude Code (or Codex) and try:");
   console.log("    /replen-triage      → runs the morning triage protocol");
-  console.log("    use replen to digest_today → pulls today's matches");
+  console.log("    use replen to replen_today → pulls today's matches");
   console.log("");
   console.log(`  Dashboard: ${exchange.base}`);
   console.log("");

@@ -12,14 +12,14 @@ While your AI coding tool waits for prompts, replen reads your code against the 
 
 | Tool | Returns |
 |---|---|
-| `digest_today` | Recent matches as JSON, filterable by days / relevance / project |
-| `digest_search` | Full-text search across your digest history |
-| `digest_starred` | Starred matches with handoff state |
-| `digest_analyze_repo` | Raw README + repo meta + your project profiles - no LLM call on our side, lets the host agent judge fit against your open codebase |
-| `digest_create_handoff` | Opens a handoff PR in the matched project's repo |
-| `digest_feedback` | Records good / bad / star / unstar / hide |
+| `replen_today` | Recent matches as JSON, filterable by days / relevance / project |
+| `replen_search` | Full-text search across your digest history |
+| `replen_starred` | Starred matches with handoff state |
+| `replen_analyze` | Raw README + repo meta + your project profiles - no LLM call on our side, lets the host agent judge fit against your open codebase |
+| `replen_handoff` | Opens a handoff PR in the matched project's repo |
+| `replen_feedback` | Records good / bad / star / unstar / hide |
 
-The killer tool is `digest_analyze_repo` - by returning raw signals instead of running our pipeline, the agent reasons about fit with **your actual open codebase in context**, which the digest's nightly cron doesn't have.
+The killer tool is `replen_analyze` - by returning raw signals instead of running our pipeline, the agent reasons about fit with **your actual open codebase in context**, which the digest's nightly cron doesn't have.
 
 ## Install (one-liner)
 
@@ -69,28 +69,28 @@ replen-mcp               # run as stdio MCP server (your host spawns this; you u
 
 ```
 You: anything new today for my project X?
-Agent: [calls digest_today({project: "my-project-x"})]
+Agent: [calls replen_today({project: "my-project-x"})]
        2 matches today, top one is roboflow/supervision - 38k★ - MIT -
        relevance: high (85) · sourced via gh-trending.
        Want me to evaluate it against your current codebase?
 
 You: yes
-Agent: [calls digest_analyze_repo({owner: "roboflow", name: "supervision"})]
+Agent: [calls replen_analyze({owner: "roboflow", name: "supervision"})]
        [reads README + your project's tech summary]
        It's a drop-in replacement for your hand-rolled annotation utilities,
        plus deletes your ByteTrack reimplementation. Strong fit. Want a
        handoff PR?
 
 You: yes
-Agent: [calls digest_create_handoff({matchId: 96})]
+Agent: [calls replen_handoff({matchId: 96})]
        PR opened: github.com/you/my-project-x/pull/142
 ```
 
 ## Costs
 
-- **Read-only tools** (`digest_today` / `digest_search` / `digest_starred`) cost nothing - pure JSON shuttle.
-- **`digest_analyze_repo`** is one GitHub API call + the agent's own analysis cost (paid through your Claude subscription, not replen's).
-- **`digest_create_handoff`** is one GitHub write call. No LLM on our side.
+- **Read-only tools** (`replen_today` / `replen_search` / `replen_starred`) cost nothing - pure JSON shuttle.
+- **`replen_analyze`** is one GitHub API call + the agent's own analysis cost (paid through your Claude subscription, not replen's).
+- **`replen_handoff`** is one GitHub write call. No LLM on our side.
 
 No additional replen-side cost vs the web dashboard - the MCP server queries the same API as `app.replen.dev`.
 
