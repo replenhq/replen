@@ -14,7 +14,13 @@ import { generateProjectSummary, PROMPT_VERSION } from "@/projects/summarize";
 import { resolveUserConfig } from "@/scheduler/user-config";
 import { withRunConfig } from "@/analyzer/run-context";
 
-const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred"]);
+// 'bookmarked' is the user-status for general-awareness matches the user is
+// "saving for later". It's semantically distinct from 'starred' (which is the
+// "I want to act on this" signal for high/medium matches) — see
+// docs/bookmark-resurface-scope.md. The setMatchStatus action enforces the
+// rule: 'starred' is rejected on general-awareness rows, 'bookmarked' is
+// rejected on non-general-awareness rows.
+const ALLOWED_STATUSES = new Set(["unread", "hidden", "starred", "bookmarked"]);
 const ALLOWED_FEEDBACK = new Set(["good", "bad", "clear"]);
 const MIN_RUN_GAP_MS = 60_000;
 
@@ -80,12 +86,31 @@ export async function setMatchStatus(matchId: number, status: string) {
   const user = await requireUser();
   if (!ALLOWED_STATUSES.has(status)) throw new Error(`invalid status: ${status}`);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
+  // Enforce intent split: 'starred' = action item (high/medium); 'bookmarked'
+  // = save-for-later (general-awareness). The UI keys the button off relevance
+  // and only ever sends the right value, but a server-side guard keeps the
+  // data clean if a stale tab sends the wrong one.
+  if (status === "starred" || status === "bookmarked") {
+    const row = await db
+      .select({ relevance: schema.matches.relevance })
+      .from(schema.matches)
+      .where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, user.id)))
+      .get();
+    if (!row) throw new Error("match not found");
+    if (status === "starred" && row.relevance === "general-awareness") {
+      throw new Error("general-awareness matches use 'bookmarked', not 'starred'");
+    }
+    if (status === "bookmarked" && row.relevance !== "general-awareness") {
+      throw new Error("only general-awareness matches can be bookmarked");
+    }
+  }
   await db
     .update(schema.matches)
     .set({ userStatus: status })
     .where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, user.id)));
   revalidatePath("/");
   revalidatePath("/projects");
+  revalidatePath("/starred");
 }
 
 export async function createHandoff(matchId: number): Promise<{ ok: boolean; prUrl?: string; reason?: string }> {

@@ -48,6 +48,7 @@ export async function GET(req: Request) {
     relevanceScore: m.relevanceScore,
     summary: ((m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "").slice(0, 400),
     starred: m.userStatus === "starred",
+    bookmarked: m.userStatus === "bookmarked",
     handoffPrUrl: m.handoffPrUrl,
     createdAt: m.createdAt.toISOString(),
   }));

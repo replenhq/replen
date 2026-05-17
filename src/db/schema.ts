@@ -276,6 +276,12 @@ export const matches = sqliteTable(
     integrationApproach: text("integration_approach"),
     risks: text("risks"),
     writeupMd: text("writeup_md"),
+    // 'unread' | 'starred' | 'bookmarked' | 'hidden'. 'starred' = "action
+    // item" (only valid on high/medium relevance); 'bookmarked' = "save for
+    // later" (only valid on general-awareness). The split is enforced in
+    // setMatchStatus (src/app/actions.ts) and lets the bookmark resurface
+    // logic key off `userStatus = 'bookmarked'` directly instead of joining
+    // on relevance. See docs/bookmark-resurface-scope.md.
     userStatus: text("user_status").notNull().default("unread"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     // URL of the GitHub PR opened by the "create handoff" action. Non-null
@@ -309,11 +315,47 @@ export const matches = sqliteTable(
     matchedOutcome: text("matched_outcome"),
     matchedOutcomeSource: text("matched_outcome_source"), // 'user' | 'inferred'
     matchedOutcomeConfidence: text("matched_outcome_confidence"), // 'high' | 'medium'
+    // How this match entered the user's digest. 'targeted' = Stage 3/4 outcome
+    // attribution; 'serendipity' = broad-net fetcher (HN, reddit, trending,
+    // etc.) with no outcome; 'bookmark' = resurfaced from the user's starred
+    // general-awareness pile against a different project; 'manual' = direct
+    // user push (bookmarklet, MCP, /api/ingest) — reserved, not yet used by
+    // any insert path. See docs/stage-5-scope.md and
+    // docs/bookmark-resurface-scope.md.
+    discoveryMode: text("discovery_mode"), // 'targeted' | 'serendipity' | 'bookmark' | 'manual'
+    // Resurface back-link: when a bookmarked general-awareness match
+    // re-surfaces as a fit for a different project, the new row references
+    // the original starred match. The UI uses this to render the "saved on
+    // <date>" chip linking back to the bookmark.
+    resurfacedFromMatchId: integer("resurfaced_from_match_id"),
   },
   (t) => ({
     idxRepoProject: index("idx_match_repo_project").on(t.repoId, t.projectId),
     idxRun: index("idx_match_run").on(t.runId),
     idxUser: index("idx_match_user").on(t.userId),
+  })
+);
+
+// Tombstone log of resurface attempts. Each row records that we asked the LLM
+// "does bookmarked repo R fit project P for user U?" — successful or not.
+// `outcome` distinguishes 'matched' (a resurface match was inserted) from
+// 'no-fit' (LLM said this bookmark doesn't serve any of the project's
+// outcomes). The pipeline reads this table to enforce the recurring 20-day
+// retry window per (user, repo, project): pairs with a tombstone newer than
+// RESURFACE_RETRY_DAYS are skipped. See docs/bookmark-resurface-scope.md.
+export const resurfaceAttempts = sqliteTable(
+  "resurface_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull().references(() => repos.id, { onDelete: "cascade" }),
+    projectId: integer("project_id").notNull().references(() => projectProfiles.id, { onDelete: "cascade" }),
+    attemptedAt: integer("attempted_at", { mode: "timestamp" }).notNull(),
+    outcome: text("outcome").notNull(), // 'matched' | 'no-fit'
+  },
+  (t) => ({
+    uniqPair: uniqueIndex("uniq_resurface_attempt_pair").on(t.userId, t.repoId, t.projectId),
+    idxUserTime: index("idx_resurface_attempts_user_time").on(t.userId, t.attemptedAt),
   })
 );
 

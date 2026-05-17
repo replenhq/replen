@@ -176,6 +176,13 @@
       "when": 1779040800000,
       "tag": "0024_match_outcome_attribution",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779044400000,
+      "tag": "0025_match_discovery_mode_and_resurface",
+      "breakpoints": true
     }
   ]
 }

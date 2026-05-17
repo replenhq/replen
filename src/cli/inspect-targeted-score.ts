@@ -6,6 +6,8 @@
 // Usage:
 //   tsx src/cli/inspect-targeted-score.ts --user=1 --slug=acme-web
 //   tsx src/cli/inspect-targeted-score.ts --user=1 --slug=acme-web --limit=3
+//   tsx src/cli/inspect-targeted-score.ts --user=1 --slug=acme-web --outcome=explainable
+//      (case-insensitive substring match against vector.outcome)
 //
 // Scans recent gh-targeted candidates attributed to <slug>, deduplicates by
 // (projectId, outcome) and (owner/name), runs scoreTargetedCandidate against
@@ -28,6 +30,7 @@ async function main() {
   const userIdStr = arg("user");
   const slug = arg("slug");
   const limit = parseInt(arg("limit") ?? "5", 10);
+  const outcomeFilter = arg("outcome")?.toLowerCase() ?? null;
   if (!userIdStr || !slug) {
     console.error(`Usage: tsx src/cli/inspect-targeted-score.ts --user=<id> --slug=<project-slug> [--limit=<N>]`);
     process.exit(1);
@@ -116,6 +119,7 @@ async function main() {
         if (!raw.owner || !raw.name || !raw.outcome) continue;
         if (raw.outcomeSource !== "user" && raw.outcomeSource !== "inferred") continue;
         if (raw.outcomeConfidence !== "high" && raw.outcomeConfidence !== "medium") continue;
+        if (outcomeFilter && !raw.outcome.toLowerCase().includes(outcomeFilter)) continue;
 
         console.log(`\n--- ${raw.owner}/${raw.name}`);
         console.log(`    outcome: ${raw.outcome}`);

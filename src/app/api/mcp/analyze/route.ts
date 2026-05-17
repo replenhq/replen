@@ -132,6 +132,7 @@ export async function POST(req: Request) {
       relevanceScore: m.relevanceScore,
       writeup: ((m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "").slice(0, 1500),
       starred: m.userStatus === "starred",
+      bookmarked: m.userStatus === "bookmarked",
       handoffPrUrl: m.handoffPrUrl,
     })),
   }, { headers: corsHeaders });

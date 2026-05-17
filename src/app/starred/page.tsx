@@ -6,26 +6,33 @@ import { BulkBar, RowCheck } from "./BulkBar";
 
 export const dynamic = "force-dynamic";
 
-// Standalone "starred" view - everything the user has flagged, partitioned by
-// where it is in the handoff lifecycle. Useful because the dashboard's day-
-// window filter hides older stars, but the user often wants to come back to a
-// pile of "things I starred but haven't actioned yet".
-//
-// Buckets:
-//   1. Awaiting handoff  - starred, no PR opened yet
-//   2. Open / under review - PR opened but not merged
-//   3. Integrated        - PR merged (integratedAt set)
+// Two flavours on this page:
+//   - "Starred" = action items the user wants to ship. high/medium relevance,
+//     userStatus='starred'. Bucketed by handoff lifecycle.
+//   - "Bookmarks" = save-for-laters. general-awareness relevance, userStatus
+//     ='bookmarked'. Re-evaluated against the user's other projects every 20
+//     days (see docs/bookmark-resurface-scope.md). The bookmark section shows
+//     the resurface state per bookmark — when it was last checked, when the
+//     next retry falls, and whether it surfaced as a fit for any project.
+const RESURFACE_RETRY_DAYS = 20;
+
 export default async function Starred() {
   const user = await requireUser();
 
-  const starred = await db
+  const saved = await db
     .select()
     .from(schema.matches)
-    .where(and(eq(schema.matches.userId, user.id), eq(schema.matches.userStatus, "starred")))
+    .where(and(
+      eq(schema.matches.userId, user.id),
+      inArray(schema.matches.userStatus, ["starred", "bookmarked"]),
+    ))
     .orderBy(desc(schema.matches.createdAt));
 
-  const repoIds = [...new Set(starred.map((m) => m.repoId))];
-  const projectIds = [...new Set(starred.map((m) => m.projectId).filter((x): x is number => !!x))];
+  const starred = saved.filter((m) => m.userStatus === "starred");
+  const bookmarks = saved.filter((m) => m.userStatus === "bookmarked");
+
+  const repoIds = [...new Set(saved.map((m) => m.repoId))];
+  const projectIds = [...new Set(saved.map((m) => m.projectId).filter((x): x is number => !!x))];
   const repoMap = new Map<number, typeof schema.repos.$inferSelect>();
   if (repoIds.length > 0) {
     const rs = await db.select().from(schema.repos).where(inArray(schema.repos.id, repoIds));
@@ -41,6 +48,61 @@ export default async function Starred() {
     for (const p of ps) projectMap.set(p.id, p);
   }
 
+  // Resurface state for each bookmark: attempts per repoId, plus any
+  // successful resurface matches that came from this bookmark.
+  const bookmarkRepoIds = [...new Set(bookmarks.map((b) => b.repoId))];
+  const attemptsByRepo = new Map<number, { attemptedAt: Date; outcome: string; projectId: number }[]>();
+  if (bookmarkRepoIds.length > 0) {
+    const rows = await db
+      .select()
+      .from(schema.resurfaceAttempts)
+      .where(and(
+        eq(schema.resurfaceAttempts.userId, user.id),
+        inArray(schema.resurfaceAttempts.repoId, bookmarkRepoIds),
+      ));
+    for (const r of rows) {
+      const arr = attemptsByRepo.get(r.repoId) ?? [];
+      arr.push({ attemptedAt: r.attemptedAt, outcome: r.outcome, projectId: r.projectId });
+      attemptsByRepo.set(r.repoId, arr);
+    }
+  }
+  // Resurfaced matches that descend from these bookmarks (so we can link out).
+  const bookmarkIds = bookmarks.map((b) => b.id);
+  const resurfaceMatchesByBookmarkId = new Map<number, { matchId: number; projectId: number | null }[]>();
+  if (bookmarkIds.length > 0) {
+    const rs = await db
+      .select({
+        id: schema.matches.id,
+        resurfacedFromMatchId: schema.matches.resurfacedFromMatchId,
+        projectId: schema.matches.projectId,
+      })
+      .from(schema.matches)
+      .where(and(
+        eq(schema.matches.userId, user.id),
+        eq(schema.matches.discoveryMode, "bookmark"),
+        inArray(schema.matches.resurfacedFromMatchId, bookmarkIds),
+      ));
+    for (const r of rs) {
+      if (!r.resurfacedFromMatchId) continue;
+      const arr = resurfaceMatchesByBookmarkId.get(r.resurfacedFromMatchId) ?? [];
+      arr.push({ matchId: r.id, projectId: r.projectId });
+      resurfaceMatchesByBookmarkId.set(r.resurfacedFromMatchId, arr);
+    }
+    // Also need the project slugs for any resurface-target project that
+    // wasn't already in the projectMap (e.g. the resurface matched to a
+    // project that has no bookmark in the saved list).
+    const extraIds = [...new Set([...resurfaceMatchesByBookmarkId.values()]
+      .flatMap((arr) => arr.map((x) => x.projectId)).filter((x): x is number => !!x && !projectMap.has(x)))];
+    if (extraIds.length > 0) {
+      const ps = await db.select().from(schema.projectProfiles)
+        .where(and(
+          eq(schema.projectProfiles.userId, user.id),
+          inArray(schema.projectProfiles.id, extraIds),
+        ));
+      for (const p of ps) projectMap.set(p.id, p);
+    }
+  }
+
   const awaiting = starred.filter((m) => !m.handoffPrUrl);
   const openPr = starred.filter((m) => m.handoffPrUrl && !m.integratedAt && m.handoffPrStatus !== "merged");
   const integrated = starred.filter((m) => m.integratedAt || m.handoffPrStatus === "merged");
@@ -52,9 +114,9 @@ export default async function Starred() {
 
   return (
     <>
-      <h1>⭐ Starred</h1>
+      <h1>⭐ Starred &amp; 🔖 Bookmarks</h1>
       <p className="meta">
-        {starred.length} starred · {awaiting.length} awaiting handoff · {openPr.length} PR open · {integrated.length} integrated
+        {starred.length} starred · {awaiting.length} awaiting handoff · {openPr.length} PR open · {integrated.length} integrated · {bookmarks.length} bookmarked
       </p>
       {(openPr.length > 0 || awaiting.length > 0) && (
         <form action={refresh} style={{ margin: "8px 0 16px" }}>
@@ -68,6 +130,14 @@ export default async function Starred() {
       <Section title={`Awaiting handoff (${awaiting.length})`} list={awaiting} repoMap={repoMap} projectMap={projectMap} bucket="awaiting" />
       <Section title={`PR open (${openPr.length})`} list={openPr} repoMap={repoMap} projectMap={projectMap} bucket="open" />
       <Section title={`Integrated (${integrated.length})`} list={integrated} repoMap={repoMap} projectMap={projectMap} bucket="integrated" />
+
+      <BookmarksSection
+        list={bookmarks}
+        repoMap={repoMap}
+        projectMap={projectMap}
+        attemptsByRepo={attemptsByRepo}
+        resurfaceMatchesByBookmarkId={resurfaceMatchesByBookmarkId}
+      />
     </>
   );
 }
@@ -125,5 +195,92 @@ function Section({ title, list, repoMap, projectMap, bucket }: {
         );
       })}
     </section>
+  );
+}
+
+function BookmarksSection({ list, repoMap, projectMap, attemptsByRepo, resurfaceMatchesByBookmarkId }: {
+  list: (typeof schema.matches.$inferSelect)[];
+  repoMap: Map<number, typeof schema.repos.$inferSelect>;
+  projectMap: Map<number, typeof schema.projectProfiles.$inferSelect>;
+  attemptsByRepo: Map<number, { attemptedAt: Date; outcome: string; projectId: number }[]>;
+  resurfaceMatchesByBookmarkId: Map<number, { matchId: number; projectId: number | null }[]>;
+}) {
+  if (list.length === 0) return null;
+  return (
+    <section style={{ marginTop: 36 }}>
+      <h2 style={{ borderBottom: "1px solid #ccc4", paddingBottom: 4, marginBottom: 4 }}>🔖 Bookmarks ({list.length})</h2>
+      <p className="meta" style={{ marginTop: 0, marginBottom: 12 }}>
+        Replen re-evaluates each bookmark against every one of your projects every {RESURFACE_RETRY_DAYS} days. If your project goals change, a bookmark may resurface as a fit on your dashboard.
+      </p>
+      {list.map((m) => {
+        const repo = repoMap.get(m.repoId);
+        if (!repo) return null;
+        const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
+        const attempts = attemptsByRepo.get(m.repoId) ?? [];
+        const lastAttempt = attempts.length > 0
+          ? attempts.reduce((a, b) => (+a.attemptedAt > +b.attemptedAt ? a : b))
+          : null;
+        const surfaced = resurfaceMatchesByBookmarkId.get(m.id) ?? [];
+        return (
+          <div className="match" key={m.id}>
+            <div className="match-head">
+              <RowCheck id={m.id} />
+              <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
+              <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
+              <span className="meta">
+                {repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · saved {m.createdAt.toLocaleDateString()}
+              </span>
+              <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "unread"); }}>
+                <button title="Remove bookmark">🔖 remove</button>
+              </form>
+            </div>
+            <div className="writeup">{writeup}</div>
+            <ResurfaceStatus
+              lastAttempt={lastAttempt}
+              surfaced={surfaced}
+              projectMap={projectMap}
+            />
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function ResurfaceStatus({ lastAttempt, surfaced, projectMap }: {
+  lastAttempt: { attemptedAt: Date; outcome: string; projectId: number } | null;
+  surfaced: { matchId: number; projectId: number | null }[];
+  projectMap: Map<number, typeof schema.projectProfiles.$inferSelect>;
+}) {
+  const baseStyle: React.CSSProperties = { marginTop: 6, fontSize: 12, color: "#555" };
+
+  if (surfaced.length > 0) {
+    const links = surfaced.map((s, i) => {
+      const slug = s.projectId ? projectMap.get(s.projectId)?.slug ?? "_unknown" : "_unknown";
+      return (
+        <span key={s.matchId}>
+          {i > 0 ? ", " : ""}
+          <a href={`/?project=${slug}#m-${s.matchId}`} style={{ color: "#1d4ed8" }}>{slug}</a>
+        </span>
+      );
+    });
+    return (
+      <p style={{ ...baseStyle, color: "#065f46" }}>
+        ✓ Surfaced as a fit for {links}
+      </p>
+    );
+  }
+
+  if (!lastAttempt) {
+    return <p style={baseStyle}>Not yet checked against your other projects (runs nightly).</p>;
+  }
+
+  const nextRetry = new Date(+lastAttempt.attemptedAt + RESURFACE_RETRY_DAYS * 24 * 3600 * 1000);
+  const daysLeft = Math.max(0, Math.ceil((+nextRetry - Date.now()) / (24 * 3600 * 1000)));
+  return (
+    <p style={baseStyle}>
+      Last re-checked {lastAttempt.attemptedAt.toLocaleDateString()} — no fit yet for any project.
+      Next retry in {daysLeft} {daysLeft === 1 ? "day" : "days"}.
+    </p>
   );
 }

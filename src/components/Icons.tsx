@@ -8,6 +8,12 @@ export function IconSprite() {
         <symbol id="i-star-fill" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2.5l2.95 6 6.55.95-4.75 4.65 1.12 6.55L12 17.6 6.13 20.65 7.25 14.1 2.5 9.45 9.05 8.5z" />
         </symbol>
+        <symbol id="i-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 4h12a1 1 0 0 1 1 1v16l-7-4-7 4V5a1 1 0 0 1 1-1z" />
+        </symbol>
+        <symbol id="i-bookmark-fill" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 4h12a1 1 0 0 1 1 1v16l-7-4-7 4V5a1 1 0 0 1 1-1z" />
+        </symbol>
         <symbol id="i-thumbs-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M7 11v9H3v-9zM7 11l4-7c1.5 0 2.5 1 2.5 2.5V10h5.5c1.1 0 2 .9 1.8 2l-1.3 6.5c-.2 1-1 1.5-2 1.5H7" />
         </symbol>

@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { ReactNode } from "react";
 import { db, schema } from "@/db/client";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
@@ -76,7 +76,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         awaiting: sql<number>`sum(case when ${schema.matches.handoffPrUrl} is null then 1 else 0 end)`,
       })
       .from(schema.matches)
-      .where(and(eq(schema.matches.userId, user.id), eq(schema.matches.userStatus, "starred")))
+      .where(and(
+        eq(schema.matches.userId, user.id),
+        inArray(schema.matches.userStatus, ["starred", "bookmarked"]),
+      ))
       .get();
     starredCount = Number(counts?.total ?? 0);
     starredAwaitingHandoff = Number(counts?.awaiting ?? 0);

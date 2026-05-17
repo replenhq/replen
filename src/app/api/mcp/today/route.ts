@@ -68,6 +68,7 @@ export async function GET(req: Request) {
       summary: writeup,
       sourceKind: m.sourceKind,
       starred: m.userStatus === "starred",
+      bookmarked: m.userStatus === "bookmarked",
       handoffPrUrl: m.handoffPrUrl,
       createdAt: m.createdAt.toISOString(),
     };

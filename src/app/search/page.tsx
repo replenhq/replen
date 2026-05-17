@@ -89,6 +89,7 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
                 {repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {new Date(m.createdAt).toLocaleDateString()}
               </span>
               {m.userStatus === "starred" && <span className="tag" style={{ background: "#fffbe6" }}>⭐</span>}
+              {m.userStatus === "bookmarked" && <span className="tag" style={{ background: "#eef6ff", color: "#1d4ed8" }}>🔖</span>}
               {m.handoffPrUrl && (
                 <a href={m.handoffPrUrl} target="_blank" rel="noreferrer" className="tag" style={{ background: "#a4d8a4", color: "#1a1a1a", textDecoration: "none" }}>↗ PR</a>
               )}

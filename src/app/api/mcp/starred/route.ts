@@ -1,16 +1,25 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../_auth";
 
 export async function GET(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
 
+  // 'starred' = action item; 'bookmarked' = save-for-later. Both flavours
+  // surface in this endpoint so an agent calling /mcp/starred sees the full
+  // saved-set; consumers that care about the split can read the `kind` field.
   const matches = await db
     .select()
     .from(schema.matches)
-    .where(and(eq(schema.matches.userId, auth.userId), eq(schema.matches.userStatus, "starred")))
+    .where(and(
+      eq(schema.matches.userId, auth.userId),
+      or(
+        eq(schema.matches.userStatus, "starred"),
+        eq(schema.matches.userStatus, "bookmarked"),
+      ),
+    ))
     .orderBy(desc(schema.matches.createdAt));
 
   const repoIds = [...new Set(matches.map((m) => m.repoId))];
@@ -42,6 +51,7 @@ export async function GET(req: Request) {
       url: r?.url ?? null,
       project: p?.slug ?? "_general",
       bucket,
+      kind: m.userStatus === "bookmarked" ? "bookmark" : "star",
       handoffPrUrl: m.handoffPrUrl,
       handoffPrStatus: m.handoffPrStatus,
       relevance: m.relevance,

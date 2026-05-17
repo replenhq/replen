@@ -64,6 +64,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   // run produces dozens of matches.
   const repoIds = [...new Set(matches.map((m) => m.repoId))];
   const projectIds = [...new Set(matches.map((m) => m.projectId).filter((x): x is number => !!x))];
+  // For resurfaced rows, fetch the originating bookmark's createdAt so the
+  // card can render "From your bookmarks — saved <date>".
+  const resurfaceIds = [...new Set(matches.map((m) => m.resurfacedFromMatchId).filter((x): x is number => !!x))];
+  const bookmarkDateById = new Map<number, Date>();
+  if (resurfaceIds.length > 0) {
+    const orig = await db
+      .select({ id: schema.matches.id, createdAt: schema.matches.createdAt })
+      .from(schema.matches)
+      .where(inArray(schema.matches.id, resurfaceIds));
+    for (const r of orig) bookmarkDateById.set(r.id, r.createdAt);
+  }
   const repoMap = new Map<number, typeof schema.repos.$inferSelect>();
   if (repoIds.length > 0) {
     const rs = await db.select().from(schema.repos).where(inArray(schema.repos.id, repoIds));
@@ -254,13 +265,32 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
               // (set at insert time), fall back to deriving it from the picked
               // candidate for rows from before the migration.
               const srcKind = m.sourceKind ?? (candidate ? sourceKind(candidate.source) : null);
+              const isGA = m.relevance === "general-awareness";
               const isStarred = m.userStatus === "starred";
+              const isBookmarked = m.userStatus === "bookmarked";
+              const isSaved = isStarred || isBookmarked;
               const canHandoff = isStarred && !m.handoffPrUrl && !!project;
+              const bookmarkDate = m.resurfacedFromMatchId ? bookmarkDateById.get(m.resurfacedFromMatchId) : null;
               return (
                 <div className="match" key={m.id}>
                   <div className="match-head">
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
                     <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
+                    {m.discoveryMode === "bookmark" && bookmarkDate && (
+                      <span className="tag" style={{ background: "#eef6ff", color: "#1d4ed8" }} title="Resurfaced from your bookmarks — Replen re-checks bookmarked repos against your projects every 20 days">
+                        From your bookmarks — saved {bookmarkDate.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+                      </span>
+                    )}
+                    {m.discoveryMode === "serendipity" && (
+                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Surfaced by a broad-net feed (HN, reddit, trending, etc.) — not tied to a specific outcome you've stated">
+                        Serendipity
+                      </span>
+                    )}
+                    {m.discoveryMode === "targeted" && m.matchedOutcome && (
+                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Matched a specific outcome you stated for this project">
+                        Targeted
+                      </span>
+                    )}
                     {srcKind && <span className="tag">via {srcKind}</span>}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                   </div>
@@ -268,11 +298,22 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                   {candidate && <SourcePost candidate={candidate} />}
                   <PersonalNote matchId={m.id} value={m.personalNote ?? ""} />
                   <div className="actions">
-                    {/* Primary path: star (and on second click on a starred row, open the handoff PR). */}
-                    {!isStarred && (
+                    {/* Primary path differs by relevance:
+                          high/medium → "Star & open handoff PR"
+                          general-awareness → "Bookmark for later" (no handoff;
+                          the system will re-evaluate against your projects
+                          every 20 days — see resurface logic). */}
+                    {!isSaved && !isGA && (
                       <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "starred"); }}>
                         <button className="primary" type="submit" title="Star to open a handoff PR in your project's repo">
                           <Icon name="star" /> Star &amp; open handoff PR
+                        </button>
+                      </form>
+                    )}
+                    {!isSaved && isGA && (
+                      <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "bookmarked"); }}>
+                        <button className="primary" type="submit" title="Bookmark for later — Replen will re-check this against your projects every 20 days">
+                          <Icon name="bookmark" /> Bookmark for later
                         </button>
                       </form>
                     )}
@@ -283,10 +324,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         </button>
                       </form>
                     )}
-                    {isStarred && (
+                    {isSaved && (
                       <form className="inline" action={async () => { "use server"; await setMatchStatus(m.id, "unread"); }}>
-                        <button type="submit" title="Unstar">
-                          <Icon name="star-fill" /> Starred
+                        <button type="submit" title={isBookmarked ? "Remove bookmark" : "Unstar"}>
+                          <Icon name={isBookmarked ? "bookmark-fill" : "star-fill"} /> {isBookmarked ? "Bookmarked" : "Starred"}
                         </button>
                       </form>
                     )}

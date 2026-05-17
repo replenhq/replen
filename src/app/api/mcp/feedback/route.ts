@@ -19,7 +19,21 @@ export async function POST(req: Request) {
   if (!ALLOWED.has(action)) return NextResponse.json({ error: `action must be one of ${[...ALLOWED].join(",")}` }, { status: 400, headers: corsHeaders });
 
   if (action === "star" || action === "unstar" || action === "hide") {
-    const status = action === "star" ? "starred" : action === "unstar" ? "unread" : "hidden";
+    // 'star' resolves to either 'starred' (action item, high/medium matches)
+    // or 'bookmarked' (save-for-later, general-awareness matches). The split
+    // is invisible to the MCP consumer — they always send action='star'.
+    let status: "starred" | "bookmarked" | "unread" | "hidden";
+    if (action === "unstar") status = "unread";
+    else if (action === "hide") status = "hidden";
+    else {
+      const row = await db
+        .select({ relevance: schema.matches.relevance })
+        .from(schema.matches)
+        .where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, auth.userId)))
+        .get();
+      if (!row) return NextResponse.json({ error: "match not found" }, { status: 404, headers: corsHeaders });
+      status = row.relevance === "general-awareness" ? "bookmarked" : "starred";
+    }
     await db.update(schema.matches).set({ userStatus: status }).where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, auth.userId)));
   } else {
     await db.update(schema.matches).set({ userFeedback: action === "clear" ? null : action }).where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, auth.userId)));

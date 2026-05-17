@@ -54,7 +54,19 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
     for (const p of ps) projectMap.set(p.id, p);
   }
 
-  const html = renderHtml(matchesForRun, repoMap, projectMap);
+  // For resurfaced rows, fetch the origin bookmark's createdAt so the email
+  // can show "From your bookmarks — saved <date>".
+  const resurfaceIds = [...new Set(matchesForRun.map((m) => m.resurfacedFromMatchId).filter((x): x is number => !!x))];
+  const bookmarkDateById = new Map<number, Date>();
+  if (resurfaceIds.length > 0) {
+    const orig = await db
+      .select({ id: schema.matches.id, createdAt: schema.matches.createdAt })
+      .from(schema.matches)
+      .where(inArray(schema.matches.id, resurfaceIds));
+    for (const o of orig) bookmarkDateById.set(o.id, o.createdAt);
+  }
+
+  const html = renderHtml(matchesForRun, repoMap, projectMap, bookmarkDateById);
   const text = renderText(matchesForRun, repoMap, projectMap);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -86,7 +98,7 @@ function relevanceColor(rel: string): { bg: string; fg: string } {
   }
 }
 
-function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>) {
+function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>, bookmarkDateById: Map<number, Date>) {
   const grouped = new Map<string, Match[]>();
   for (const m of matches) {
     const key = m.projectId ? projects.get(m.projectId)?.slug ?? "_unknown" : "_general";
@@ -129,11 +141,22 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
       const srcChip = m.sourceKind
         ? `<span style="display:inline-block;background:#eef;color:#225;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">via ${escapeHtml(m.sourceKind)}</span>`
         : "";
+      let modeChip = "";
+      if (m.discoveryMode === "bookmark" && m.resurfacedFromMatchId) {
+        const bd = bookmarkDateById.get(m.resurfacedFromMatchId);
+        const dateStr = bd ? bd.toISOString().slice(0, 10) : "earlier";
+        modeChip = `<span style="display:inline-block;background:#eef6ff;color:#1d4ed8;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">From your bookmarks — saved ${escapeHtml(dateStr)}</span>`;
+      } else if (m.discoveryMode === "serendipity") {
+        modeChip = `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Serendipity</span>`;
+      } else if (m.discoveryMode === "targeted" && m.matchedOutcome) {
+        modeChip = `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Targeted</span>`;
+      }
       body += `
         <div style="margin:16px 0;padding:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">
           <div style="display:block;margin-bottom:6px">
             <a href="${escapeHref(r.url)}" style="font-size:15px;font-weight:600;color:#1f3a8a;text-decoration:none">${escapeHtml(r.owner)}/${escapeHtml(r.name)}</a>
             <span style="display:inline-block;background:${c.bg};color:${c.fg};border-radius:3px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px">${escapeHtml(m.relevance)} ${m.relevanceScore ?? ""}</span>
+            ${modeChip}
             ${srcChip}
           </div>
           <div style="color:#888;font-size:12px;margin-bottom:8px">${r.stars ?? 0}★ · ${escapeHtml(r.primaryLanguage ?? "?")} · ${escapeHtml(r.license ?? "no license")}</div>

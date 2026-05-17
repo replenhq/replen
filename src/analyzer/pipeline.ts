@@ -1,9 +1,11 @@
 import { db, schema } from "../db/client";
-import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull } from "drizzle-orm";
 import { scanRepo, type SafetyReport } from "../scanner/safety";
 import { triage } from "./triage";
 import { reasonAboutRepo, renderWriteup } from "./reason";
 import { scoreTargetedCandidate, type TargetedAttribution } from "./score-targeted";
+import { scoreBookmarkAgainstProject } from "./resurface";
+import type { ProjectSummary } from "../projects/summarize";
 import { discoverLocalProjects, upsertProjects, type LocalProject } from "../projects/loader";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
@@ -141,9 +143,12 @@ async function runAnalysisInner(runId: number, userId: number) {
   // Reorder targets by their best weighted score, descending.
   targets.sort((a, b) => (scoreByKey.get(b.key) ?? 0) - (scoreByKey.get(a.key) ?? 0));
 
-  // Skip-actioned filter: if the user has already starred, hidden, integrated,
-  // or opened a handoff PR for a repo, don't re-analyse it. Saves LLM cost and
-  // avoids dashboard noise.
+  // Skip-actioned filter: if the user has already starred, bookmarked, hidden,
+  // integrated, or opened a handoff PR for a repo, don't re-analyse it on the
+  // discovery path. Saves LLM cost and avoids dashboard noise. (Bookmarked
+  // general-awareness matches are STILL re-evaluated against OTHER projects
+  // via the bookmark-resurface pass — see resurface.ts. The filter here only
+  // skips re-discovery, not re-evaluation.)
   if (targets.length > 0) {
     const statusRows = await db
       .select({
@@ -158,7 +163,13 @@ async function runAnalysisInner(runId: number, userId: number) {
       .where(eq(schema.matches.userId, userId));
     const actionedSet = new Set<string>();
     for (const r of statusRows) {
-      if (r.status === "starred" || r.status === "hidden" || r.integratedAt || r.handoffPrUrl) {
+      if (
+        r.status === "starred" ||
+        r.status === "bookmarked" ||
+        r.status === "hidden" ||
+        r.integratedAt ||
+        r.handoffPrUrl
+      ) {
         actionedSet.add(`${r.owner.toLowerCase()}/${r.name.toLowerCase()}`);
       }
     }
@@ -170,6 +181,33 @@ async function runAnalysisInner(runId: number, userId: number) {
       const skipped = before - targets.length;
       if (skipped > 0) console.log(`[pipeline] skipped ${skipped} already-actioned repos`);
     }
+  }
+
+  // Stage 5: trending demotion. Split targets into targeted (has Stage-3
+  // outcome attribution) and serendipity (everything else — HN, reddit,
+  // trending, etc.). Cap the serendipity candidate pool pre-LLM so a noisy
+  // morning of broad-net fetches doesn't burn the LLM budget; we'll also
+  // cap the *match* count post-LLM (see end of runAnalysisInner).
+  // See docs/stage-5-scope.md.
+  const SERENDIPITY_CANDIDATE_CAP = Number(process.env.SERENDIPITY_CANDIDATE_CAP ?? 15);
+  const SERENDIPITY_MATCH_CAP = Number(process.env.SERENDIPITY_MATCH_CAP ?? 3);
+  if (targets.length > 0 && SERENDIPITY_CANDIDATE_CAP >= 0) {
+    const targeted: typeof targets = [];
+    const serendipity: typeof targets = [];
+    for (const t of targets) {
+      if ((targetedAttribByKey.get(t.key) ?? []).length > 0) targeted.push(t);
+      else serendipity.push(t);
+    }
+    // targets is already sorted by weighted score desc, so each sub-array is too.
+    const cappedSerendipity = serendipity.slice(0, SERENDIPITY_CANDIDATE_CAP);
+    const dropped = serendipity.length - cappedSerendipity.length;
+    if (dropped > 0) {
+      console.log(`[pipeline] serendipity cap dropped ${dropped} candidates (kept ${cappedSerendipity.length} of ${serendipity.length})`);
+    }
+    // Targeted first so worker pool starts with the high-precision pool; the
+    // serendipity tail is cheaper to abandon mid-run if we hit a quota error.
+    targets.length = 0;
+    targets.push(...targeted, ...cappedSerendipity);
   }
 
   let reposAnalyzed = 0;
@@ -310,6 +348,7 @@ async function runAnalysisInner(runId: number, userId: number) {
             matchedOutcome: ta.matchedOutcome,
             matchedOutcomeSource: ta.matchedOutcomeSource,
             matchedOutcomeConfidence: ta.matchedOutcomeConfidence,
+            discoveryMode: "targeted",
           });
           matchesCreated++;
           void recordEvent(
@@ -355,6 +394,7 @@ async function runAnalysisInner(runId: number, userId: number) {
           userStatus: "unread",
           createdAt: new Date(),
           sourceKind: bestSourceByKey.get(t.key) ?? null,
+          discoveryMode: "serendipity",
         });
         matchesCreated++;
         const projSlug = project?.slug ?? "_general";
@@ -399,6 +439,45 @@ async function runAnalysisInner(runId: number, userId: number) {
   // If any worker hit quota mid-run, surface it now so runPipelineForUser
   // can flag the digest_runs row with pausedReason='llm-quota'.
   if (abortReason) throw abortReason;
+
+  // Bookmark resurface pass: re-evaluate the user's bookmarked GA matches
+  // against other projects' outcome goals. Runs AFTER the main worker pool
+  // so the skip rules can rely on this run's targeted/serendipity inserts
+  // already being visible. Per-run cap and 20-day retry are enforced inside.
+  // See docs/bookmark-resurface-scope.md.
+  try {
+    const created = await runResurfacePass(runId, userId, dbProjects);
+    matchesCreated += created;
+  } catch (e) {
+    if (e instanceof LlmQuotaError) throw e;
+    console.warn(`[resurface] pass failed for user=${userId}, continuing`, e);
+  }
+
+  // Stage 5: post-pass match cap. Trim surplus serendipity rows from THIS run
+  // so the digest stays dense. Only touches discovery_mode='serendipity' from
+  // the current runId — targeted and bookmark-resurface rows are preserved at
+  // any count. We keep the top SERENDIPITY_MATCH_CAP by relevanceScore.
+  if (SERENDIPITY_MATCH_CAP >= 0) {
+    const serendipityRows = await db
+      .select({ id: schema.matches.id, score: schema.matches.relevanceScore })
+      .from(schema.matches)
+      .where(and(
+        eq(schema.matches.userId, userId),
+        eq(schema.matches.runId, runId),
+        eq(schema.matches.discoveryMode, "serendipity"),
+      ))
+      .orderBy(desc(schema.matches.relevanceScore));
+    if (serendipityRows.length > SERENDIPITY_MATCH_CAP) {
+      const toDelete = serendipityRows.slice(SERENDIPITY_MATCH_CAP).map((r) => r.id);
+      for (const id of toDelete) {
+        await db.delete(schema.matches).where(eq(schema.matches.id, id));
+      }
+      const removed = toDelete.length;
+      matchesCreated -= removed;
+      console.log(`[pipeline] serendipity match cap pruned ${removed} (kept top ${SERENDIPITY_MATCH_CAP})`);
+      void recordEvent(runId, userId, "skip", `Trimmed ${removed} serendipity matches over cap of ${SERENDIPITY_MATCH_CAP}`);
+    }
+  }
 
   return { reposAnalyzed, matchesCreated };
 }
@@ -451,5 +530,255 @@ async function upsertRepo(safety: SafetyReport, t: { owner: string; name: string
     .returning()
     .get();
   return ins!;
+}
+
+const RESURFACE_RETRY_DAYS = 20;
+
+type DbProject = typeof schema.projectProfiles.$inferSelect;
+
+// Bookmark resurface: re-score the user's bookmarked general-awareness matches
+// against the outcome goals of OTHER projects (i.e. projects the bookmark
+// didn't originally surface for). The motivation is in
+// docs/active-scouting-plan.md § "Stage 4 input: starred general-awareness as
+// bookmarks-for-later" and the design is locked in
+// docs/bookmark-resurface-scope.md.
+//
+// Per (bookmark, project) pair, eligibility is:
+//   - bookmark.userStatus = 'bookmarked' (the migration backfills these)
+//   - bookmark.relevance = 'general-awareness' (sanity check)
+//   - bookmark.archivedAt is null
+//   - bookmark.createdAt is older than 24h (don't resurface today's saves)
+//   - project.included is true
+//   - project has summaryJson + searchVectorsJson (Stage 1+2 complete)
+//   - project.id != bookmark.projectId (don't resurface to origin project)
+//   - no successful match exists for (userId, repoId, projectId)
+//   - no resurface_attempts row within RESURFACE_RETRY_DAYS for the pair
+//
+// Capped at RESURFACE_PER_RUN_CAP per run; resurface inserts are tagged
+// discoveryMode='bookmark' and link back to the original via
+// resurfacedFromMatchId.
+async function runResurfacePass(
+  runId: number,
+  userId: number,
+  dbProjects: DbProject[],
+): Promise<number> {
+  if (process.env.RESURFACE_ENABLED === "0") return 0;
+  const PER_RUN_CAP = Number(process.env.RESURFACE_PER_RUN_CAP ?? 30);
+  if (PER_RUN_CAP <= 0) return 0;
+
+  // Eligible projects: included + Stage 1+2 complete. Anything else can't be
+  // resurface-targeted because we have no outcomes to match against.
+  const eligibleProjects = dbProjects.filter(
+    (p) => p.included && p.summaryJson && p.searchVectorsJson,
+  );
+  if (eligibleProjects.length === 0) {
+    console.log(`[resurface] user=${userId} skip: no eligible projects (need Stage 1+2 complete)`);
+    return 0;
+  }
+
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000);
+  const bookmarks = await db
+    .select()
+    .from(schema.matches)
+    .where(and(
+      eq(schema.matches.userId, userId),
+      eq(schema.matches.userStatus, "bookmarked"),
+      eq(schema.matches.relevance, "general-awareness"),
+      isNull(schema.matches.archivedAt),
+    ))
+    .orderBy(desc(schema.matches.createdAt));
+  if (bookmarks.length === 0) return 0;
+
+  const aged = bookmarks.filter((b) => +b.createdAt < +dayAgo);
+  if (aged.length === 0) {
+    console.log(`[resurface] user=${userId} skip: ${bookmarks.length} bookmarks all <24h old`);
+    return 0;
+  }
+
+  // Existing matches for this user — used to skip (repoId, projectId) pairs
+  // that already have any match row (resurface or otherwise).
+  const existingMatches = await db
+    .select({ repoId: schema.matches.repoId, projectId: schema.matches.projectId })
+    .from(schema.matches)
+    .where(eq(schema.matches.userId, userId));
+  const matchedPairs = new Set<string>();
+  for (const r of existingMatches) {
+    if (r.projectId !== null) matchedPairs.add(`${r.repoId}:${r.projectId}`);
+  }
+
+  // Recent resurface attempts — honour the 20-day retry window.
+  const retryCutoff = new Date(Date.now() - RESURFACE_RETRY_DAYS * 24 * 3600 * 1000);
+  const recentAttempts = await db
+    .select({
+      repoId: schema.resurfaceAttempts.repoId,
+      projectId: schema.resurfaceAttempts.projectId,
+    })
+    .from(schema.resurfaceAttempts)
+    .where(and(
+      eq(schema.resurfaceAttempts.userId, userId),
+      gte(schema.resurfaceAttempts.attemptedAt, retryCutoff),
+    ));
+  const recentlyAttempted = new Set<string>();
+  for (const a of recentAttempts) recentlyAttempted.add(`${a.repoId}:${a.projectId}`);
+
+  // Build the eligible (bookmark, project) candidate list.
+  type Candidate = {
+    bookmark: typeof bookmarks[number];
+    project: DbProject;
+    summary: ProjectSummary;
+  };
+  const candidates: Candidate[] = [];
+  for (const b of aged) {
+    for (const p of eligibleProjects) {
+      if (p.id === b.projectId) continue; // skip origin project
+      const key = `${b.repoId}:${p.id}`;
+      if (matchedPairs.has(key)) continue;
+      if (recentlyAttempted.has(key)) continue;
+      let summary: ProjectSummary;
+      try {
+        summary = JSON.parse(p.summaryJson ?? "{}") as ProjectSummary;
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(summary.outcomeGoals) || summary.outcomeGoals.length === 0) continue;
+      candidates.push({ bookmark: b, project: p, summary });
+      if (candidates.length >= PER_RUN_CAP) break;
+    }
+    if (candidates.length >= PER_RUN_CAP) break;
+  }
+
+  if (candidates.length === 0) {
+    console.log(`[resurface] user=${userId} no eligible (bookmark, project) pairs after filtering`);
+    return 0;
+  }
+
+  console.log(`[resurface] user=${userId} processing ${candidates.length} pair(s) (cap=${PER_RUN_CAP})`);
+  void recordEvent(runId, userId, "scan", `Resurface: evaluating ${candidates.length} bookmark(s) against your projects`);
+
+  // Repo scan cache — same repo may appear in multiple pairs.
+  const scanByRepoId = new Map<number, SafetyReport>();
+  const repoRowById = new Map<number, typeof schema.repos.$inferSelect>();
+  let created = 0;
+
+  for (const c of candidates) {
+    const { bookmark, project, summary } = c;
+    let repoRow = repoRowById.get(bookmark.repoId);
+    if (!repoRow) {
+      const r = await db.select().from(schema.repos).where(eq(schema.repos.id, bookmark.repoId)).get();
+      if (!r) continue;
+      repoRow = r;
+      repoRowById.set(bookmark.repoId, r);
+    }
+    let safety = scanByRepoId.get(bookmark.repoId);
+    if (!safety) {
+      const s = await scanRepo(repoRow.owner, repoRow.name);
+      if (!s) {
+        console.warn(`[resurface] scan failed for ${repoRow.owner}/${repoRow.name}; skipping bookmark`);
+        continue;
+      }
+      safety = s;
+      scanByRepoId.set(bookmark.repoId, s);
+    }
+
+    const localProject: LocalProject = {
+      slug: project.slug,
+      path: project.path,
+      name: project.name,
+      readmeMd: project.readmeMd,
+      claudeMd: project.claudeMd,
+      techSummary: project.techSummary,
+      profileHash: project.profileHash,
+      active: !!project.active,
+      included: !!project.included,
+      sensitivity: (project.sensitivity as "low" | "high") ?? "low",
+      llmProvider: (project.llmProvider as "auto" | "deepseek" | "anthropic") ?? "auto",
+    };
+
+    let result;
+    try {
+      result = await scoreBookmarkAgainstProject({
+        safety,
+        project: localProject,
+        outcomes: summary.outcomeGoals,
+        bookmarkedAt: bookmark.createdAt,
+      });
+    } catch (e) {
+      if (e instanceof LlmQuotaError) throw e;
+      console.warn(`[resurface] scoring failed ${repoRow.owner}/${repoRow.name} → ${project.slug}`, e);
+      continue;
+    }
+    if (result.kind === "error") continue;
+
+    // Always record the attempt so the 20-day retry window applies — both
+    // matches and no-fits get a tombstone.
+    await db.insert(schema.resurfaceAttempts).values({
+      userId,
+      repoId: bookmark.repoId,
+      projectId: project.id,
+      attemptedAt: new Date(),
+      outcome: result.kind === "match" ? "matched" : "no-fit",
+    }).onConflictDoUpdate({
+      target: [
+        schema.resurfaceAttempts.userId,
+        schema.resurfaceAttempts.repoId,
+        schema.resurfaceAttempts.projectId,
+      ],
+      set: {
+        attemptedAt: new Date(),
+        outcome: result.kind === "match" ? "matched" : "no-fit",
+      },
+    });
+
+    if (result.kind !== "match") {
+      void recordEvent(runId, userId, "triage_skip", `Resurface: ${repoRow.owner}/${repoRow.name} → ${project.slug} no fit`);
+      continue;
+    }
+
+    // Floor: don't insert resurface matches below 50. Bookmarks that score
+    // medium-but-weak should wait until a stronger fit emerges.
+    if ((result.assessment.relevanceScore ?? 0) < 50) {
+      void recordEvent(runId, userId, "triage_skip", `Resurface: ${repoRow.owner}/${repoRow.name} → ${project.slug} below score floor`);
+      continue;
+    }
+
+    const writeup = renderWriteup(
+      { owner: repoRow.owner, name: repoRow.name, url: repoRow.url },
+      { oneLiner: "", safetyNotes: "", perProject: [result.assessment] },
+      result.assessment,
+      safety
+    );
+    await db.insert(schema.matches).values({
+      userId,
+      repoId: bookmark.repoId,
+      projectId: project.id,
+      runId,
+      relevance: result.assessment.relevance,
+      relevanceScore: result.assessment.relevanceScore,
+      summary: result.assessment.summary,
+      whyUseful: result.assessment.whyUseful,
+      suggestedUse: result.assessment.suggestedUse,
+      integrationApproach: result.assessment.integrationApproach,
+      risks: result.assessment.risks,
+      writeupMd: writeup,
+      userStatus: "unread",
+      createdAt: new Date(),
+      sourceKind: bookmark.sourceKind, // carry forward the original discovery source for analytics
+      matchedOutcome: result.assessment.matchedOutcome,
+      matchedOutcomeSource: result.assessment.matchedOutcomeSource,
+      matchedOutcomeConfidence: result.assessment.matchedOutcomeConfidence,
+      discoveryMode: "bookmark",
+      resurfacedFromMatchId: bookmark.id,
+    });
+    created++;
+    void recordEvent(
+      runId,
+      userId,
+      "match",
+      `Resurface match: ${repoRow.owner}/${repoRow.name} → ${project.slug} (${result.assessment.relevance} · ${result.assessment.relevanceScore})`,
+    );
+  }
+
+  console.log(`[resurface] user=${userId} inserted ${created} resurface match(es) from ${candidates.length} pair(s)`);
+  return created;
 }
 
