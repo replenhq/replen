@@ -226,6 +226,16 @@ export const projectProfiles = sqliteTable(
     // trending feeds. Re-derived when profileHash changes; user-overridable.
     searchKeywords: text("search_keywords"),
     profileHash: text("profile_hash").notNull(),
+    // Stage-1 structured project understanding. JSON blob conforming to the
+    // ProjectSummary type in src/projects/summarize.ts. Cached. Regenerated
+    // when profileHash changes, summary_generated_at is > 3 days old, or the
+    // prompt_version constant in the codebase has been bumped past what's
+    // recorded here. Feeds Stage-2 gap analysis (active scouting) — see
+    // docs/active-scouting-plan.md and docs/stage-1-scope.md.
+    summaryJson: text("summary_json"),
+    summaryHash: text("summary_hash"),
+    summaryGeneratedAt: integer("summary_generated_at", { mode: "timestamp" }),
+    summaryPromptVersion: text("summary_prompt_version"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),
     sensitivity: text("sensitivity").notNull().default("low"),
