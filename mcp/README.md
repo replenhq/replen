@@ -96,4 +96,4 @@ No additional replen-side cost vs the web dashboard - the MCP server queries the
 
 ## License
 
-MIT - see `LICENSE`.
+FSL-1.1-MIT - see `LICENSE`. Free for self-hosting and internal use; no competing-service use during the 2-year non-compete window; auto-converts to MIT after 2 years.

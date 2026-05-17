@@ -7,7 +7,7 @@
   <p>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/v/replen?style=flat-square&color=d97706" alt="npm version"></a>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/dm/replen?style=flat-square&color=d97706" alt="npm downloads"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-FSL--1.1--MIT-blue?style=flat-square" alt="FSL-1.1-MIT License"></a>
     <a href="https://replen.dev"><img src="https://img.shields.io/badge/website-replen.dev-d97706?style=flat-square" alt="Website"></a>
   </p>
 
@@ -314,3 +314,17 @@ replen/
 ├── scripts/                deploy.sh, nginx config, systemd units, plists
 └── data/                   sqlite db (gitignored)
 ```
+
+## License
+
+[FSL-1.1-MIT](LICENSE) — Functional Source License with a 2-year MIT future grant. In plain English:
+
+- **You can self-host Replen for your own use** (internal, personal, your company's internal tooling). Free, no asterisks.
+- **You can read, modify, and redistribute the source code** for any non-competing purpose.
+- **You can't run Replen as a commercial service that competes with us** (e.g. offering "Hosted Replen" to other people) until the 2-year window expires for that version.
+- **After 2 years, each version auto-converts to MIT** — same permissive licence as before, just delayed.
+
+Commits made before 2026-05-17 (`d6052c8` and earlier) remain available under the previous MIT licence; the FSL terms apply to subsequent commits.
+
+If you want to use Replen in a way that might cross the "competing use" line, get in touch via [replen.dev](https://replen.dev) and we'll sort out a commercial licence.
+
