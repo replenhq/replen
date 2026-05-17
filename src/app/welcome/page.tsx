@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function Welcome({ searchParams }: { searchParams: Promise<{ step?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const step = Math.max(1, Math.min(4, parseInt(sp.step ?? "1", 10) || 1));
+  const step = Math.max(1, Math.min(3, parseInt(sp.step ?? "1", 10) || 1));
 
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
@@ -41,7 +41,7 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
   // Auto-skip past steps the user has already completed.
   if (step === 1 && hasGithub) redirect("/welcome?step=2");
   if (step === 2 && hasEmail) redirect("/welcome?step=3");
-  if (step === 4 && hasRun) redirect("/");
+  if (step === 3 && hasRun) redirect("/");
 
   async function saveGithubToken(form: FormData) {
     "use server";
@@ -90,14 +90,20 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
       <Stepper step={step} />
       {step === 1 && <Step1 onSave={saveGithubToken} currentToken={tokenForDisplay} />}
       {step === 2 && <Step2 onSave={saveDelivery} current={settings} />}
-      {step === 3 && <Step3 projects={detectedProjects} matched={matchedProjects.length} curated={curated.length} />}
-      {step === 4 && <Step4 onStart={startFirstRun} />}
+      {step === 3 && (
+        <Step3
+          projects={detectedProjects}
+          matched={matchedProjects.length}
+          curated={curated.length}
+          onStart={startFirstRun}
+        />
+      )}
     </>
   );
 }
 
 function Stepper({ step }: { step: number }) {
-  const steps = ["GitHub", "Delivery", "Confirm", "First run"];
+  const steps = ["GitHub", "Delivery", "Confirm & run"];
   return (
     <ol style={{ display: "flex", gap: 12, padding: 0, margin: "12px 0 24px", listStyle: "none", fontSize: 13 }}>
       {steps.map((s, i) => (
@@ -173,10 +179,15 @@ function Step2({ onSave, current }: { onSave: (f: FormData) => Promise<void>; cu
   );
 }
 
-function Step3({ projects, matched, curated }: { projects: typeof schema.projectProfiles.$inferSelect[]; matched: number; curated: number }) {
+function Step3({ projects, matched, curated, onStart }: {
+  projects: typeof schema.projectProfiles.$inferSelect[];
+  matched: number;
+  curated: number;
+  onStart: () => Promise<void>;
+}) {
   return (
     <>
-      <h2 style={{ marginTop: 0 }}>3. We discovered your projects</h2>
+      <h2 style={{ marginTop: 0 }}>3. Confirm &amp; run your first digest</h2>
       <p>
         Replen scanned <a href="/projects">your project_profiles</a> and found <b>{projects.length}</b> active.
         {matched > 0 && <> Of those, <b>{matched}</b> are linked to GitHub repos (auto-detected).</>}
@@ -195,30 +206,16 @@ function Step3({ projects, matched, curated }: { projects: typeof schema.project
         Sources to fetch from: <b>{curated}</b> curated.{" "}
         Adjust either on <a href="/projects">/projects</a> and <a href="/sources">/sources</a> any time.
       </p>
-      <p style={{ marginTop: 16 }}>
-        <a href="/welcome?step=4" style={{ display: "inline-block", padding: "8px 18px", background: "#111", color: "#fff", borderRadius: 6, textDecoration: "none" }}>
-          Looks right →
-        </a>
-      </p>
-    </>
-  );
-}
-
-function Step4({ onStart }: { onStart: () => Promise<void> }) {
-  return (
-    <>
-      <h2 style={{ marginTop: 0 }}>4. Run your first digest</h2>
       <p>
-        We'll fetch from your sources, score each new repo against your projects, and write up the ones that fit. Takes 5-10 minutes.
-        You'll watch it on <a href="/runs">/runs</a>; matches appear on the dashboard as they're written.
+        Clicking the button below kicks off your first pipeline run — fetches from your sources, scores each new repo against your projects, and writes up the ones that fit. Takes 5–10 minutes. You&apos;ll watch it on <a href="/runs">/runs</a>; matches appear on the dashboard as they&apos;re written.
       </p>
-      <form action={onStart}>
-        <button type="submit" style={{ padding: "10px 24px", background: "#111", color: "#fff", borderRadius: 6, fontSize: 14, fontWeight: 500 }}>
-          Run my first digest →
+      <form action={onStart} style={{ marginTop: 16 }}>
+        <button type="submit" className="primary">
+          Looks right — run my first digest →
         </button>
       </form>
       <p className="meta" style={{ marginTop: 16 }}>
-        After this you can come back to <a href="/">the dashboard</a> any time. Your daily run will fire automatically at the UTC hour you set.
+        After this, your daily run fires automatically at the UTC hour you set.
       </p>
     </>
   );

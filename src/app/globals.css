@@ -29,14 +29,6 @@ body {
   min-height: 100vh;
   isolation: isolate;
 }
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: -1;
-  background:
-    radial-gradient(900px 700px at 8% -10%, rgba(255, 200, 87, 0.18) 0%, transparent 60%),
-    radial-gradient(800px 600px at 95% 0%, rgba(111, 206, 130, 0.10) 0%, transparent 60%),
-    radial-gradient(600px 500px at 50% 110%, rgba(255, 200, 87, 0.08) 0%, transparent 60%),
-    var(--bg);
-}
 
 main {
   max-width: 1100px;
