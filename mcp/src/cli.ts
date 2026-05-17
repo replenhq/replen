@@ -7,6 +7,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./server.js";
 import { runSetup } from "./setup.js";
+import { detectCurrentRepo } from "./repo-detect.js";
 
 async function main() {
   if (process.argv[2] === "setup") {
@@ -46,12 +47,23 @@ Commands:
     { capabilities: { tools: {} } },
   );
 
-  registerTools(server, { baseUrl, token });
+  // Repo-scoping: detect the GitHub repo we were spawned in so tool calls
+  // (replen_starred, replen_today, replen_search) default to that scope.
+  // Best-effort — silent fallback to user-scoped behaviour when no git origin
+  // is reachable. An explicit `repo: ""` on any call overrides this default
+  // and asks for everything across all the user's projects.
+  const detected = detectCurrentRepo();
+  const defaultRepo = detected?.ownerRepo ?? null;
+
+  registerTools(server, { baseUrl, token, defaultRepo });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stderr because stdout is the MCP transport channel.
-  console.error(`[replen-mcp] connected · base=${baseUrl}`);
+  console.error(
+    `[replen-mcp] connected · base=${baseUrl}` +
+    (defaultRepo ? ` · scope=${defaultRepo}` : ` · scope=(no git repo detected)`),
+  );
 }
 
 main().catch((e) => {

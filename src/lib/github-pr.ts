@@ -84,11 +84,20 @@ export async function createHandoffPR(input: CreateHandoffPRInput): Promise<Crea
     throw new Error(`branch create failed: ${branchRes.status} ${body.slice(0, 300)}`);
   }
 
+  // Co-Authored-By trailer on the handoff commit. GitHub parses this and lists
+  // replenhq as a contributor on the PR + the commit's "co-authored by" line.
+  // It's how the replenhq avatar shows up on PRs in the wild (the same trick
+  // Claude Code uses with its own trailer). Email maps to the public mirror's
+  // bootstrap account (see commits on github.com/replenhq/replen) so the avatar
+  // resolves correctly.
+  const commitMessage = `digest: handoff for ${input.prTitle.replace(/^Handoff: /, "")}
+
+Co-Authored-By: replenhq <noreply@replen.dev>`;
   await ghJson(client, `/repos/${owner}/${repo}/contents/${encodeURIPathSegments(input.filePath)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      message: `digest: handoff for ${input.prTitle.replace(/^Handoff: /, "")}`,
+      message: commitMessage,
       content: Buffer.from(input.fileContent, "utf8").toString("base64"),
       branch: input.branch,
     }),

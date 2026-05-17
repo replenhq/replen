@@ -26,6 +26,22 @@ type Tool = {
   handler: (cfg: ApiConfig, args: Record<string, unknown>) => Promise<string>;
 };
 
+// Resolve the `repo` filter for a tool call:
+//   - explicit `repo` arg wins
+//   - empty string ("") explicitly opts out of repo-scoping
+//   - undefined falls back to cfg.defaultRepo (the cwd-detected one)
+// Returns undefined when no filter should be applied (so apiGet skips the
+// query param entirely).
+function resolveRepo(args: Record<string, unknown>, cfg: ApiConfig): string | undefined {
+  if (typeof args.repo === "string") {
+    return args.repo === "" ? undefined : args.repo;
+  }
+  return cfg.defaultRepo ?? undefined;
+}
+
+const REPO_PARAM_DESCRIPTION =
+  "GitHub 'owner/name' to scope results to. Defaults to the repo this MCP was spawned in (detected from `git remote get-url origin`). Pass an empty string '' to override the default and see matches across all your projects.";
+
 const TOOLS: Tool[] = [
   {
     name: "replen_help",
@@ -55,13 +71,14 @@ const TOOLS: Tool[] = [
   },
   {
     name: "replen_today",
-    description: "List matches from replen, the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. Use this to answer 'what could make my project sharper today' or 'anything for <project-name> this week'.",
+    description: "List matches from replen, the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. By default, scopes to matches whose handoff target is the repo this MCP was spawned in — pass repo='' to see everything.",
     inputSchema: {
       type: "object",
       properties: {
         days: { type: "number", minimum: 1, maximum: 30, default: 2, description: "Days back to include" },
         relevance: { type: "array", items: { type: "string", enum: ["high", "medium", "general-awareness", "low"] }, description: "Filter to specific relevance levels. Default: high+medium." },
         project: { type: "string", description: "Limit to one project slug" },
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
       },
     },
     handler: async (cfg, args) => {
@@ -69,35 +86,45 @@ const TOOLS: Tool[] = [
         days: z.number().min(1).max(30).default(2),
         relevance: z.array(z.string()).optional(),
         project: z.string().optional(),
+        repo: z.string().optional(),
       }).parse(args);
       const data = await apiGet<{ matches: unknown[]; count: number }>(cfg, "/api/mcp/today", {
         days: parsed.days,
         relevance: parsed.relevance?.join(","),
         project: parsed.project,
+        repo: resolveRepo(args, cfg),
       });
       return JSON.stringify(data, null, 2);
     },
   },
   {
     name: "replen_search",
-    description: "Full-text search across your replen history (writeups, repo metadata, personal notes). Use when the user asks about a repo / topic they've seen before but doesn't remember when.",
+    description: "Full-text search across your replen history (writeups, repo metadata, personal notes). Use when the user asks about a repo / topic they've seen before but doesn't remember when. Scoped to the current repo by default; pass repo='' for global search.",
     inputSchema: {
       type: "object",
-      properties: { q: { type: "string", description: "Search query (min 2 chars)" } },
+      properties: {
+        q: { type: "string", description: "Search query (min 2 chars)" },
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+      },
       required: ["q"],
     },
     handler: async (cfg, args) => {
       const { q } = z.object({ q: z.string().min(2) }).parse(args);
-      const data = await apiGet(cfg, "/api/mcp/search", { q });
+      const data = await apiGet(cfg, "/api/mcp/search", { q, repo: resolveRepo(args, cfg) });
       return JSON.stringify(data, null, 2);
     },
   },
   {
     name: "replen_starred",
-    description: "List all starred matches with their handoff status (awaiting / open-pr / integrated). Use to triage what to integrate next.",
-    inputSchema: { type: "object", properties: {} },
-    handler: async (cfg) => {
-      const data = await apiGet(cfg, "/api/mcp/starred");
+    description: "List starred matches with handoff status (awaiting / open-pr / integrated). Scoped by default to the repo this MCP was spawned in — i.e. matches whose handoff PR target is this repo. Pass repo='' to see everything you've starred across all projects.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+      },
+    },
+    handler: async (cfg, args) => {
+      const data = await apiGet(cfg, "/api/mcp/starred", { repo: resolveRepo(args, cfg) });
       return JSON.stringify(data, null, 2);
     },
   },

@@ -2,7 +2,14 @@
 // server can identify the user. Errors bubble as Error so MCP tool wrappers
 // can translate them to readable messages.
 
-export type ApiConfig = { baseUrl: string; token: string };
+export type ApiConfig = {
+  baseUrl: string;
+  token: string;
+  // GitHub "owner/name" detected from the MCP's spawn directory (best effort).
+  // Tools that accept a `repo` filter default to this when the caller doesn't
+  // override it. Null when we're not in a recognisable GitHub repo.
+  defaultRepo: string | null;
+};
 
 export async function apiGet<T = unknown>(cfg: ApiConfig, path: string, query?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(cfg.baseUrl + path);

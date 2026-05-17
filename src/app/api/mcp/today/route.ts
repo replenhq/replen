@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../_auth";
 
 export async function GET(req: Request) {
@@ -11,6 +11,9 @@ export async function GET(req: Request) {
   const days = Math.min(Math.max(parseInt(url.searchParams.get("days") ?? "2", 10) || 2, 1), 30);
   const relevance = (url.searchParams.get("relevance") ?? "high,medium").split(",").filter(Boolean);
   const projectSlug = url.searchParams.get("project");
+  // Optional ?repo=owner/name scopes to matches whose project's githubFullName
+  // matches. Used by the MCP to default-filter when spawned in a specific repo.
+  const repoFilter = url.searchParams.get("repo")?.trim().toLowerCase() || null;
 
   const since = new Date(Date.now() - days * 24 * 3600 * 1000);
   const conds = [
@@ -27,6 +30,24 @@ export async function GET(req: Request) {
       .where(and(eq(schema.projectProfiles.userId, auth.userId), eq(schema.projectProfiles.slug, projectSlug)))
       .get();
     if (p) conds.push(eq(schema.matches.projectId, p.id));
+  }
+  if (repoFilter) {
+    const rows = await db
+      .select({ id: schema.projectProfiles.id })
+      .from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, auth.userId),
+        sql`LOWER(${schema.projectProfiles.githubFullName}) = ${repoFilter}`,
+      ));
+    if (rows.length === 0) {
+      // No project targets this repo. Return empty result with scopedTo so the
+      // agent can fall back to repo='' if it wants the full picture.
+      return NextResponse.json(
+        { days, count: 0, scopedTo: repoFilter, matches: [] },
+        { headers: corsHeaders },
+      );
+    }
+    conds.push(inArray(schema.matches.projectId, rows.map((r) => r.id)));
   }
 
   const matches = await db.select().from(schema.matches).where(and(...conds)).orderBy(desc(schema.matches.relevanceScore)).limit(50);
@@ -73,7 +94,9 @@ export async function GET(req: Request) {
       createdAt: m.createdAt.toISOString(),
     };
   });
-  return NextResponse.json({ days, count: out.length, matches: out }, { headers: corsHeaders });
+  const body: Record<string, unknown> = { days, count: out.length, matches: out };
+  if (repoFilter) body.scopedTo = repoFilter;
+  return NextResponse.json(body, { headers: corsHeaders });
 }
 
 export async function OPTIONS() {

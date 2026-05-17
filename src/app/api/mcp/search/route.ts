@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../_auth";
 
 export async function GET(req: Request) {
@@ -12,6 +12,43 @@ export async function GET(req: Request) {
   if (q.length < 2) return NextResponse.json({ count: 0, matches: [] }, { headers: corsHeaders });
   const needle = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
 
+  // ?repo=owner/name scopes results to matches whose project's githubFullName
+  // matches — used by the MCP to default-filter when spawned in a specific repo.
+  const repoFilter = url.searchParams.get("repo")?.trim().toLowerCase() || null;
+  let scopedProjectIds: number[] | null = null;
+  if (repoFilter) {
+    const rows = await db
+      .select({ id: schema.projectProfiles.id })
+      .from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, auth.userId),
+        sql`LOWER(${schema.projectProfiles.githubFullName}) = ${repoFilter}`,
+      ));
+    scopedProjectIds = rows.map((r) => r.id);
+    if (scopedProjectIds.length === 0) {
+      return NextResponse.json(
+        { q, count: 0, scopedTo: repoFilter, matches: [] },
+        { headers: corsHeaders },
+      );
+    }
+  }
+
+  const matchConds = [
+    eq(schema.matches.userId, auth.userId),
+    or(
+      like(schema.matches.summary, needle),
+      like(schema.matches.whyUseful, needle),
+      like(schema.matches.suggestedUse, needle),
+      like(schema.matches.writeupMd, needle),
+      like(schema.matches.personalNote, needle),
+      like(schema.repos.owner, needle),
+      like(schema.repos.name, needle),
+      like(schema.repos.description, needle),
+      sql`lower(${schema.repos.owner}) || '/' || lower(${schema.repos.name}) like ${needle.toLowerCase()}`,
+    )!,
+  ];
+  if (scopedProjectIds) matchConds.push(inArray(schema.matches.projectId, scopedProjectIds));
+
   const rows = await db
     .select({ match: schema.matches, repo: schema.repos, project: schema.projectProfiles })
     .from(schema.matches)
@@ -22,20 +59,7 @@ export async function GET(req: Request) {
       eq(schema.matches.projectId, schema.projectProfiles.id),
       eq(schema.projectProfiles.userId, auth.userId),
     ))
-    .where(and(
-      eq(schema.matches.userId, auth.userId),
-      or(
-        like(schema.matches.summary, needle),
-        like(schema.matches.whyUseful, needle),
-        like(schema.matches.suggestedUse, needle),
-        like(schema.matches.writeupMd, needle),
-        like(schema.matches.personalNote, needle),
-        like(schema.repos.owner, needle),
-        like(schema.repos.name, needle),
-        like(schema.repos.description, needle),
-        sql`lower(${schema.repos.owner}) || '/' || lower(${schema.repos.name}) like ${needle.toLowerCase()}`,
-      ),
-    ))
+    .where(and(...matchConds))
     .orderBy(desc(schema.matches.createdAt))
     .limit(50);
 
@@ -52,7 +76,9 @@ export async function GET(req: Request) {
     handoffPrUrl: m.handoffPrUrl,
     createdAt: m.createdAt.toISOString(),
   }));
-  return NextResponse.json({ q, count: out.length, matches: out }, { headers: corsHeaders });
+  const body: Record<string, unknown> = { q, count: out.length, matches: out };
+  if (repoFilter) body.scopedTo = repoFilter;
+  return NextResponse.json(body, { headers: corsHeaders });
 }
 
 export async function OPTIONS() { return new NextResponse(null, { status: 204, headers: corsHeaders }); }

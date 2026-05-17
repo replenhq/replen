@@ -40,7 +40,12 @@ echo "[3/6] npm install + db migrate + build"
 # to the repo. Running drizzle-kit generate against the live schema would
 # emit an extra autogen migration whenever the remote snapshot drifts from
 # main, which then races the committed migration of the same step number.
-ssh "$REMOTE" "cd $REMOTE_DIR && npm install --no-audit --no-fund && npm run db:migrate && npm run build"
+#
+# `next build` (Next 16.x with turbopack) spawns page-data-collection workers
+# that don't auto-load .env, so client.ts trips its ENCRYPTION_KEY assert
+# even though systemd loads .env fine at runtime. Source .env explicitly into
+# the build shell to give the workers the same env the running service has.
+ssh "$REMOTE" "cd $REMOTE_DIR && npm install --no-audit --no-fund && npm run db:migrate && set -a && . ./.env && set +a && npm run build"
 
 echo "[4/6] installing systemd units"
 ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$WEB_SVC /etc/systemd/system/$WEB_SVC && sudo cp $REMOTE_DIR/scripts/$CRON_SVC /etc/systemd/system/$CRON_SVC && sudo systemctl daemon-reload"
