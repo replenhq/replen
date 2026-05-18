@@ -11,7 +11,15 @@ type Project = typeof schema.projectProfiles.$inferSelect;
 export async function sendDigestEmail(runId: number, userId: number, cfg: UserConfig) {
   const fromAddr = process.env.EMAIL_FROM_ADDRESS;
   const fromName = process.env.EMAIL_FROM_NAME ?? "Replen";
-  const to = cfg.emailToAddress ?? process.env.EMAIL_TO_ADDRESS;
+  // Audit L7: in solo/single-user mode (AUTH_MODE=solo), EMAIL_TO_ADDRESS
+  // is the legitimate fallback. In multi-user mode (AUTH_MODE=firebase,
+  // default in prod), falling back to the env address means a misconfigured
+  // user's digest lands in the admin's inbox — content leak across tenants.
+  // Require explicit per-user emailToAddress in multi-user mode.
+  const isMultiUser = (process.env.AUTH_MODE ?? "firebase") !== "solo";
+  const to = isMultiUser
+    ? cfg.emailToAddress
+    : (cfg.emailToAddress ?? process.env.EMAIL_TO_ADDRESS);
 
   if (!fromAddr || !to) {
     console.warn(`[email] user=${userId} missing from-address or destination; skipping`);

@@ -32,5 +32,39 @@ RestartSec=5
 StandardOutput=append:/var/log/replen/web.log
 StandardError=append:/var/log/replen/web.log
 
+# ── Sandbox hardening ─────────────────────────────────────────────────
+# These directives shrink what a code-execution compromise in Node can
+# reach. They are deliberately compatible with Next.js + Node 22 + git
+# subprocess for the shallow-clone path. Crucially MemoryDenyWriteExecute
+# is NOT set — V8 emits RWX pages for JIT and the unit would crash on
+# every page compilation.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/replen /var/log/replen
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+# AF_NETLINK / AF_PACKET / AF_RAW not needed — Node uses INET[6] + UNIX
+# (cluster IPC + libuv signals). Locking this down blocks a class of
+# kernel-surface exploits.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# App binds 3030 (unprivileged); drop every capability.
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Inherited writes (logs, db updates) default to 0640.
+UMask=0027
+
 [Install]
 WantedBy=multi-user.target

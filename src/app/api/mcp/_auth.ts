@@ -31,6 +31,20 @@ export async function authenticate(req: Request): Promise<McpAuth | null> {
   // surface — they could keep writing candidates, reading matches, and
   // opening handoff PRs indefinitely.
   if (row.status !== "active") return null;
+  // Expiry gate (audit H1). NULL expiry on legacy pre-0028 rows is treated
+  // as non-expiring back-compat; new tokens from authorizeCli always carry
+  // a 90-day stamp. Once a token is past its expiry the user must run the
+  // CLI auth flow again — a leaked token can't be used forever.
+  const expiresAt = row.settings.ingestTokenExpiresAt;
+  if (expiresAt && +expiresAt < Date.now()) return null;
+  // Stamp last-used so /settings can surface stale-or-suspicious tokens.
+  // Fire-and-forget: don't slow the request on a slow disk; if the update
+  // fails the API call still succeeds.
+  void db
+    .update(schema.userSettings)
+    .set({ ingestTokenLastUsedAt: new Date() })
+    .where(eq(schema.userSettings.id, row.settings.id))
+    .catch((e) => console.warn(`[_auth] last-used stamp failed: ${(e as Error).message}`));
   return { userId: row.settings.userId, settings: row.settings };
 }
 

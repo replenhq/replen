@@ -1,4 +1,4 @@
-import { chatCompletion, TRIAGE_MODEL } from "./llm";
+import { chatCompletion, triageModel } from "./llm";
 import type { SafetyReport } from "../scanner/safety";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE } from "./guards";
 
@@ -42,7 +42,7 @@ Description: ${safety.meta.description ?? "(none)"}
 ${sanitizeUntrusted(safety.readmeMd.slice(0, 8000), "REPO_README")}`;
 
   const res = await chatCompletion({
-    model: TRIAGE_MODEL,
+    model: triageModel(),
     max_tokens: 1024,
     response_format: { type: "json_object" },
     messages: [

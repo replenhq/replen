@@ -23,3 +23,7 @@ backups/
 
 # Claude Code session files
 .mcp.json
+
+# Operator-specific deploy wrappers (private hostnames/domains)
+scripts/*.local.sh
+scripts/*.local.plist

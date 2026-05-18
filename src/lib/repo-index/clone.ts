@@ -39,7 +39,19 @@ export async function shallowClone(
   name: string,
   opts: { token?: string | null } = {},
 ): Promise<ClonedRepo> {
-  const dir = await mkdtemp(join(tmpdir(), `replen-clone-${owner}-${name}-`));
+  // Defence-in-depth boundary validation (audit L1). Today's callers all
+  // sanitise upstream; a future regression that feeds attacker-controlled
+  // strings here would otherwise inherit safety implicitly (argv-spawn,
+  // no shell) rather than explicitly.
+  if (!/^[\w.-]+$/.test(owner)) throw new Error(`shallowClone: invalid owner`);
+  if (!/^[\w.-]+$/.test(name)) throw new Error(`shallowClone: invalid name`);
+  if (opts.token != null && opts.token !== "" && !/^[A-Za-z0-9_]+$/.test(opts.token)) {
+    throw new Error(`shallowClone: invalid token shape`);
+  }
+  // Fixed-template tempdir; mkdtemp adds the random suffix. Not interpolating
+  // owner/name means a future malicious value (if it ever got past the checks
+  // above) can't surface as a controllable filesystem path segment.
+  const dir = await mkdtemp(join(tmpdir(), `replen-clone-`));
   // Auth in the URL when present. Don't log this — token would land in the
   // child's stderr if git complains.
   const auth = opts.token ? `${opts.token}@` : "";

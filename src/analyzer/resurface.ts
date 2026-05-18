@@ -9,7 +9,7 @@
 //
 // See docs/bookmark-resurface-scope.md.
 
-import { chatCompletion, hasAnthropicKey, REASONING_MODEL, REASONING_MODEL_HIGH } from "./llm";
+import { chatCompletion, hasAnthropicKey, reasoningModel, reasoningModelHigh } from "./llm";
 import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import type { OutcomeGoal } from "../projects/summarize";
@@ -93,7 +93,7 @@ export async function scoreBookmarkAgainstProject(input: ResurfaceInput): Promis
     console.warn(`[resurface] skipping ${project.slug}: Anthropic requested but key missing`);
     return { kind: "no-fit" };
   }
-  const model = provider === "anthropic" ? REASONING_MODEL_HIGH : REASONING_MODEL;
+  const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 
   const projectBlock = `## Project: ${project.name} (slug: ${project.slug})
 

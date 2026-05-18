@@ -38,17 +38,29 @@ export async function authorizeCli(port: number, state: string): Promise<Authori
     .from(schema.userSettings)
     .where(eq(schema.userSettings.userId, u.id))
     .get();
+  // 90-day expiry: long enough that users don't re-auth often, short enough
+  // that a token from a forgotten device aged out can't be used forever.
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 90 * 24 * 3600 * 1000);
   if (existing) {
     await db
       .update(schema.userSettings)
-      .set({ ingestTokenHash: hash, ingestToken: null, updatedAt: new Date() })
+      .set({
+        ingestTokenHash: hash,
+        ingestToken: null,
+        ingestTokenExpiresAt: expiresAt,
+        ingestTokenLastUsedAt: null, // reset on re-issue
+        updatedAt: now,
+      })
       .where(eq(schema.userSettings.userId, u.id));
   } else {
     await db.insert(schema.userSettings).values({
       userId: u.id,
       ingestTokenHash: hash,
       ingestToken: null,
-      updatedAt: new Date(),
+      ingestTokenExpiresAt: expiresAt,
+      ingestTokenLastUsedAt: null,
+      updatedAt: now,
     });
   }
 

@@ -16,6 +16,11 @@ ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen
 ExecStartPre=+/usr/bin/touch /var/log/replen/cron.log
 ExecStartPre=+/bin/chmod 0640 /var/log/replen/cron.log
 ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen/cron.log
+# Sweep orphaned shallow-clone tempdirs left behind by a previous run
+# that crashed before its cleanup() ran (audit L2). +60min so we don't
+# clobber an in-flight clone from a sibling process. With PrivateTmp=yes
+# below this targets the unit's private /tmp namespace only.
+ExecStartPre=-/usr/bin/find /tmp -maxdepth 1 -name 'replen-clone-*' -type d -mmin +60 -exec rm -rf {} +
 # Pin tsx to the installed binary. `npx tsx` would silently `npm install`
 # tsx from the registry on every restart if node_modules went missing —
 # a supply-chain race every cron startup.
@@ -24,6 +29,34 @@ Restart=on-failure
 RestartSec=30
 StandardOutput=append:/var/log/replen/cron.log
 StandardError=append:/var/log/replen/cron.log
+
+# ── Sandbox hardening ─────────────────────────────────────────────────
+# Matches the web unit. Same caveat: do NOT add MemoryDenyWriteExecute
+# (V8 JIT). PrivateTmp=yes is important here — the indexer's shallow
+# clones land in tmpfs under the unit's private namespace, isolated
+# from anything else on the box.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/replen /var/log/replen
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

@@ -2,26 +2,22 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 
-// GET /api/sync?since=<iso8601>&user_id=<id>
-// Token-protected (still keyed on SYNC_TOKEN so the laptop CLI works without Firebase).
-// SYNC_TOKEN is bound to exactly one user_id (SYNC_USER_ID env). Other ids
-// return 403 — this is the laptop-CLI endpoint, not a cross-tenant fetcher.
+// GET /api/sync?since=<iso8601>
+// Token-protected (keyed on SYNC_TOKEN so the laptop CLI works without Firebase).
+// SYNC_TOKEN is bound to exactly one user via the SYNC_USER_ID env var. The
+// user-id is no longer accepted from the query string — it would have been a
+// 403-vs-200 fingerprint of the valid id, and accepting it tempted future
+// maintainers to "support multiple users" with a single token.
 export async function GET(req: Request) {
   if (!authorized(req)) return new NextResponse("unauthorized", { status: 401 });
 
-  const { searchParams } = new URL(req.url);
-  const userIdParam = searchParams.get("user_id");
-  if (!userIdParam) return new NextResponse("user_id required", { status: 400 });
-  const userId = Number(userIdParam);
-  if (!Number.isFinite(userId)) return new NextResponse("user_id must be a number", { status: 400 });
-
-  const allowedUserId = Number(process.env.SYNC_USER_ID);
-  if (!Number.isFinite(allowedUserId)) {
+  const userId = Number(process.env.SYNC_USER_ID);
+  if (!Number.isFinite(userId)) {
     console.error("[/api/sync] SYNC_USER_ID env var not set or not numeric — refusing");
     return new NextResponse("server misconfigured", { status: 503 });
   }
-  if (userId !== allowedUserId) return new NextResponse("forbidden", { status: 403 });
 
+  const { searchParams } = new URL(req.url);
   const sinceParam = searchParams.get("since");
   const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
 

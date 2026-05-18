@@ -1,4 +1,4 @@
-import { chatCompletion, TRIAGE_MODEL } from "./llm";
+import { chatCompletion, triageModel } from "./llm";
 
 // Derive 3-5 GitHub-topic-style search keywords from a project's docs.
 // Stored once per project_profile (in search_keywords) and re-derived only
@@ -35,7 +35,7 @@ export async function deriveSearchKeywords(p: KeywordDerivationInput): Promise<s
   if (!p.readmeMd && !p.claudeMd && !p.techSummary) return null;
   try {
     const res = await chatCompletion({
-      model: TRIAGE_MODEL,
+      model: triageModel(),
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPrompt },

@@ -2,7 +2,7 @@
 // (typical of Threads/Instagram), use the LLM to extract a likely identity
 // and confirm against GitHub's repo search.
 
-import { chatCompletion, TRIAGE_MODEL } from "../analyzer/llm";
+import { chatCompletion, triageModel } from "../analyzer/llm";
 import { readRunOrEnv } from "../analyzer/run-context";
 
 type Resolution = {
@@ -47,7 +47,7 @@ export async function resolveGithubFromText(text: string): Promise<Resolution | 
   try {
     const res = await chatCompletion(
       {
-        model: TRIAGE_MODEL,
+        model: triageModel(),
         max_tokens: 512,
         response_format: { type: "json_object" },
         messages: [

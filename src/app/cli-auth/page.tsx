@@ -28,6 +28,17 @@ function validateState(raw: string | undefined): string | null {
   return raw;
 }
 
+// Referrer-Policy: no-referrer. When this page redirects to the CLI's
+// localhost callback (carrying the exchange code in the URL), no Referer
+// header is set on that request. Any third-party content rendered inside
+// the CLI's callback page also can't leak the code via outbound Referer.
+// Defence-in-depth on top of the in-memory single-use + 2-min TTL guard.
+export const metadata = {
+  other: {
+    "referrer-policy": "no-referrer",
+  },
+};
+
 export default async function CliAuthPage({ searchParams }: Params) {
   const sp = await searchParams;
   const port = validatePort(sp.port);
@@ -36,6 +47,7 @@ export default async function CliAuthPage({ searchParams }: Params) {
   if (!port || !state) {
     return (
       <main style={pageStyle}>
+        <meta name="referrer" content="no-referrer" />
         <h1 style={h1Style}>Bad request</h1>
         <p style={dimStyle}>
           This page needs to be opened by the <code>replen</code> CLI. Run{" "}
@@ -52,6 +64,7 @@ export default async function CliAuthPage({ searchParams }: Params) {
 
   return (
     <main style={pageStyle}>
+      <meta name="referrer" content="no-referrer" />
       <h1 style={h1Style}>Authorize the Replen CLI</h1>
       <p style={dimStyle}>
         An app running on your computer (<code>localhost:{port}</code>) is

@@ -7,8 +7,52 @@ import { redeemCliAuthCode } from "@/lib/cli-auth-codes";
 // in any URL.
 //
 // Single-use: even on state mismatch the code is consumed (so a brute-force
-// state probe can only burn the code once).
+// state probe can only burn the code once). Belt-and-braces per-IP bucket
+// below (audit H2) caps brute force at 10 attempts / minute / IP even if the
+// nginx-layer limit is misconfigured.
+
+// Per-IP token bucket. Keyed by the connecting IP (X-Forwarded-For when
+// nginx is in front, else req.ip). Tiny in-memory store; sweep stale
+// entries on every call. Single-replica deployment so a global Map is fine.
+type Bucket = { tokens: number; refilledAt: number };
+const buckets = new Map<string, Bucket>();
+const RATE_REFILL_MS = 60_000; // 10 reqs / minute
+const RATE_CAPACITY = 10;
+function takeBucketToken(ip: string): boolean {
+  const now = Date.now();
+  let b = buckets.get(ip);
+  if (!b) {
+    b = { tokens: RATE_CAPACITY, refilledAt: now };
+    buckets.set(ip, b);
+  }
+  // Refill linearly: tokens granted proportional to elapsed time.
+  const elapsed = now - b.refilledAt;
+  if (elapsed > 0) {
+    const refill = (elapsed / RATE_REFILL_MS) * RATE_CAPACITY;
+    b.tokens = Math.min(RATE_CAPACITY, b.tokens + refill);
+    b.refilledAt = now;
+  }
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  // Opportunistic sweep so the map doesn't grow unbounded.
+  if (buckets.size > 1000) {
+    for (const [k, v] of buckets) {
+      if (now - v.refilledAt > 5 * RATE_REFILL_MS) buckets.delete(k);
+    }
+  }
+  return true;
+}
+
+function callerIp(req: Request): string {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return "unknown";
+}
+
 export async function POST(req: Request) {
+  if (!takeBucketToken(callerIp(req))) {
+    return NextResponse.json({ ok: false, error: "rate limit" }, { status: 429 });
+  }
   let body: { code?: string; state?: string };
   try {
     body = await req.json();
@@ -25,6 +69,7 @@ export async function POST(req: Request) {
   }
   const r = redeemCliAuthCode(code, state);
   if (!r.ok) {
+    console.warn(`[/api/cli-auth/exchange] redeem failed ip=${callerIp(req)} reason=${r.error}`);
     return NextResponse.json({ ok: false, error: r.error }, { status: 400 });
   }
   return NextResponse.json({ ok: true, token: r.token, base: r.base });

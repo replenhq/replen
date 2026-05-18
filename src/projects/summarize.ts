@@ -3,7 +3,7 @@
 // CONTEXT, not recommendations — gap identification (Stage 2) and matching
 // (Stage 3+4) live elsewhere. See docs/stage-1-scope.md.
 
-import { chatCompletion, TRIAGE_MODEL } from "../analyzer/llm";
+import { chatCompletion, triageModel } from "../analyzer/llm";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing summaries — they re-generate on next pipeline run.
@@ -223,7 +223,7 @@ export async function generateProjectSummary(input: SummarizeInput): Promise<Pro
     input.techSummary ? "techSummary" : null,
   ].filter((s): s is string => s !== null);
 
-  const model = TRIAGE_MODEL;
+  const model = triageModel();
   const res = await chatCompletion(
     {
       model,

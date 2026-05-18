@@ -7,7 +7,7 @@
 // Stage 3 (targeted GitHub search). Stage 4 (scoring) still reads the raw
 // docs to evaluate fit — the summary is an index, not a source of truth.
 
-import { chatCompletion, TRIAGE_MODEL } from "../analyzer/llm";
+import { chatCompletion, triageModel } from "../analyzer/llm";
 import type { ProjectSummary } from "./summarize";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
@@ -319,12 +319,12 @@ export async function generateSearchVectors(
       confidenceFloor,
       generatedAt: new Date().toISOString(),
       sourceSummaryHash: summaryHash,
-      llmModel: TRIAGE_MODEL,
+      llmModel: triageModel(),
       promptVersion: VECTORS_PROMPT_VERSION,
     };
   }
 
-  const model = TRIAGE_MODEL;
+  const model = triageModel();
   const res = await chatCompletion(
     {
       model,

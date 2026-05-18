@@ -63,7 +63,15 @@ function waitForCallback(port: number, expectedState: string): Promise<CallbackR
         res.end("state mismatch");
         return;
       }
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // Referrer-Policy: no-referrer means anything rendered in SUCCESS_HTML
+      // (even if a future maintainer adds an external <img>, <link>, or fetch)
+      // cannot leak the callback URL — which carries the exchange code in
+      // its query string — via an outbound Referer header.
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "referrer-policy": "no-referrer",
+        "cache-control": "no-store",
+      });
       res.end(SUCCESS_HTML);
       // Give the response a tick to flush before we shut down the listener.
       setTimeout(() => server.close(), 100);

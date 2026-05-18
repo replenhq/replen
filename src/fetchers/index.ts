@@ -1,4 +1,5 @@
 import { db, schema } from "../db/client";
+import { errorMsg } from "../lib/error-msg";
 import { hnFetcher } from "./hn";
 import { redditFetcher } from "./reddit";
 import { ghTrendingFetcher } from "./gh-trending";
@@ -41,7 +42,10 @@ async function runFetchersInner(userId: number, cfg: UserConfig): Promise<{ inse
         console.log(`[fetch] user=${userId} ${f.name}: ${items.length} items`);
         return items;
       } catch (e) {
-        console.error(`[fetch] ${f.name} failed`, e);
+        // Audit L9: pass an error MESSAGE not the raw Error object. Some
+        // undici error shapes carry request headers (incl. Authorization)
+        // which would land in logs via the default util.inspect path.
+        console.error(`[fetch] ${f.name} failed: ${errorMsg(e)}`);
         return [];
       }
     })

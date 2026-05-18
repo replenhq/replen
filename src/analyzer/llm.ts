@@ -52,12 +52,65 @@ function pickApiKey(slot: "primary" | "sensitive"): string {
   return k;
 }
 
-// Module-load fallbacks for callers outside a withRunConfig() scope (CLI scripts).
+// Model resolution. Per-user override wins (from the user's /settings row,
+// carried by withRunConfig → AsyncLocalStorage), then process env, then a
+// hard-coded default. Resolving at call time (not module load) means a user
+// who edits their model in the dashboard takes effect on the next pipeline
+// run without a service restart — and concurrent runs by different users
+// can't see each other's model picks.
+//
+// TRIAGE_MODEL and REASONING_MODEL both share the user's "primary" slot
+// because that's how the rest of the routing works (provider, key, base URL
+// all come from the primary slot). REASONING_MODEL_HIGH lives in the
+// "sensitive" slot which routes to Anthropic for sensitivity=high projects.
+export function triageModel(): string {
+  return (
+    readRunOrEnv("llmPrimaryModel", "TRIAGE_MODEL", "LLM_PRIMARY_MODEL") ??
+    "deepseek-v4-flash"
+  );
+}
+export function reasoningModel(): string {
+  return (
+    readRunOrEnv("llmPrimaryModel", "REASONING_MODEL", "LLM_PRIMARY_MODEL") ??
+    "deepseek-v4-flash"
+  );
+}
+export function reasoningModelHigh(): string {
+  return (
+    readRunOrEnv("llmSensitiveModel", "REASONING_MODEL_HIGH", "LLM_SENSITIVE_MODEL") ??
+    "claude-opus-4-7"
+  );
+}
+
+// Module-load constants kept as a deprecated fallback for code paths that
+// run outside withRunConfig and want a stable string at import time
+// (e.g. a logging line that includes the model). New call sites should
+// invoke the resolver functions above so per-user routing takes effect.
 export const TRIAGE_MODEL = process.env.TRIAGE_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
 export const REASONING_MODEL = process.env.REASONING_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
 export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? process.env.LLM_SENSITIVE_MODEL ?? "claude-opus-4-7";
 
 export type Provider = "deepseek" | "anthropic";
+
+// Scrub a provider error body before it lands in an Error message (audit
+// L4). Some providers include bearer tokens or request IDs in error bodies;
+// some echo a slice of the request back. We cap aggressively + redact
+// patterns that look like secrets so a runs.error column never accidentally
+// carries them.
+function scrubLlmErrorBody(text: string): string {
+  if (!text) return "";
+  let scrubbed = text
+    // Bearer/api keys mentioned in error bodies (uncommon but seen on auth failures).
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-[redacted]")
+    .replace(/ghp_[A-Za-z0-9_-]{8,}/g, "ghp_[redacted]")
+    .replace(/github_pat_[A-Za-z0-9_-]{8,}/g, "github_pat_[redacted]")
+    .replace(/ing_[A-Za-z0-9_-]{8,}/g, "ing_[redacted]");
+  // Cap to 200 chars so even unanticipated leak shapes have bounded blast
+  // radius when this error makes it into a DB row.
+  if (scrubbed.length > 200) scrubbed = scrubbed.slice(0, 200) + "…";
+  return scrubbed;
+}
 
 // Thrown when the LLM provider responds with a clear out-of-credits / quota
 // signal (HTTP 402, "insufficient_balance", "insufficient_quota", etc.).
@@ -70,7 +123,7 @@ export class LlmQuotaError extends Error {
   readonly httpStatus: number;
   readonly detail: string;
   constructor(slot: "primary" | "sensitive", httpStatus: number, detail: string) {
-    super(`${slot} LLM out of credits (HTTP ${httpStatus}): ${detail.slice(0, 200)}`);
+    super(`${slot} LLM out of credits (HTTP ${httpStatus}): ${scrubLlmErrorBody(detail)}`);
     this.name = "LlmQuotaError";
     this.slot = slot;
     this.httpStatus = httpStatus;
@@ -130,8 +183,9 @@ export async function chatCompletion(
   const res = provider === "anthropic"
     ? await anthropicCompletion(req, opts)
     : await deepseekCompletion(req, opts);
-  if (currentUsage && res.usage) {
-    currentUsage.calls.push({
+  const usage = usageStore.getStore();
+  if (usage && res.usage) {
+    usage.calls.push({
       provider,
       model: req.model,
       inputTokens: res.usage.prompt_tokens ?? 0,
@@ -143,6 +197,9 @@ export async function chatCompletion(
 
 // Per-run usage tracking. The pipeline calls beginUsageTracking()
 // before doing any LLM work and endUsageTracking() to drain the totals.
+// Stored in AsyncLocalStorage (audit L8) so concurrent runs don't
+// corrupt each other's billing — the previous module-level singleton
+// would let run B's calls land in run A's bucket if they overlapped.
 
 export type LlmCall = {
   provider: Provider;
@@ -159,15 +216,30 @@ export type UsageSummary = {
   calls: LlmCall[];
 };
 
-let currentUsage: { calls: LlmCall[] } | null = null;
+import { AsyncLocalStorage } from "node:async_hooks";
+const usageStore = new AsyncLocalStorage<{ calls: LlmCall[] }>();
+
+// Backwards-compat shape: the pipeline calls beginUsageTracking() and
+// expects endUsageTracking() to return what was tracked since. With ALS
+// we model the "since" window by enter()-ing a fresh store on begin and
+// returning the drained calls on end.
+let pendingUsage: { calls: LlmCall[] } | null = null;
+let usageExit: (() => void) | null = null;
 
 export function beginUsageTracking(): void {
-  currentUsage = { calls: [] };
+  pendingUsage = { calls: [] };
+  const store = pendingUsage;
+  // enterWith binds the store to this async context. Since the pipeline
+  // is single-rooted at runAnalysis() this matches the existing per-run
+  // shape exactly while preventing cross-run mixing.
+  usageStore.enterWith(store);
+  usageExit = () => { pendingUsage = null; };
 }
 
 export function endUsageTracking(): UsageSummary {
-  const calls = currentUsage?.calls ?? [];
-  currentUsage = null;
+  const calls = pendingUsage?.calls ?? [];
+  if (usageExit) usageExit();
+  usageExit = null;
   const summary: UsageSummary = {
     deepseekInputTokens: 0,
     deepseekOutputTokens: 0,
@@ -330,7 +402,12 @@ async function doWithRetry(
         if (isQuotaError(res.status, text)) {
           throw new LlmQuotaError(label as "primary" | "sensitive", res.status, text);
         }
-        throw new Error(`${label} ${res.status}: ${text.slice(0, 300)}`);
+        // Scrub the provider's error body before bubbling it into an Error
+        // message (audit L4). Some providers include their own bearer
+        // tokens / request-id headers in error bodies; this Error eventually
+        // lands in runs.error in the DB. Cap aggressively and assert no
+        // obvious secret-shaped tokens leak through.
+        throw new Error(`${label} ${res.status}: ${scrubLlmErrorBody(text)}`);
       }
       return (await res.json()) as ChatResponse;
     } catch (e) {

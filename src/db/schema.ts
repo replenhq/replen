@@ -95,6 +95,16 @@ export const userSettings = sqliteTable(
     // migration) - any value present is migrated on db boot.
     ingestToken: text("ingest_token"),
     ingestTokenHash: text("ingest_token_hash"),
+    // 90-day expiry stamped at issue time by authorizeCli. Auth middleware
+    // refuses redemption once now() > this. Forces periodic re-auth and
+    // means a leaked token has a bounded blast radius. Nullable for legacy
+    // rows pre-0028; those are treated as non-expiring (back-compat).
+    ingestTokenExpiresAt: integer("ingest_token_expires_at", { mode: "timestamp" }),
+    // Updated by the auth middleware on every successful redemption.
+    // Surfaced on /settings so users notice tokens that haven't been used
+    // (revoke unused) or that are being used at weird hours (revoke
+    // suspicious).
+    ingestTokenLastUsedAt: integer("ingest_token_last_used_at", { mode: "timestamp" }),
     // Comma-separated primary languages auto-detected from the user's own
     // repos when they save a PAT (e.g. "TypeScript,Python,Go"). Used by the
     // gh-trending fetcher to pull language-specific trending pages instead

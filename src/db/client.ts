@@ -1,6 +1,6 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import * as schema from "./schema";
@@ -22,6 +22,16 @@ const absPath = resolve(dbPath);
 mkdirSync(dirname(absPath), { recursive: true });
 
 const client = createClient({ url: `file:${absPath}` });
+// Audit L6: enforce 0600 on the sqlite file (owner read/write only). Default
+// umask drift can leave the file world-readable, which on a multi-tenant
+// host exposes every match writeup, project profile, and DEK ciphertext to
+// any logged-in user. Best-effort: a chmod failure shouldn't crash boot
+// (e.g. read-only test fixtures), so swallow but log.
+if (existsSync(absPath)) {
+  try { chmodSync(absPath, 0o600); } catch (e) {
+    console.warn(`[db] chmod 0600 on ${absPath} failed: ${(e as Error).message}`);
+  }
+}
 // Absorb concurrent reader/writer locks (the dashboard reads while the pipeline writes).
 await client.execute("PRAGMA busy_timeout = 8000");
 await client.execute("PRAGMA journal_mode = WAL");
@@ -73,7 +83,7 @@ if (process.env.ENCRYPTION_KEY) {
 
 async function rewrapV1Secrets(): Promise<void> {
   const rs = await client.execute({
-    sql: `SELECT id, user_id, github_token, github_write_token, deepseek_api_key, anthropic_api_key
+    sql: `SELECT id, user_id, github_token, github_write_token, deepseek_api_key, anthropic_api_key, webhook_url
           FROM user_settings`,
     args: [],
   });
@@ -106,17 +116,21 @@ async function rewrapV1Secrets(): Promise<void> {
     return dek;
   }
 
-  const COLUMNS: Array<["github_token" | "github_write_token" | "deepseek_api_key" | "anthropic_api_key", string]> = [
+  const COLUMNS: Array<["github_token" | "github_write_token" | "deepseek_api_key" | "anthropic_api_key" | "webhook_url", string]> = [
     ["github_token", "githubToken"],
     ["github_write_token", "githubToken"],
     ["deepseek_api_key", "deepseekApiKey"],
     ["anthropic_api_key", "anthropicApiKey"],
+    // webhook_url: was plaintext until audit M1. Same migration shape since
+    // decryptSecret() returns plaintext input unchanged.
+    ["webhook_url", "webhookUrl"],
   ];
 
   for (const r of rs.rows as unknown as Array<{
     id: number; user_id: number;
     github_token: string | null; github_write_token: string | null;
     deepseek_api_key: string | null; anthropic_api_key: string | null;
+    webhook_url: string | null;
   }>) {
     const updates: Record<string, string> = {};
     for (const [col] of COLUMNS) {

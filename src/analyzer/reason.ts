@@ -1,4 +1,4 @@
-import { chatCompletion, hasAnthropicKey, REASONING_MODEL, REASONING_MODEL_HIGH, TRIAGE_MODEL } from "./llm";
+import { chatCompletion, hasAnthropicKey, reasoningModel, reasoningModelHigh, triageModel } from "./llm";
 import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
@@ -55,7 +55,7 @@ ${projectLines}`;
 
   const res = await chatCompletion(
     {
-      model: TRIAGE_MODEL,
+      model: triageModel(),
       max_tokens: 1024,
       response_format: { type: "json_object" },
       messages: [
@@ -190,7 +190,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     console.warn(`[reason] skipping project ${project?.slug ?? "?"} - Anthropic requested but ANTHROPIC_API_KEY not set`);
     return null;
   }
-  const model = provider === "anthropic" ? REASONING_MODEL_HIGH : REASONING_MODEL;
+  const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 
   const res = await chatCompletion(
     {
@@ -249,6 +249,25 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
 // gh-trending. Encodes window breadth in plain English so the LLM doesn't
 // need to interpret a Set; empty/null windows return "" so the prompt
 // stays unchanged for non-trending candidates.
+// Collapse a project's tech-summary down to a comma-separated language list
+// for the shortlist pass when the project is high-sensitivity. The full
+// techSummary often inlines dependency names ("@stripe/foo", "internal-auth-
+// service") which reveal the stack to the lower-trust shortlister LLM.
+// Strategy: keep alpha tokens that match a known language word; drop everything
+// else. Errs on the side of less leakage — if no language word survives, return
+// null and the shortlister falls back to slug + tagline only.
+const LANGUAGE_HINTS = new Set([
+  "typescript", "javascript", "python", "rust", "go", "java", "kotlin", "scala",
+  "swift", "ruby", "php", "c", "cpp", "csharp", "fsharp", "lua", "bash", "sql",
+  "dart", "elm", "elixir", "clojure", "haskell", "ocaml", "node",
+]);
+function redactTechForShortlist(tech: string | null | undefined): string | null {
+  if (!tech) return null;
+  const tokens = tech.toLowerCase().split(/[^a-z+#]+/).filter(Boolean);
+  const langs = Array.from(new Set(tokens.filter((t) => LANGUAGE_HINTS.has(t))));
+  return langs.length > 0 ? langs.join(", ") : null;
+}
+
 function renderTrendingSignal(windows: string[] | undefined): string {
   if (!windows || windows.length === 0) return "";
   const set = new Set(windows);
@@ -289,11 +308,18 @@ export async function reasonAboutRepo(
   const included = projects.filter((p) => p.included !== false);
 
   // High-sensitivity projects must not be revealed to DeepSeek (the shortlister).
-  // We pass only their slug + a one-line tagline; the README/CLAUDE.md content stays out.
-  // The deepWriteup call later routes the full content to Anthropic.
+  // README + CLAUDE.md are dropped entirely; techSummary is collapsed to the
+  // language list only (no vendor / internal-service names / package surface)
+  // since the full summary often mentions dependencies that reveal the stack.
+  // The deepWriteup call later routes full content to Anthropic only.
   const shortlistInput = included.map((p) =>
     p.sensitivity === "high"
-      ? ({ ...p, readmeMd: `[redacted - high-sensitivity project, name only]`, claudeMd: null, techSummary: p.techSummary } as LocalProject)
+      ? ({
+          ...p,
+          readmeMd: `[redacted - high-sensitivity project, name only]`,
+          claudeMd: null,
+          techSummary: redactTechForShortlist(p.techSummary),
+        } as LocalProject)
       : p
   );
 

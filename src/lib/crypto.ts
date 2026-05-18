@@ -47,6 +47,40 @@ function getMasterKey(): Buffer {
   return buf;
 }
 
+// Optional previous master key for the rotation window. When operator wants
+// to rotate ENCRYPTION_KEY they set ENCRYPTION_KEY_PREV to the OLD value,
+// flip ENCRYPTION_KEY to the new value, deploy, then run the rotate CLI
+// (`tsx src/cli/rotate-master-key.ts`) to rewrap every users.dek_ciphertext
+// under the new key. Once verified they unset ENCRYPTION_KEY_PREV. During
+// the window, decrypt tries current first, then prev.
+export function getPrevMasterKey(): Buffer | null {
+  const raw = process.env.ENCRYPTION_KEY_PREV;
+  if (!raw) return null;
+  const buf = Buffer.from(raw, "base64");
+  if (buf.length !== 32) {
+    throw new Error(`ENCRYPTION_KEY_PREV must decode to 32 bytes, got ${buf.length}`);
+  }
+  return buf;
+}
+
+// decryptWith but try the current master key first, fall back to PREV if a
+// rotation is in flight. Surface the *original* error on total failure so
+// the caller's error log reads cleanly.
+function decryptWithMasterKeys(body: string): string {
+  const cur = getMasterKey();
+  try {
+    return decryptWith(cur, body);
+  } catch (eCur) {
+    const prev = getPrevMasterKey();
+    if (!prev) throw eCur;
+    try {
+      return decryptWith(prev, body);
+    } catch {
+      throw eCur;
+    }
+  }
+}
+
 // Call once at module-load time. In production, refuses to boot without a
 // valid ENCRYPTION_KEY. In development we let it through so `npm run dev`
 // works on a fresh checkout - first real DB write will then fail loud.
@@ -67,19 +101,21 @@ export function isEncrypted(s: string | null | undefined): boolean {
 
 // v1 raw envelope (used for the DEK ciphertext and legacy rows)
 
-function encryptWith(key: Buffer, plaintext: string, prefix: string, header = ""): string {
+function encryptWith(key: Buffer, plaintext: string, prefix: string, header = "", aad?: Buffer): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGO, key, iv);
+  if (aad) cipher.setAAD(aad);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `${prefix}${header}${iv.toString("base64")}:${tag.toString("base64")}:${ct.toString("base64")}`;
 }
 
-function decryptWith(key: Buffer, body: string): string {
+function decryptWith(key: Buffer, body: string, aad?: Buffer): string {
   const parts = body.split(":");
   if (parts.length !== 3) throw new Error("malformed encrypted secret");
   const [ivB64, tagB64, ctB64] = parts;
   const decipher = createDecipheriv(ALGO, key, Buffer.from(ivB64, "base64"));
+  if (aad) decipher.setAAD(aad);
   decipher.setAuthTag(Buffer.from(tagB64, "base64"));
   const pt = Buffer.concat([decipher.update(Buffer.from(ctB64, "base64")), decipher.final()]);
   return pt.toString("utf8");
@@ -96,10 +132,14 @@ export function encryptSecret(plaintext: string): string {
 // Decrypts either v1 or v2 *without* userId context. v2 callers should prefer
 // decryptForUser() which logs to secret_access_log. Used by encrypt-secrets.ts
 // migration CLI which has no user context.
+//
+// During key rotation (ENCRYPTION_KEY_PREV is set) tries the current master
+// first, then the previous one, so a half-rotated DB stays readable until
+// the rotate-master-key CLI catches up.
 export function decryptSecret(stored: string | null | undefined): string | null {
   if (!stored) return null;
   if (stored.startsWith(PREFIX_V1)) {
-    return decryptWith(getMasterKey(), stored.slice(PREFIX_V1.length));
+    return decryptWithMasterKeys(stored.slice(PREFIX_V1.length));
   }
   if (stored.startsWith(PREFIX_V2)) {
     throw new Error("v2 ciphertext requires decryptForUser(userId, reason)");
@@ -118,12 +158,23 @@ export function generateDek(): { dek: Buffer; ciphertext: string } {
 }
 
 // Unwraps the DEK ciphertext using the master KEK. Throws if not v1.
+// During a master-key rotation window (ENCRYPTION_KEY_PREV set) tries the
+// current key first, then falls back to the prev key so a half-rotated DB
+// keeps decrypting until the rotate-master-key CLI catches every row.
 export function unwrapDek(stored: string): Buffer {
   if (!stored.startsWith(PREFIX_V1)) throw new Error("DEK must be v1-wrapped");
-  const dekB64 = decryptWith(getMasterKey(), stored.slice(PREFIX_V1.length));
+  const dekB64 = decryptWithMasterKeys(stored.slice(PREFIX_V1.length));
   const dek = Buffer.from(dekB64, "base64");
   if (dek.length !== 32) throw new Error("Unwrapped DEK must be 32 bytes");
   return dek;
+}
+
+// Rewrap a DEK ciphertext under the CURRENT master key. Used by the
+// rotate-master-key CLI to migrate rows from KEY_PREV → KEY_CURRENT.
+// Returns the new ciphertext (caller persists). Pure function — no DB I/O.
+export function rewrapDekUnderCurrentKey(stored: string): string {
+  const dek = unwrapDek(stored);
+  return encryptWith(getMasterKey(), dek.toString("base64"), PREFIX_V1);
 }
 
 // Current DEK generation stamp. Bumped on real DEK rotation (not yet
@@ -135,11 +186,14 @@ export const DEK_GENERATION_CURRENT = 1;
 // header so we can route decryption to the right key at read time. A
 // generation tag (`g1`, `g2`, …) is also stamped so future DEK rotation can
 // route historical ciphertexts to the right historical key without rewriting
-// every row at rotation time.
+// every row at rotation time. The header (`userId:gN`) is bound into GCM
+// as AAD (audit L3) so swapping headers between rows in the DB forces a
+// tag-verification failure instead of a silent wrong-key decrypt.
 export function encryptForUserWithDek(userId: number, dek: Buffer, plaintext: string): string {
   if (!plaintext) return plaintext;
   if (!Number.isInteger(userId) || userId <= 0) throw new Error("encryptForUserWithDek: bad userId");
-  return encryptWith(dek, plaintext, PREFIX_V2, `${userId}:g${DEK_GENERATION_CURRENT}:`);
+  const header = `${userId}:g${DEK_GENERATION_CURRENT}:`;
+  return encryptWith(dek, plaintext, PREFIX_V2, header, Buffer.from(`${userId}:g${DEK_GENERATION_CURRENT}`));
 }
 
 // Parses a v2 ciphertext header and returns the userId + generation + body.
@@ -166,9 +220,24 @@ export function parseV2(stored: string): { userId: number; generation: number; b
 // Decrypts a v2 ciphertext given the user's DEK. Future rotation will pass a
 // generation-specific DEK; for now there's only one DEK per user so the
 // generation is informational.
+//
+// Try the AAD-bound decrypt first (audit L3 — new ciphertexts bind userId+gen
+// into GCM AAD so header tampering is detected). Fall back to no-AAD for
+// legacy rows written before the L3 fix. Both paths use the SAME ciphertext
+// bytes — the difference is whether the AEAD verifies against AAD or not.
+// Legacy rows naturally migrate to the new shape on the next write.
 export function decryptWithDek(stored: string, dek: Buffer): string {
-  const { body } = parseV2(stored);
-  return decryptWith(dek, body);
+  const { userId, generation, body } = parseV2(stored);
+  const aad = Buffer.from(`${userId}:g${generation}`);
+  try {
+    return decryptWith(dek, body, aad);
+  } catch (eAad) {
+    try {
+      return decryptWith(dek, body);
+    } catch {
+      throw eAad;
+    }
+  }
 }
 
 // One-way hash for ingest tokens. The token itself has ~192 bits of entropy

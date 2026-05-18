@@ -35,7 +35,12 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!tokens) return null;
 
   const uid = tokens.decodedToken.uid;
-  const email = (tokens.decodedToken.email as string) ?? "";
+  // Audit L10: lowercase the email before any lookup. The admin invite path
+  // inserts emails lowercased, but Firebase preserves the case the user
+  // signed up with. Without normalisation, Alice@example.com signing up to
+  // claim an invite for alice@example.com would miss and land as a fresh
+  // pending row.
+  const email = ((tokens.decodedToken.email as string) ?? "").trim().toLowerCase();
   const emailVerified = Boolean((tokens.decodedToken as { email_verified?: boolean }).email_verified);
   const displayName = (tokens.decodedToken.name as string) ?? null;
 
@@ -78,7 +83,23 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     // 500 to the user. onConflictDoNothing + re-select converts that
     // collision into a benign no-op.
     const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "").replace(/\s+/g, "").toLowerCase();
-    const matchesBootstrap = !!bootstrapEmail && email.toLowerCase() === bootstrapEmail && emailVerified;
+    let matchesBootstrap = !!bootstrapEmail && email === bootstrapEmail && emailVerified;
+    // Audit L10: refuse bootstrap-admin if an admin already exists. The
+    // existing flow let a swapped BOOTSTRAP_ADMIN_EMAIL mid-deploy create
+    // a second admin on first sign-in, granting canUseSharedLlm + role
+    // bypass without any in-app step. With a real admin already present
+    // we degrade to normal pending-user; operator can promote via /admin.
+    if (matchesBootstrap) {
+      const existingAdmin = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.role, "admin"))
+        .get();
+      if (existingAdmin) {
+        console.warn(`[auth] BOOTSTRAP_ADMIN_EMAIL matched ${email} but an admin already exists; creating as pending instead`);
+        matchesBootstrap = false;
+      }
+    }
     await db
       .insert(schema.users)
       .values({

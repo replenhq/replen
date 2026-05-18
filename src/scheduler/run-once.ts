@@ -15,6 +15,7 @@ import {
 } from "../projects/search-vectors";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
+import { readUserSecret } from "../lib/user-secrets";
 
 // Synchronously creates the digest_runs row (so the dashboard query sees an
 // in-flight run on the very next render) and kicks off the actual pipeline
@@ -131,10 +132,19 @@ async function executePipeline(
     matchesCreated = analysis.matchesCreated;
     emailSent = await sendDigestEmail(runId, userId, cfg);
     // Real-time webhook for `high` matches. Failures are logged but don't
-    // poison the run - email is the canonical delivery.
+    // poison the run - email is the canonical delivery. The URL is stored
+    // encrypted at rest (audit M1 — bearer-equivalent for Slack/Discord),
+    // so decrypt right before send and never widen its scope.
     if (settings?.webhookUrl) {
-      await sendHighRelevanceWebhook(runId, userId, settings.webhookUrl, settings.webhookKind ?? "generic")
-        .catch((e) => console.warn(`[webhook] user=${userId} failed:`, e));
+      try {
+        const url = await readUserSecret(userId, "webhookUrl", settings.webhookUrl, "webhook-send");
+        if (url) {
+          await sendHighRelevanceWebhook(runId, userId, url, settings.webhookKind ?? "generic")
+            .catch((e) => console.warn(`[webhook] user=${userId} failed:`, e));
+        }
+      } catch (e) {
+        console.warn(`[webhook] user=${userId} decrypt failed:`, (e as Error).message);
+      }
     }
   } catch (e) {
     errorLog = e instanceof Error ? e.stack ?? e.message : String(e);

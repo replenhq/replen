@@ -45,6 +45,9 @@ export default async function SettingsPage({ searchParams }: Params) {
     githubWriteToken: rawSettings.githubWriteToken ? "•••••" : null,
     llmPrimaryApiKey: primaryKeySet ? "•••••" : null,
     llmSensitiveApiKey: sensitiveKeySet ? "•••••" : null,
+    // webhookUrl is encrypted at rest (v2 envelope) — never render the cipher,
+    // and the save handler treats an unchanged "•••••" submission as a no-op.
+    webhookUrl: rawSettings.webhookUrl ? "•••••" : null,
   };
   const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
   const sharedAllowed = !!userRow?.canUseSharedLlm;
@@ -148,18 +151,24 @@ export default async function SettingsPage({ searchParams }: Params) {
       enabled: form.get("enabled") === "on",
       cronHourUtc: Math.min(Math.max(parseInt((form.get("cronHourUtc") as string) || "6", 10) || 6, 0), 23),
       dailyCostCapUsd: Math.max(0, Number((form.get("dailyCostCapUsd") as string) || "5") || 5),
-      webhookUrl: (() => {
+      webhookUrl: await (async () => {
         const raw = ((form.get("webhookUrl") as string) || "").trim();
-        if (!raw) return null;
+        // Empty submission: preserve any existing encrypted value rather than
+        // clearing — the input is masked on render so a blank field is the
+        // "no change" signal, not an explicit unset. Use the dedicated clear
+        // button (handled separately if added) for unset.
+        if (!raw) return existingPrev?.webhookUrl ?? null;
+        // The masked sentinel from the render path comes back unchanged
+        // when the user didn't edit. Treat as no-op.
+        if (raw === "•••••") return existingPrev?.webhookUrl ?? null;
         const v = validateWebhookUrl(raw);
         if (!v.ok) {
-          // We reject silently here (preserve previous value) rather than
-          // throwing so the rest of the form save still applies. The user
-          // can see the rejected URL is gone from the field next render.
           console.warn(`[settings] webhook URL rejected: ${v.error}`);
           return existingPrev?.webhookUrl ?? null;
         }
-        return v.url.toString();
+        // Webhook URLs are bearer-equivalent for Slack/Discord; encrypt at
+        // rest the same way PATs/LLM keys are (audit M1).
+        return await writeUserSecret(u.id, v.url.toString());
       })(),
       webhookKind: ((form.get("webhookKind") as string) || "generic"),
       // Preserve the existing ingest-token HASH. Plaintext ingest_token column
@@ -211,17 +220,29 @@ export default async function SettingsPage({ searchParams }: Params) {
     const u = await requireUser();
     const fresh = "ing_" + randomBytes(24).toString("base64url");
     const hash = hashIngestToken(fresh);
+    const now = new Date();
+    // 90-day expiry stamped on every rotation. Forces re-issue after a
+    // bounded window so a leaked token can't be used forever (audit H1).
+    const expiresAt = new Date(now.getTime() + 90 * 24 * 3600 * 1000);
     const existing = await db.select({ id: schema.userSettings.id }).from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     if (existing) {
       await db.update(schema.userSettings)
-        .set({ ingestTokenHash: hash, ingestToken: null, updatedAt: new Date() })
+        .set({
+          ingestTokenHash: hash,
+          ingestToken: null,
+          ingestTokenExpiresAt: expiresAt,
+          ingestTokenLastUsedAt: null,
+          updatedAt: now,
+        })
         .where(eq(schema.userSettings.userId, u.id));
     } else {
       await db.insert(schema.userSettings).values({
         userId: u.id,
         ingestTokenHash: hash,
         ingestToken: null,
-        updatedAt: new Date(),
+        ingestTokenExpiresAt: expiresAt,
+        ingestTokenLastUsedAt: null,
+        updatedAt: now,
       });
     }
     revalidatePath("/settings");
@@ -378,7 +399,7 @@ export default async function SettingsPage({ searchParams }: Params) {
         </Section>
 
         <Section title="Real-time webhook (optional)">
-          <Field label="Webhook URL" name="webhookUrl" value={rawSettings?.webhookUrl ?? ""} type="url" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
+          <Field label="Webhook URL" name="webhookUrl" value={s?.webhookUrl ?? ""} type="text" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ fontSize: 13 }}>Format</span>
             <select name="webhookKind" defaultValue={rawSettings?.webhookKind ?? "generic"} style={{ padding: 6, maxWidth: 240 }}>
@@ -423,10 +444,37 @@ export default async function SettingsPage({ searchParams }: Params) {
             </details>
           </div>
         ) : rawSettings?.ingestTokenHash ? (
-          <p className="meta" style={{ marginTop: 8 }}>
-            Token configured. The plaintext was shown once at generation/rotation and is not retrievable from this page — rotate below to mint a new one (the old one stops working immediately).
-            {" "}Or use <code>npx replen</code> from your terminal to authorize a fresh device without exposing the token in a URL.
-          </p>
+          <>
+            <p className="meta" style={{ marginTop: 8 }}>
+              Token configured. The plaintext was shown once at generation/rotation and is not retrievable from this page — rotate below to mint a new one (the old one stops working immediately).
+              {" "}Or use <code>npx replen</code> from your terminal to authorize a fresh device without exposing the token in a URL.
+            </p>
+            <p className="meta" style={{ marginTop: 4, fontSize: 12 }}>
+              {(() => {
+                const exp = rawSettings.ingestTokenExpiresAt;
+                const lu = rawSettings.ingestTokenLastUsedAt;
+                let lastUsedText = "never used";
+                if (lu) {
+                  const days = Math.floor((Date.now() - +lu) / 86400_000);
+                  lastUsedText = days === 0 ? "used today" : days === 1 ? "last used yesterday" : `last used ${days} days ago`;
+                }
+                let expiryText = "";
+                let expired = false;
+                if (exp) {
+                  const days = Math.ceil((+exp - Date.now()) / 86400_000);
+                  if (days < 0) { expired = true; expiryText = "expired — re-authorize to use MCP"; }
+                  else expiryText = `expires in ${days} days`;
+                }
+                return (
+                  <>
+                    {lastUsedText}
+                    {expiryText && " · "}
+                    {expired ? <strong style={{ color: "#c33" }}>{expiryText}</strong> : expiryText}
+                  </>
+                );
+              })()}
+            </p>
+          </>
         ) : (
           <p className="meta">No token yet. Generate one below, or use <code>npx replen</code>.</p>
         )}

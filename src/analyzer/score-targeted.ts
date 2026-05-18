@@ -20,7 +20,7 @@
 //   - High-sensitivity projects route to Anthropic, fail-closed when the
 //     key is missing.
 
-import { chatCompletion, hasAnthropicKey, REASONING_MODEL, REASONING_MODEL_HIGH } from "./llm";
+import { chatCompletion, hasAnthropicKey, reasoningModel, reasoningModelHigh } from "./llm";
 import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
@@ -111,7 +111,7 @@ export async function scoreTargetedCandidate(
     console.warn(`[score-targeted] skipping ${project.slug}: Anthropic requested but key missing`);
     return null;
   }
-  const model = provider === "anthropic" ? REASONING_MODEL_HIGH : REASONING_MODEL;
+  const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 
   const projectBlock = `## Project: ${project.name} (slug: ${project.slug})
 

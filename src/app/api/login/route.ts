@@ -1,38 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setAuthCookies } from "next-firebase-auth-edge/lib/next/cookies";
+import { getFirebaseAuth } from "next-firebase-auth-edge/lib/auth";
 import { authConfig } from "@/lib/auth/config";
-
-// Decode (without verifying) the email + email_verified claims from a Firebase
-// ID token. Verification happens inside setAuthCookies; we just need the email
-// to run the allowlist check before establishing a session.
-function decodeJwtPayload(authzHeader: string): { email?: string; email_verified?: boolean } | null {
-  const m = /^bearer\s+(.+)$/i.exec(authzHeader);
-  if (!m) return null;
-  const parts = m[1].split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(padded));
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
-    // Soft gate: require email_verified=true on the Firebase token before we
-    // hand out a session cookie. Verified email is the bare-minimum proof of
-    // address ownership; without it, a malicious user could enrol with an
-    // unverified provider and claim someone else's address.
-    //
-    // We deliberately don't enforce an invite-list here: new sign-ins are
-    // allowed through, but the row is created with status='pending' inside
-    // getCurrentUser, so they can't do anything until an admin approves them
-    // from /admin. The scheduler / API routes / dashboard all gate on
-    // status='active'.
-    const payload = decodeJwtPayload(request.headers.get("authorization") ?? "");
-    const email = (payload?.email ?? "").toLowerCase().trim();
-    const emailVerified = Boolean(payload?.email_verified);
+    // Audit L11: verify the Firebase ID token's signature BEFORE checking
+    // any claims on it. The previous flow decoded the payload without
+    // verifying, which let a forged token with email_verified=true probe
+    // response codes ("which addresses are allowed through?") even though
+    // setAuthCookies would later reject it. Now: bad signature → 401
+    // before email is ever read.
+    const authz = request.headers.get("authorization") ?? "";
+    const m = /^bearer\s+(.+)$/i.exec(authz);
+    if (!m) {
+      return NextResponse.json({ error: "Sign-in failed: no token." }, { status: 401 });
+    }
+    const idToken = m[1];
+    const { verifyIdToken } = getFirebaseAuth({
+      serviceAccount: authConfig.serviceAccount,
+      apiKey: authConfig.apiKey,
+    });
+    let decoded;
+    try {
+      decoded = await verifyIdToken(idToken);
+    } catch {
+      return NextResponse.json({ error: "Sign-in failed: invalid token." }, { status: 401 });
+    }
+    const email = (decoded.email ?? "").toLowerCase().trim();
+    const emailVerified = Boolean(decoded.email_verified);
     if (!email) {
       return NextResponse.json({ error: "Sign-in failed: no email on token." }, { status: 401 });
     }
