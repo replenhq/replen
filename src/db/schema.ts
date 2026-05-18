@@ -315,14 +315,16 @@ export const matches = sqliteTable(
     matchedOutcome: text("matched_outcome"),
     matchedOutcomeSource: text("matched_outcome_source"), // 'user' | 'inferred'
     matchedOutcomeConfidence: text("matched_outcome_confidence"), // 'high' | 'medium'
-    // How this match entered the user's digest. 'targeted' = Stage 3/4 outcome
-    // attribution; 'serendipity' = broad-net fetcher (HN, reddit, trending,
-    // etc.) with no outcome; 'bookmark' = resurfaced from the user's starred
-    // general-awareness pile against a different project; 'manual' = direct
+    // How this match entered the user's digest. 'scouted' = Stage 3/4 outcome
+    // attribution (was: 'targeted'); 'discovered' = broad-net fetcher (HN,
+    // reddit, trending, etc.) with no outcome (was: 'serendipity');
+    // 're-checked' = resurfaced from the user's starred general-awareness
+    // pile against a different project (was: 'bookmark'); 'manual' = direct
     // user push (bookmarklet, MCP, /api/ingest) — reserved, not yet used by
-    // any insert path. See docs/stage-5-scope.md and
+    // any insert path. Renamed 2026-05-18 by migration 0027 to use plainer
+    // English vocabulary on the UI pill. See docs/stage-5-scope.md and
     // docs/bookmark-resurface-scope.md.
-    discoveryMode: text("discovery_mode"), // 'targeted' | 'serendipity' | 'bookmark' | 'manual'
+    discoveryMode: text("discovery_mode"), // 'scouted' | 'discovered' | 're-checked' | 'manual'
     // Resurface back-link: when a bookmarked general-awareness match
     // re-surfaces as a fit for a different project, the new row references
     // the original starred match. The UI uses this to render the "saved on

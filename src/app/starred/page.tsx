@@ -80,7 +80,7 @@ export default async function Starred() {
       .from(schema.matches)
       .where(and(
         eq(schema.matches.userId, user.id),
-        eq(schema.matches.discoveryMode, "bookmark"),
+        eq(schema.matches.discoveryMode, "re-checked"),
         inArray(schema.matches.resurfacedFromMatchId, bookmarkIds),
       ));
     for (const r of rs) {

@@ -48,3 +48,42 @@ export async function getSourceQualityWeights(userId: number): Promise<Map<strin
   }
   return weights;
 }
+
+// Parse the trending-windows membership info stashed in a gh-trending
+// candidate's rawJson. Returns the windows present (e.g. ["daily","weekly"])
+// and a multiplier to apply to the candidate's score so sustained-trending
+// repos out-rank single-window spikes. Returns null when the source isn't
+// gh-trending or the rawJson doesn't carry the field (older candidates,
+// or future fetcher changes).
+//
+// Multiplier rationale: a repo on all three windows is showing consistent
+// star activity across timescales — strongest "this is real, not hype"
+// signal. Weekly+monthly without daily means "trending but cooled off
+// today" which still beats a one-day spike. Daily-only is the weakest:
+// could be a viral push that won't stick.
+export function parseTrendingMembership(
+  source: string,
+  rawJson: string | null | undefined,
+): { windows: string[]; multiplier: number } | null {
+  if (sourceKind(source) !== "gh-trending" || !rawJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const w = (parsed as { windows?: unknown }).windows;
+  if (!Array.isArray(w)) return null;
+  const windows = w.filter((x): x is string => typeof x === "string");
+  const hasD = windows.includes("daily");
+  const hasW = windows.includes("weekly");
+  const hasM = windows.includes("monthly");
+  let multiplier = 1.0;
+  if (hasD && hasW && hasM) multiplier = 1.5;
+  else if (hasW && hasM) multiplier = 1.3;
+  else if (hasW || hasM) multiplier = 1.1;
+  // daily-only stays at 1.0 — no boost; that's the baseline we're trying
+  // to differentiate the breadth signals from.
+  return { windows, multiplier };
+}

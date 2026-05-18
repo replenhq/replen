@@ -10,7 +10,7 @@ import { readRunOrEnv } from "./run-context";
 import type { ProjectSummary } from "../projects/summarize";
 import { discoverLocalProjects, upsertProjects, type LocalProject } from "../projects/loader";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
-import { getSourceQualityWeights, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
+import { getSourceQualityWeights, parseTrendingMembership, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "./run-context";
 import { recordEvent } from "../scheduler/events";
@@ -88,6 +88,10 @@ async function runAnalysisInner(runId: number, userId: number) {
   // the richest-media discovery (TikTok beats gh-trending, etc.).
   const bestSourceByKey = new Map<string, string>();
   const scoreByKey = new Map<string, number>();
+  // Trending window membership per repo, captured at candidate-collection
+  // time so reason.ts can surface "appeared on daily+weekly+monthly" as a
+  // signal to the LLM. Keyed by lowercase "owner/name" same as scoreByKey.
+  const trendingWindowsByKey = new Map<string, string[]>();
   const targets: { owner: string; name: string; key: string }[] = [];
   // gh-targeted attribution per repo. When a repo was surfaced by Stage 3
   // we already know which project + outcome it's meant to serve. Stage 4
@@ -103,10 +107,18 @@ async function runAnalysisInner(runId: number, userId: number) {
     const prev = bestSourceByKey.get(key);
     if (!prev || sourceRank(kind) < sourceRank(prev)) bestSourceByKey.set(key, kind);
     // Weight candidate score by source feedback quality (default 1.0).
+    // For gh-trending candidates, also apply the breadth-of-window multiplier
+    // so all-three-windows repos rank above daily-only when the queue is full.
+    // The multiplier defaults to 1.0 for non-trending sources / older rows.
     const baseScore = c.score ?? 0;
-    const weighted = baseScore * (weights.get(kind) ?? 1.0);
+    const membership = parseTrendingMembership(c.source, c.rawJson);
+    const trendingMult = membership?.multiplier ?? 1.0;
+    const weighted = baseScore * (weights.get(kind) ?? 1.0) * trendingMult;
     const prevScore = scoreByKey.get(key) ?? -Infinity;
     if (weighted > prevScore) scoreByKey.set(key, weighted);
+    if (membership && !trendingWindowsByKey.has(key)) {
+      trendingWindowsByKey.set(key, membership.windows);
+    }
     if (!targets.find((x) => x.key === key)) {
       targets.push({ owner: m[1], name: m[2].replace(/\.git$/, ""), key });
     }
@@ -364,7 +376,7 @@ async function runAnalysisInner(runId: number, userId: number) {
             matchedOutcome: ta.matchedOutcome,
             matchedOutcomeSource: ta.matchedOutcomeSource,
             matchedOutcomeConfidence: ta.matchedOutcomeConfidence,
-            discoveryMode: "targeted",
+            discoveryMode: "scouted",
           });
           matchesCreated++;
           void recordEvent(
@@ -378,7 +390,12 @@ async function runAnalysisInner(runId: number, userId: number) {
       }
 
       void recordEvent(runId, userId, "reason", `Reasoning about ${label} against ${projectsForReasoning.length} projects`);
-      const reasoning = await reasonAboutRepo(safety, projectsForReasoning);
+      const trendingWindows = trendingWindowsByKey.get(t.key);
+      const reasoning = await reasonAboutRepo(
+        safety,
+        projectsForReasoning,
+        trendingWindows ? { trendingWindows } : null,
+      );
 
       for (const pa of reasoning.perProject) {
         if ((pa.relevanceScore ?? 0) < 50) continue;
@@ -410,7 +427,7 @@ async function runAnalysisInner(runId: number, userId: number) {
           userStatus: "unread",
           createdAt: new Date(),
           sourceKind: bestSourceByKey.get(t.key) ?? null,
-          discoveryMode: "serendipity",
+          discoveryMode: "discovered",
         });
         matchesCreated++;
         const projSlug = project?.slug ?? "_general";
@@ -480,7 +497,7 @@ async function runAnalysisInner(runId: number, userId: number) {
       .where(and(
         eq(schema.matches.userId, userId),
         eq(schema.matches.runId, runId),
-        eq(schema.matches.discoveryMode, "serendipity"),
+        eq(schema.matches.discoveryMode, "discovered"),
       ))
       .orderBy(desc(schema.matches.relevanceScore));
     if (serendipityRows.length > SERENDIPITY_MATCH_CAP) {
@@ -782,7 +799,7 @@ async function runResurfacePass(
       matchedOutcome: result.assessment.matchedOutcome,
       matchedOutcomeSource: result.assessment.matchedOutcomeSource,
       matchedOutcomeConfidence: result.assessment.matchedOutcomeConfidence,
-      discoveryMode: "bookmark",
+      discoveryMode: "re-checked",
       resurfacedFromMatchId: bookmark.id,
     });
     created++;

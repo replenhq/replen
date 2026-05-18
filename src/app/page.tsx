@@ -286,19 +286,19 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                   <div className="match-head">
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
                     <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
-                    {m.discoveryMode === "bookmark" && bookmarkDate && (
-                      <span className="tag" style={{ background: "#eef6ff", color: "#1d4ed8" }} title="Resurfaced from your bookmarks — Replen re-checks bookmarked repos against your projects every 20 days">
-                        From your bookmarks — saved {bookmarkDate.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+                    {m.discoveryMode === "re-checked" && bookmarkDate && (
+                      <span className="tag" style={{ background: "#eef6ff", color: "#1d4ed8" }} title="Re-checked from your bookmarks — Replen re-evaluates bookmarked repos against your projects every 20 days">
+                        Re-checked — saved {bookmarkDate.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
                       </span>
                     )}
-                    {m.discoveryMode === "serendipity" && (
-                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Surfaced by a broad-net feed (HN, reddit, trending, etc.) — not tied to a specific outcome you've stated">
-                        Serendipity
+                    {m.discoveryMode === "discovered" && (
+                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Discovered via a broad-net feed (HN, reddit, trending, etc.) — not tied to a specific outcome you've stated">
+                        Discovered
                       </span>
                     )}
-                    {m.discoveryMode === "targeted" && m.matchedOutcome && (
-                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Matched a specific outcome you stated for this project">
-                        Targeted
+                    {m.discoveryMode === "scouted" && m.matchedOutcome && (
+                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Scouted to match a specific outcome you stated for this project">
+                        Scouted
                       </span>
                     )}
                     {srcKind && <span className="tag">via {srcKind}</span>}

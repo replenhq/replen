@@ -142,14 +142,14 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
         ? `<span style="display:inline-block;background:#eef;color:#225;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">via ${escapeHtml(m.sourceKind)}</span>`
         : "";
       let modeChip = "";
-      if (m.discoveryMode === "bookmark" && m.resurfacedFromMatchId) {
+      if (m.discoveryMode === "re-checked" && m.resurfacedFromMatchId) {
         const bd = bookmarkDateById.get(m.resurfacedFromMatchId);
         const dateStr = bd ? bd.toISOString().slice(0, 10) : "earlier";
-        modeChip = `<span style="display:inline-block;background:#eef6ff;color:#1d4ed8;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">From your bookmarks — saved ${escapeHtml(dateStr)}</span>`;
-      } else if (m.discoveryMode === "serendipity") {
-        modeChip = `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Serendipity</span>`;
-      } else if (m.discoveryMode === "targeted" && m.matchedOutcome) {
-        modeChip = `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Targeted</span>`;
+        modeChip = `<span style="display:inline-block;background:#eef6ff;color:#1d4ed8;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Re-checked from your bookmarks — saved ${escapeHtml(dateStr)}</span>`;
+      } else if (m.discoveryMode === "discovered") {
+        modeChip = `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Discovered</span>`;
+      } else if (m.discoveryMode === "scouted" && m.matchedOutcome) {
+        modeChip = `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Scouted</span>`;
       }
       body += `
         <div style="margin:16px 0;padding:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">

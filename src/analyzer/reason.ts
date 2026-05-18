@@ -125,7 +125,21 @@ Output JSON ONLY:
   "writeup": "<the prose scoping note as described above>"
 }`;
 
-async function deepWriteup(safety: SafetyReport, project: LocalProject | null, oneLiner: string): Promise<ProjectAssessment | null> {
+// Extra discovery-context hints we want the LLM to see when judging fit.
+// Currently just trending window breadth (gh-trending); kept extensible so
+// we can fold in HN/Reddit comment signals later without another plumbing
+// round.
+export type DiscoveryContext = {
+  /** Windows on which a gh-trending repo appeared. e.g. ["daily","weekly","monthly"] */
+  trendingWindows?: string[];
+};
+
+async function deepWriteup(
+  safety: SafetyReport,
+  project: LocalProject | null,
+  oneLiner: string,
+  discovery: DiscoveryContext | null,
+): Promise<ProjectAssessment | null> {
   const isGeneral = !project;
   const projectName = project?.name ?? "_general";
 
@@ -139,13 +153,20 @@ ${sanitizeUntrusted((project.readmeMd ?? "").slice(0, 8000), "PROJECT_README")}
 ${project.claudeMd ? sanitizeUntrusted(project.claudeMd.slice(0, 10000), "PROJECT_CLAUDE_MD") + "\n\n" : ""}Tech: ${project.techSummary ?? "(none)"}`
     : `## Target: _general (no specific project - write a general-awareness note)`;
 
+  // Trending-window hint: when a repo surfaced via gh-trending we know
+  // whether it appeared on daily, weekly, monthly, or some combination.
+  // All-three is a stronger signal than a single-day spike — pass that to
+  // the LLM so it can weight breadth alongside stars/age. Omit the line
+  // entirely for non-trending sources so it doesn't add noise.
+  const trendingLine = renderTrendingSignal(discovery?.trendingWindows);
+
   const repoBlock = `## Candidate repo: ${safety.meta.owner}/${safety.meta.name}
 
 URL: https://github.com/${safety.meta.owner}/${safety.meta.name}
 Stars: ${safety.meta.stars} · Forks: ${safety.meta.forks} · Age: ${safety.ageDays}d · Last push: ${safety.daysSincePush}d ago
 Contributors: ${safety.contributorCount} · Language: ${safety.meta.language ?? "?"} · License: ${safety.meta.license ?? "?"}
 Description: ${safety.meta.description ?? "(none)"}
-
+${trendingLine}
 Safety scan:
 - risk level: ${safety.riskLevel}
 - postinstall hooks: ${safety.postinstallHooks.join("; ") || "none"}
@@ -224,6 +245,26 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
   }
 }
 
+// Render a one-line "Trending signal" hint when the candidate came from
+// gh-trending. Encodes window breadth in plain English so the LLM doesn't
+// need to interpret a Set; empty/null windows return "" so the prompt
+// stays unchanged for non-trending candidates.
+function renderTrendingSignal(windows: string[] | undefined): string {
+  if (!windows || windows.length === 0) return "";
+  const set = new Set(windows);
+  const hasD = set.has("daily");
+  const hasW = set.has("weekly");
+  const hasM = set.has("monthly");
+  let descriptor: string;
+  if (hasD && hasW && hasM) descriptor = "appears on all three trending windows (daily + weekly + monthly) — sustained growth across timescales, not a single-day spike";
+  else if (hasW && hasM) descriptor = "appears on weekly + monthly trending but not today's daily — proven attention that's cooled off recently";
+  else if (hasM) descriptor = "appears on monthly trending only — slow-burn, no recent acceleration";
+  else if (hasW) descriptor = "appears on weekly trending only — picked up in the last 7 days but not in today's top 25";
+  else if (hasD) descriptor = "appears on today's daily trending only — single-day spike, no track record of sustained interest yet";
+  else descriptor = `windows: ${windows.join(", ")}`;
+  return `\nTrending signal: ${descriptor}.\n`;
+}
+
 // Strip any markdown headers the model leaked in, then run the shared
 // markdown sanitiser so persisted writeups never carry inline HTML, defanged
 // script schemes, control chars, or bidi/zero-width tricks regardless of
@@ -239,7 +280,11 @@ function scrubWriteup(s: string): string {
 
 // Orchestration
 
-export async function reasonAboutRepo(safety: SafetyReport, projects: LocalProject[]): Promise<ReasoningOutput> {
+export async function reasonAboutRepo(
+  safety: SafetyReport,
+  projects: LocalProject[],
+  discovery: DiscoveryContext | null = null,
+): Promise<ReasoningOutput> {
   // Only consider projects the user has explicitly opted in.
   const included = projects.filter((p) => p.included !== false);
 
@@ -264,7 +309,7 @@ export async function reasonAboutRepo(safety: SafetyReport, projects: LocalProje
       const project = slug === "_general" ? null : included.find((p) => p.slug === slug) ?? null;
       if (slug !== "_general" && !project) return null;
       try {
-        return await deepWriteup(safety, project, oneLiner);
+        return await deepWriteup(safety, project, oneLiner, discovery);
       } catch (e) {
         console.warn(`[deepWriteup] failed for ${slug}:`, errorMsg(e));
         return null;
