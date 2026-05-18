@@ -292,16 +292,19 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                       </span>
                     )}
                     {m.discoveryMode === "discovered" && (
-                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Discovered via a broad-net feed (HN, reddit, trending, etc.) — not tied to a specific outcome you've stated">
+                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Found via a broad-net feed (GitHub trending, HN, Reddit, etc.) — not tied to a specific gap in your project">
                         Discovered
                       </span>
                     )}
                     {m.discoveryMode === "scouted" && m.matchedOutcome && (
-                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Scouted to match a specific outcome you stated for this project">
+                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Surfaced by a niche GitHub search Replen ran for this project's open work">
                         Scouted
                       </span>
                     )}
-                    {srcKind && <span className="tag">via {srcKind}</span>}
+                    {/* Suppress "via gh-targeted" — redundant with the Scouted pill.
+                        For discovered/re-checked, the source (gh-trending / hn / tiktok / etc.) is
+                        actually useful information so keep showing it. */}
+                    {srcKind && srcKind !== "gh-targeted" && <span className="tag">via {srcKind}</span>}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                   </div>
                   <div className="writeup">{writeup}</div>

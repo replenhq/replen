@@ -88,13 +88,27 @@ Structure your note like this:
 
 (paragraph 1) Open with 1-2 sentences on what the repo actually is - what it does, the tech split (e.g. hardware vs software, Rust core vs Python bindings), license, and any obvious constraints.
 
-(paragraph 2) Bridge into project fit. Use the literal phrasing:
-"For <PROJECT_NAME> specifically, there are N concrete plug points where it earns its place. Listed in increasing ambition:"
-…where N is between 1 and 5, depending on how well it fits.
+(paragraph 2) Bridge into project fit with a natural sentence that names <PROJECT_NAME> and signals how many plug points follow. Read like a senior engineer pointing a colleague at a useful library — concise, file-path-specific, no product-brief vocabulary.
 
-(numbered list) For each plug point, write a short imperative title (e.g. "1. New Tier-A sensor source.") followed by 2-5 sentences of concrete how-to. NAME THE SUBSYSTEM in <PROJECT_NAME> where it'd slot in - refer to the actual module, file path, or service the project already has. Be specific about behaviour gained.
+FORBIDDEN openers (over-used / read as templated):
+- "For <PROJECT_NAME> specifically, there are N concrete plug points where it earns its place. Listed in increasing ambition:"
+- Any opener that uses the literal word "outcome" or quotes an outcome phrase.
 
-(closing paragraph) Scoping. Identify the smallest viable first slice - which plug point is fastest, what does it depend on, rough time estimate (hours/days). If items build on each other, say so.
+Acceptable shapes (don't copy verbatim, rotate naturally):
+- "<PROJECT_NAME> has N clean integration paths here, smallest first:"
+- "Where <PROJECT_NAME> would actually use this: N specific surfaces, ordered by effort."
+- "Three places this plugs into <PROJECT_NAME>, in order of payoff:" (only if N=3)
+- "The one integration <PROJECT_NAME> needs from this is <X>." (when N=1; collapse the numbered list into a single paragraph)
+- "Five points where <PROJECT_NAME> gains from this, from quickest win to deepest cut:" (when N=5)
+- "<PROJECT_NAME> gains N things from this, listed cheapest first:"
+- "Two surfaces in <PROJECT_NAME> change shape if this lands:" (when N=2)
+- "Where this earns its place in <PROJECT_NAME>: N specific subsystems."
+
+N is the number of plug points the repo GENUINELY supports for THIS project. Could be 1 (one perfect drop-in, no need to invent more — just write a single paragraph after the bridge, no list). Could be 2, 3, 5, 7 — whatever the repo honestly justifies. Do NOT pad to hit a count. Do NOT trim a real fit to feel "balanced". Calibrate by integration value, not by aesthetic shape.
+
+(numbered list, OR a single paragraph if N=1) For each plug point, write a short imperative title (e.g. "1. New Tier-A sensor source.") followed by 2-5 sentences of concrete how-to. NAME THE SUBSYSTEM in <PROJECT_NAME> where it'd slot in — refer to the actual module, file path, or service the project already has. Be specific about behaviour gained.
+
+(closing paragraph) Scoping. Identify the smallest viable first slice — which plug point is fastest, what does it depend on, rough time estimate (hours/days). If items build on each other, say so.
 
 Cardinal rules:
 - Reference the user's project's actual components by name (services, modules, files) - pull these from their CLAUDE.md or README context provided. If you don't have specifics, use generic-but-grounded references (e.g. "your image-processing layer") rather than empty filler.

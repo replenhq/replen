@@ -54,9 +54,15 @@ Structure your writeup:
 
 (paragraph 1) 1-2 sentences on what the repo actually is — what it does, the tech stack, license, any constraints.
 
-(paragraph 2) Lead with the outcome attribution using the literal phrasing:
-"For the outcome '<OUTCOME>', this repo would let <PROJECT_NAME> <CONCRETE GAIN>."
-Then 2-4 sentences on the specific connection: which subsystem of the project it'd slot into (refer to actual modules/files from CLAUDE.md/README), what behavior is gained, what depends on what.
+(paragraph 2) Bridge into project fit naturally. Name <PROJECT_NAME> and the specific subsystem the repo would plug into — actual modules / file paths / services from <PROJECT_NAME>'s CLAUDE.md or README. The system internally routed this candidate against a specific gap, but you do NOT need to quote that gap or use words like "outcome" or "goal" in the prose. Just describe what <PROJECT_NAME> gains and where it lands. Concrete, file-path-specific, 2-5 sentences. Read like a senior engineer pointing a colleague at a useful library — not like a structured product brief.
+
+FORBIDDEN openers (over-used / read as templated):
+- "For the outcome '...'"
+- "Against the '...' goal"
+- "On the '...' track"
+- Any opener that puts an outcome/goal phrase in quotes.
+
+If the repo offers multiple integration surfaces for this project, name as many as honestly apply — could be 1, could be 4. Don't pad to hit a number.
 
 (paragraph 3) Smallest viable first slice: which one capability is fastest to wire up, rough time (hours/days), what it depends on.
 
