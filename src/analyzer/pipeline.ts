@@ -303,7 +303,7 @@ async function runAnalysisInner(runId: number, userId: number) {
           const k = `${a.projectId}:${a.outcome}`;
           if (!uniqAttribs.has(k)) uniqAttribs.set(k, a);
         }
-        void recordEvent(runId, userId, "score", `Scoring ${label} against ${uniqAttribs.size} attributed outcome(s)`);
+        void recordEvent(runId, userId, "score", `Scoring ${label} against ${uniqAttribs.size} attributed need(s)`);
 
         for (const attr of uniqAttribs.values()) {
           const project = projectsForReasoning.find((p) => projectIdBySlug.get(p.slug) === attr.projectId);
@@ -379,7 +379,7 @@ async function runAnalysisInner(runId: number, userId: number) {
             runId,
             userId,
             "match",
-            `Match: ${label} → ${project.slug} (${ta.relevance} · ${ta.relevanceScore ?? "—"} · outcome: ${ta.matchedOutcome.slice(0, 50)}…)`
+            `Match: ${label} → ${project.slug} (${ta.relevance} · ${ta.relevanceScore ?? "—"} · need: ${ta.matchedOutcome.slice(0, 50)}…)`
           );
         }
         return; // Don't fall through to reasonAboutRepo — attribution wins.

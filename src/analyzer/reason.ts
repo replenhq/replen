@@ -4,6 +4,7 @@ import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import { errorMsg } from "../lib/error-msg";
+import { scrubBannedVocab } from "./score-targeted";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -93,6 +94,13 @@ Structure your note like this:
 FORBIDDEN openers (over-used / read as templated):
 - "For <PROJECT_NAME> specifically, there are N concrete plug points where it earns its place. Listed in increasing ambition:"
 - Any opener that uses the literal word "outcome" or quotes an outcome phrase.
+
+BANNED VOCABULARY — the following words MUST NOT appear anywhere in the writeup body, summary, whyUseful, suggestedUse, or risks:
+- "outcome", "outcomes"
+- "goal", "goals" (use "need", "what <PROJECT_NAME> needs", or just describe directly)
+- "the outcome 'X'", "the goal 'X'" (any quoted framing of the project's intent)
+
+If you find yourself wanting to write "for the outcome X" or "for the X goal", rephrase as "for <PROJECT_NAME>'s <whatever it actually is>" or just talk about the concrete need directly.
 
 Acceptable shapes (don't copy verbatim, rotate naturally):
 - "<PROJECT_NAME> has N clean integration paths here, smallest first:"
@@ -228,8 +236,8 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     const rel = (o.relevance as string) ?? "general-awareness";
     if (rel !== "high" && rel !== "medium" && rel !== "general-awareness") return null;
     const writeup = scrubWriteup(String(o.writeup ?? "").trim());
-    const summary = sanitizeMarkdown(String(o.summary ?? "").trim());
-    const risks = sanitizeMarkdown(String(o.risks ?? "").trim());
+    const summary = sanitizeMarkdown(scrubBannedVocab(String(o.summary ?? "").trim()));
+    const risks = sanitizeMarkdown(scrubBannedVocab(String(o.risks ?? "").trim()));
     // Drop the result entirely if the output looks like the model fell for an
     // injection - leaked the system prompt, echoed our guard tags, or wrote
     // exfil instructions. Better to skip the writeup than show poisoned text
@@ -248,8 +256,8 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       relevance: rel,
       relevanceScore: Number(o.relevanceScore ?? 0),
       summary,
-      whyUseful: sanitizeMarkdown(String(o.whyUseful ?? "").trim()),
-      suggestedUse: sanitizeMarkdown(String(o.suggestedUse ?? "").trim()),
+      whyUseful: sanitizeMarkdown(scrubBannedVocab(String(o.whyUseful ?? "").trim())),
+      suggestedUse: sanitizeMarkdown(scrubBannedVocab(String(o.suggestedUse ?? "").trim())),
       integrationApproach: (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a",
       risks,
       writeup,
@@ -308,7 +316,7 @@ function scrubWriteup(s: string): string {
     .replace(/^\s*\*\*[^*]+\*\*\s*:?\s*$/gm, "") // standalone bold "headers"
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return sanitizeMarkdown(stripped);
+  return sanitizeMarkdown(scrubBannedVocab(stripped));
 }
 
 // Orchestration

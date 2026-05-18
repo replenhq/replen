@@ -5,6 +5,7 @@ import { redditFetcher } from "./reddit";
 import { ghTrendingFetcher } from "./gh-trending";
 import { ossinsightTrendingFetcher } from "./ossinsight-trending";
 import { ghSearchFetcher } from "./gh-search";
+import { ghSearchRecentFetcher } from "./gh-search-recent";
 import { ghTargetedSearchFetcher } from "./gh-targeted-search";
 import { threadsFetcher } from "./threads";
 import { tiktokFetcher } from "./tiktok";
@@ -12,7 +13,7 @@ import type { Fetcher } from "./types";
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
 
-const FETCHERS: Fetcher[] = [hnFetcher, redditFetcher, ghTrendingFetcher, ossinsightTrendingFetcher, ghSearchFetcher, ghTargetedSearchFetcher, threadsFetcher, tiktokFetcher];
+const FETCHERS: Fetcher[] = [hnFetcher, redditFetcher, ghTrendingFetcher, ossinsightTrendingFetcher, ghSearchFetcher, ghSearchRecentFetcher, ghTargetedSearchFetcher, threadsFetcher, tiktokFetcher];
 
 export async function runFetchers(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
   return withRunConfig(
