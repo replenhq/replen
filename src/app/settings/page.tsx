@@ -171,9 +171,6 @@ export default async function SettingsPage({ searchParams }: Params) {
         return await writeUserSecret(u.id, v.url.toString());
       })(),
       webhookKind: ((form.get("webhookKind") as string) || "generic"),
-      // Preserve the existing ingest-token HASH. Plaintext ingest_token column
-      // is migration-only and stays null on writes.
-      ingestToken: null,
       ingestTokenHash: existingPrev?.ingestTokenHash ?? null,
       // Detected languages are owned by the re-detect action / PAT save below;
       // don't clobber them on a vanilla settings save.
@@ -229,7 +226,6 @@ export default async function SettingsPage({ searchParams }: Params) {
       await db.update(schema.userSettings)
         .set({
           ingestTokenHash: hash,
-          ingestToken: null,
           ingestTokenExpiresAt: expiresAt,
           ingestTokenLastUsedAt: null,
           updatedAt: now,
@@ -239,7 +235,6 @@ export default async function SettingsPage({ searchParams }: Params) {
       await db.insert(schema.userSettings).values({
         userId: u.id,
         ingestTokenHash: hash,
-        ingestToken: null,
         ingestTokenExpiresAt: expiresAt,
         ingestTokenLastUsedAt: null,
         updatedAt: now,

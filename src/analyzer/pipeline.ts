@@ -197,31 +197,37 @@ async function runAnalysisInner(runId: number, userId: number) {
     }
   }
 
-  // Stage 5: trending demotion. Split targets into targeted (has Stage-3
-  // outcome attribution) and serendipity (everything else — HN, reddit,
-  // trending, etc.). Cap the serendipity candidate pool pre-LLM so a noisy
+  // Stage 5: trending demotion. Split targets into scouted (has Stage-3
+  // outcome attribution) and discovered (everything else — HN, reddit,
+  // trending, etc.). Cap the discovered candidate pool pre-LLM so a noisy
   // morning of broad-net fetches doesn't burn the LLM budget; we'll also
   // cap the *match* count post-LLM (see end of runAnalysisInner).
   // See docs/stage-5-scope.md.
-  const SERENDIPITY_CANDIDATE_CAP = Number(process.env.SERENDIPITY_CANDIDATE_CAP ?? 15);
-  const SERENDIPITY_MATCH_CAP = Number(process.env.SERENDIPITY_MATCH_CAP ?? 3);
-  if (targets.length > 0 && SERENDIPITY_CANDIDATE_CAP >= 0) {
-    const targeted: typeof targets = [];
-    const serendipity: typeof targets = [];
+  // SERENDIPITY_* env vars are accepted as a back-compat alias for the old
+  // names; new deployments should set DISCOVERED_*.
+  const DISCOVERED_CANDIDATE_CAP = Number(
+    process.env.DISCOVERED_CANDIDATE_CAP ?? process.env.SERENDIPITY_CANDIDATE_CAP ?? 15
+  );
+  const DISCOVERED_MATCH_CAP = Number(
+    process.env.DISCOVERED_MATCH_CAP ?? process.env.SERENDIPITY_MATCH_CAP ?? 3
+  );
+  if (targets.length > 0 && DISCOVERED_CANDIDATE_CAP >= 0) {
+    const scouted: typeof targets = [];
+    const discovered: typeof targets = [];
     for (const t of targets) {
-      if ((targetedAttribByKey.get(t.key) ?? []).length > 0) targeted.push(t);
-      else serendipity.push(t);
+      if ((targetedAttribByKey.get(t.key) ?? []).length > 0) scouted.push(t);
+      else discovered.push(t);
     }
     // targets is already sorted by weighted score desc, so each sub-array is too.
-    const cappedSerendipity = serendipity.slice(0, SERENDIPITY_CANDIDATE_CAP);
-    const dropped = serendipity.length - cappedSerendipity.length;
+    const cappedDiscovered = discovered.slice(0, DISCOVERED_CANDIDATE_CAP);
+    const dropped = discovered.length - cappedDiscovered.length;
     if (dropped > 0) {
-      console.log(`[pipeline] serendipity cap dropped ${dropped} candidates (kept ${cappedSerendipity.length} of ${serendipity.length})`);
+      console.log(`[pipeline] discovered cap dropped ${dropped} candidates (kept ${cappedDiscovered.length} of ${discovered.length})`);
     }
-    // Targeted first so worker pool starts with the high-precision pool; the
-    // serendipity tail is cheaper to abandon mid-run if we hit a quota error.
+    // Scouted first so worker pool starts with the high-precision pool; the
+    // discovered tail is cheaper to abandon mid-run if we hit a quota error.
     targets.length = 0;
-    targets.push(...targeted, ...cappedSerendipity);
+    targets.push(...scouted, ...cappedDiscovered);
   }
 
   let reposAnalyzed = 0;
@@ -475,7 +481,7 @@ async function runAnalysisInner(runId: number, userId: number) {
 
   // Bookmark resurface pass: re-evaluate the user's bookmarked GA matches
   // against other projects' outcome goals. Runs AFTER the main worker pool
-  // so the skip rules can rely on this run's targeted/serendipity inserts
+  // so the skip rules can rely on this run's scouted/discovered inserts
   // already being visible. Per-run cap and 20-day retry are enforced inside.
   // See docs/bookmark-resurface-scope.md.
   try {
@@ -486,12 +492,12 @@ async function runAnalysisInner(runId: number, userId: number) {
     console.warn(`[resurface] pass failed for user=${userId}, continuing`, e);
   }
 
-  // Stage 5: post-pass match cap. Trim surplus serendipity rows from THIS run
-  // so the digest stays dense. Only touches discovery_mode='serendipity' from
-  // the current runId — targeted and bookmark-resurface rows are preserved at
-  // any count. We keep the top SERENDIPITY_MATCH_CAP by relevanceScore.
-  if (SERENDIPITY_MATCH_CAP >= 0) {
-    const serendipityRows = await db
+  // Stage 5: post-pass match cap. Trim surplus discovered rows from THIS run
+  // so the digest stays dense. Only touches discovery_mode='discovered' from
+  // the current runId — scouted and re-checked rows are preserved at any
+  // count. We keep the top DISCOVERED_MATCH_CAP by relevanceScore.
+  if (DISCOVERED_MATCH_CAP >= 0) {
+    const discoveredRows = await db
       .select({ id: schema.matches.id, score: schema.matches.relevanceScore })
       .from(schema.matches)
       .where(and(
@@ -500,15 +506,15 @@ async function runAnalysisInner(runId: number, userId: number) {
         eq(schema.matches.discoveryMode, "discovered"),
       ))
       .orderBy(desc(schema.matches.relevanceScore));
-    if (serendipityRows.length > SERENDIPITY_MATCH_CAP) {
-      const toDelete = serendipityRows.slice(SERENDIPITY_MATCH_CAP).map((r) => r.id);
+    if (discoveredRows.length > DISCOVERED_MATCH_CAP) {
+      const toDelete = discoveredRows.slice(DISCOVERED_MATCH_CAP).map((r) => r.id);
       for (const id of toDelete) {
         await db.delete(schema.matches).where(eq(schema.matches.id, id));
       }
       const removed = toDelete.length;
       matchesCreated -= removed;
-      console.log(`[pipeline] serendipity match cap pruned ${removed} (kept top ${SERENDIPITY_MATCH_CAP})`);
-      void recordEvent(runId, userId, "skip", `Trimmed ${removed} serendipity matches over cap of ${SERENDIPITY_MATCH_CAP}`);
+      console.log(`[pipeline] discovered match cap pruned ${removed} (kept top ${DISCOVERED_MATCH_CAP})`);
+      void recordEvent(runId, userId, "skip", `Trimmed ${removed} discovered matches over cap of ${DISCOVERED_MATCH_CAP}`);
     }
   }
 

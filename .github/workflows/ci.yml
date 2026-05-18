@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: typecheck
+        run: npx tsc --noEmit
+      - name: drizzle migrate diff (must be empty)
+        run: |
+          DIFF=$(npx drizzle-kit generate --dry-run 2>&1 || true)
+          if echo "$DIFF" | grep -q "No schema changes"; then
+            echo "schema matches migrations"
+          else
+            echo "schema drift detected — run \`npm run db:generate\` and commit the migration"
+            echo "$DIFF"
+            exit 1
+          fi
+      - name: build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          SKIP_ENV_VALIDATION: "1"
+        run: npm run build

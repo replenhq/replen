@@ -90,10 +90,7 @@ export const userSettings = sqliteTable(
     // a user POST from a bookmarklet / browser extension / MCP server into
     // their account without going through full Firebase auth. The plaintext
     // is shown to the user once at generation/rotation and never persisted;
-    // only the sha256 hash is stored for lookup. The plaintext column below
-    // is retained as nullable during the backfill window (drops in a later
-    // migration) - any value present is migrated on db boot.
-    ingestToken: text("ingest_token"),
+    // only the sha256 hash is stored for lookup.
     ingestTokenHash: text("ingest_token_hash"),
     // 90-day expiry stamped at issue time by authorizeCli. Auth middleware
     // refuses redemption once now() > this. Forces periodic re-auth and
@@ -325,15 +322,16 @@ export const matches = sqliteTable(
     matchedOutcome: text("matched_outcome"),
     matchedOutcomeSource: text("matched_outcome_source"), // 'user' | 'inferred'
     matchedOutcomeConfidence: text("matched_outcome_confidence"), // 'high' | 'medium'
-    // How this match entered the user's digest. 'scouted' = Stage 3/4 outcome
-    // attribution (was: 'targeted'); 'discovered' = broad-net fetcher (HN,
-    // reddit, trending, etc.) with no outcome (was: 'serendipity');
-    // 're-checked' = resurfaced from the user's starred general-awareness
-    // pile against a different project (was: 'bookmark'); 'manual' = direct
-    // user push (bookmarklet, MCP, /api/ingest) — reserved, not yet used by
-    // any insert path. Renamed 2026-05-18 by migration 0027 to use plainer
-    // English vocabulary on the UI pill. See docs/stage-5-scope.md and
-    // docs/bookmark-resurface-scope.md.
+    // How this match entered the user's digest:
+    //   'scouted'    — Stage 3/4 outcome attribution (was: 'targeted')
+    //   'discovered' — broad-net fetcher (HN, reddit, trending, etc.) with
+    //                  no outcome attribution (was: 'serendipity')
+    //   're-checked' — resurfaced from the user's starred general-awareness
+    //                  pile against a different project (was: 'bookmark')
+    //   'manual'     — direct user push (bookmarklet, MCP, /api/ingest);
+    //                  reserved, not yet used by any insert path.
+    // Renamed 2026-05-18 by migration 0027 to use plainer English vocabulary
+    // on the UI pill. See docs/stage-5-scope.md and docs/bookmark-resurface-scope.md.
     discoveryMode: text("discovery_mode"), // 'scouted' | 'discovered' | 're-checked' | 'manual'
     // Resurface back-link: when a bookmarked general-awareness match
     // re-surfaces as a fit for a different project, the new row references

@@ -47,7 +47,6 @@ export async function authorizeCli(port: number, state: string): Promise<Authori
       .update(schema.userSettings)
       .set({
         ingestTokenHash: hash,
-        ingestToken: null,
         ingestTokenExpiresAt: expiresAt,
         ingestTokenLastUsedAt: null, // reset on re-issue
         updatedAt: now,
@@ -57,7 +56,6 @@ export async function authorizeCli(port: number, state: string): Promise<Authori
     await db.insert(schema.userSettings).values({
       userId: u.id,
       ingestTokenHash: hash,
-      ingestToken: null,
       ingestTokenExpiresAt: expiresAt,
       ingestTokenLastUsedAt: null,
       updatedAt: now,

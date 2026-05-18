@@ -2,7 +2,6 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { createHash } from "node:crypto";
 import * as schema from "./schema";
 import {
   assertEncryptionKeyForBoot,
@@ -53,25 +52,6 @@ await client.execute({
           AND started_at < strftime('%s','now') - 1800`,
   args: [],
 }).catch((e) => console.error("[db] orphan reaper failed:", e));
-
-// One-shot backfill: hash any plaintext ingest_token still in the DB and
-// null the plaintext column. Idempotent (rows where hash is populated are
-// skipped). Cheap on a small user table. Drop the plaintext column in a
-// follow-up migration once this has run everywhere.
-await client.execute({
-  sql: `SELECT id, ingest_token FROM user_settings
-        WHERE ingest_token IS NOT NULL AND ingest_token_hash IS NULL`,
-  args: [],
-}).then(async (rs) => {
-  for (const row of rs.rows as unknown as Array<{ id: number; ingest_token: string }>) {
-    const hash = createHash("sha256").update(row.ingest_token).digest("hex");
-    await client.execute({
-      sql: `UPDATE user_settings SET ingest_token_hash = ?, ingest_token = NULL WHERE id = ?`,
-      args: [hash, row.id],
-    });
-    console.log(`[db] migrated ingest_token → hash for user_settings.id=${row.id}`);
-  }
-}).catch((e) => console.error("[db] ingest-token hash backfill failed:", e));
 
 // One-shot envelope upgrade: rewrap any v1-encrypted user_settings secrets
 // under the user's per-tenant DEK (enc:v2). Idempotent - rows already in v2
