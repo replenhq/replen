@@ -1,5 +1,5 @@
 [Unit]
-Description=replen - Next.js dashboard
+Description=Replen - Next.js dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,22 @@ WorkingDirectory=/opt/replen
 EnvironmentFile=/opt/replen/.env
 Environment=NODE_ENV=production
 Environment=PORT=3030
+# Bind to loopback only. Public traffic arrives via cloudflared tunnel +
+# nginx; binding to 0.0.0.0 would expose the dashboard to anyone who finds
+# the origin IP if UFW rules ever drift. The `npm start` script already
+# passes `-H 127.0.0.1`, but HOSTNAME is read by Next as a fallback.
+Environment=HOSTNAME=127.0.0.1
+# Override laptop-side .env values for the VPS
 Environment=GITHUB_ROOT=/opt/replen/projects-mirror
+# Lock the log dir + files to 0640 (ubuntu:adm). Any user with a shell on
+# the box could otherwise tail the file and see auth-middleware error
+# traces. Two-step: dir first (so the touch can land), then files.
+ExecStartPre=+/bin/mkdir -p /var/log/replen
+ExecStartPre=+/bin/chmod 0750 /var/log/replen
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen
+ExecStartPre=+/usr/bin/touch /var/log/replen/web.log
+ExecStartPre=+/bin/chmod 0640 /var/log/replen/web.log
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen/web.log
 ExecStart=/usr/bin/npm run start
 Restart=on-failure
 RestartSec=5

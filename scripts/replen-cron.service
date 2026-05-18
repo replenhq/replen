@@ -1,5 +1,5 @@
 [Unit]
-Description=replen - cron scheduler (fetchers + analyzer + email)
+Description=Replen - cron scheduler (fetchers + analyzer + email)
 After=network-online.target replen.service
 Wants=network-online.target
 
@@ -10,7 +10,16 @@ WorkingDirectory=/opt/replen
 EnvironmentFile=/opt/replen/.env
 Environment=NODE_ENV=production
 Environment=GITHUB_ROOT=/opt/replen/projects-mirror
-ExecStart=/usr/bin/npx tsx src/scheduler/cron.ts
+ExecStartPre=+/bin/mkdir -p /var/log/replen
+ExecStartPre=+/bin/chmod 0750 /var/log/replen
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen
+ExecStartPre=+/usr/bin/touch /var/log/replen/cron.log
+ExecStartPre=+/bin/chmod 0640 /var/log/replen/cron.log
+ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen/cron.log
+# Pin tsx to the installed binary. `npx tsx` would silently `npm install`
+# tsx from the registry on every restart if node_modules went missing —
+# a supply-chain race every cron startup.
+ExecStart=/opt/replen/node_modules/.bin/tsx src/scheduler/cron.ts
 Restart=on-failure
 RestartSec=30
 StandardOutput=append:/var/log/replen/cron.log

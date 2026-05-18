@@ -25,7 +25,7 @@ export const BIG_CO_OWNERS = new Set<string>([
 
 // Drop anything above this star count as "established, not under-the-radar".
 // The whole point of the digest is *new* projects worth knowing about.
-export const STAR_CEILING = parseInt(process.env.OSS_DIGEST_STAR_CEILING ?? "30000", 10);
+export const STAR_CEILING = parseInt(process.env.REPLEN_STAR_CEILING ?? "30000", 10);
 
 export function isBigCoOwner(owner: string): boolean {
   return BIG_CO_OWNERS.has(owner.toLowerCase());
