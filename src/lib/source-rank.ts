@@ -8,7 +8,7 @@
 import { db, schema } from "@/db/client";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 
-export const SOURCE_RANK: string[] = ["tiktok", "threads", "reddit", "hn", "gh-trending"];
+export const SOURCE_RANK: string[] = ["tiktok", "threads", "reddit", "hn", "gh-trending", "ossinsight-trending"];
 
 export function sourceKind(source: string): string {
   const colon = source.indexOf(":");
@@ -49,23 +49,29 @@ export async function getSourceQualityWeights(userId: number): Promise<Map<strin
   return weights;
 }
 
-// Parse the trending-windows membership info stashed in a gh-trending
-// candidate's rawJson. Returns the windows present (e.g. ["daily","weekly"])
-// and a multiplier to apply to the candidate's score so sustained-trending
-// repos out-rank single-window spikes. Returns null when the source isn't
-// gh-trending or the rawJson doesn't carry the field (older candidates,
-// or future fetcher changes).
+// Parse the trending-windows membership info stashed in a gh-trending or
+// ossinsight-trending candidate's rawJson. Returns the windows present
+// (e.g. ["daily","weekly"] for gh-trending, ["past_3_months","past_month"]
+// for ossinsight-trending) and a multiplier to apply to the candidate's
+// score so sustained-trending repos out-rank single-window spikes. Returns
+// null when the source isn't a trending fetcher or the rawJson doesn't
+// carry the field.
 //
-// Multiplier rationale: a repo on all three windows is showing consistent
-// star activity across timescales — strongest "this is real, not hype"
-// signal. Weekly+monthly without daily means "trending but cooled off
-// today" which still beats a one-day spike. Daily-only is the weakest:
-// could be a viral push that won't stick.
+// Multiplier rationale:
+//   gh-trending: all three windows = consistent star activity across
+//     timescales (strongest "real, not hype" signal). Weekly+monthly
+//     without daily = "trending but cooled off today" (still beats a
+//     one-day spike). Daily-only = could be a viral push that won't stick.
+//   ossinsight-trending: past_3_months is the long-haul signal — sustained
+//     attention over a quarter, much stronger than gh-trending's monthly
+//     window. Both periods together = "sustained AND still rising now".
 export function parseTrendingMembership(
   source: string,
   rawJson: string | null | undefined,
 ): { windows: string[]; multiplier: number } | null {
-  if (sourceKind(source) !== "gh-trending" || !rawJson) return null;
+  const kind = sourceKind(source);
+  if (kind !== "gh-trending" && kind !== "ossinsight-trending") return null;
+  if (!rawJson) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
@@ -73,17 +79,30 @@ export function parseTrendingMembership(
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const w = (parsed as { windows?: unknown }).windows;
-  if (!Array.isArray(w)) return null;
-  const windows = w.filter((x): x is string => typeof x === "string");
-  const hasD = windows.includes("daily");
-  const hasW = windows.includes("weekly");
-  const hasM = windows.includes("monthly");
+  if (kind === "gh-trending") {
+    const w = (parsed as { windows?: unknown }).windows;
+    if (!Array.isArray(w)) return null;
+    const windows = w.filter((x): x is string => typeof x === "string");
+    const hasD = windows.includes("daily");
+    const hasW = windows.includes("weekly");
+    const hasM = windows.includes("monthly");
+    let multiplier = 1.0;
+    if (hasD && hasW && hasM) multiplier = 1.5;
+    else if (hasW && hasM) multiplier = 1.3;
+    else if (hasW || hasM) multiplier = 1.1;
+    return { windows, multiplier };
+  }
+  // ossinsight-trending — same idea but on the periods axis.
+  const p = (parsed as { periods?: unknown }).periods;
+  if (!Array.isArray(p)) return null;
+  const periods = p.filter((x): x is string => typeof x === "string");
+  const has3m = periods.includes("past_3_months");
+  const hasM = periods.includes("past_month");
   let multiplier = 1.0;
-  if (hasD && hasW && hasM) multiplier = 1.5;
-  else if (hasW && hasM) multiplier = 1.3;
-  else if (hasW || hasM) multiplier = 1.1;
-  // daily-only stays at 1.0 — no boost; that's the baseline we're trying
-  // to differentiate the breadth signals from.
-  return { windows, multiplier };
+  // Both = highest signal: surviving 3-month decay AND still on the monthly
+  // chart. past_3_months alone is still strong long-haul. past_month alone
+  // mostly duplicates gh-trending's monthly so we don't boost it further.
+  if (has3m && hasM) multiplier = 1.4;
+  else if (has3m) multiplier = 1.25;
+  return { windows: periods, multiplier };
 }
