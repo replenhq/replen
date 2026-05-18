@@ -211,6 +211,21 @@ export async function searchIndex(
   topK: number = 10,
 ): Promise<SearchHit[]> {
   const index = await loadIndex(indexId);
+  return searchLoadedIndex(index, query, topK);
+}
+
+/**
+ * Same as searchIndex but takes an already-rehydrated TermIndex. Use this
+ * when running multiple queries against the same index — loadIndex pulls
+ * every term posting out of SQLite, so doing it once and reusing the result
+ * across queries is materially faster (the dominant cost for multi-query
+ * workflows like Stage 4 verification).
+ */
+export async function searchLoadedIndex(
+  index: TermIndex,
+  query: string,
+  topK: number = 10,
+): Promise<SearchHit[]> {
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return [];
 

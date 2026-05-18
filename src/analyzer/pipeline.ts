@@ -4,7 +4,9 @@ import { scanRepo, type SafetyReport } from "../scanner/safety";
 import { triage } from "./triage";
 import { reasonAboutRepo, renderWriteup } from "./reason";
 import { scoreTargetedCandidate, type TargetedAttribution } from "./score-targeted";
+import { scoreWithSourceVerification } from "./source-context";
 import { scoreBookmarkAgainstProject } from "./resurface";
+import { readRunOrEnv } from "./run-context";
 import type { ProjectSummary } from "../projects/summarize";
 import { discoverLocalProjects, upsertProjects, type LocalProject } from "../projects/loader";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
@@ -305,14 +307,28 @@ async function runAnalysisInner(runId: number, userId: number) {
             console.warn(`[score-targeted] dropping ${label} → ${project.slug}: not included`);
             continue;
           }
+          const attribution: TargetedAttribution = {
+            outcome: attr.outcome,
+            outcomeSource: attr.outcomeSource,
+            outcomeConfidence: attr.outcomeConfidence,
+            matchedTerm: attr.matchedTerm,
+          };
+          // STAGE4_VERIFY_WITH_SOURCE=1 enables the BM25 source-context pass:
+          // when the cheap README-only score comes back medium/high, clone +
+          // index + re-score against retrieved excerpts. Falls back to the
+          // baseline verdict on any verification failure, so the worst case
+          // matches the unflagged path. Gated for now because the cold-path
+          // clone+index cost is non-trivial and the prod data hasn't yet
+          // produced the baseline=high false-positive case it's designed to
+          // catch — keep it dark until we see that shape live.
+          const verifyWithSource = process.env.STAGE4_VERIFY_WITH_SOURCE === "1";
           let ta;
           try {
-            ta = await scoreTargetedCandidate(safety, project, {
-              outcome: attr.outcome,
-              outcomeSource: attr.outcomeSource,
-              outcomeConfidence: attr.outcomeConfidence,
-              matchedTerm: attr.matchedTerm,
-            });
+            ta = verifyWithSource
+              ? await scoreWithSourceVerification(safety, project, attribution, {
+                  token: readRunOrEnv("githubToken", "GITHUB_TOKEN") ?? null,
+                })
+              : await scoreTargetedCandidate(safety, project, attribution);
           } catch (e) {
             if (e instanceof LlmQuotaError) throw e;
             console.warn(`[score-targeted] ${label} → ${project.slug} failed`, e);

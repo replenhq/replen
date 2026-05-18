@@ -44,7 +44,14 @@ async function tryRead(p: string): Promise<string | null> {
   try { return await readFile(p, "utf8"); } catch { return null; }
 }
 
-async function loadProjectFromPath(path: string, slug: string, name: string, tech: string | null): Promise<LocalProject> {
+async function loadProjectFromPath(
+  path: string,
+  slug: string,
+  name: string,
+  tech: string | null,
+  sensitivity: "low" | "high",
+  llmProvider: "auto" | "deepseek" | "anthropic",
+): Promise<LocalProject> {
   // Try the common README casings; first hit wins. Mirrors loader.ts's
   // DOC_NAMES list approximately — we don't need its full machinery here.
   const readme =
@@ -65,8 +72,8 @@ async function loadProjectFromPath(path: string, slug: string, name: string, tec
     profileHash: "inspector",
     active: true,
     included: true,
-    sensitivity: "low",
-    llmProvider: "auto",
+    sensitivity,
+    llmProvider,
   };
 }
 
@@ -104,6 +111,8 @@ async function main() {
   const sourceMode = (arg("source") ?? "user") as "user" | "inferred";
   const confidence = (arg("confidence") ?? "high") as "high" | "medium";
   const tech = arg("tech") ?? null;
+  const sensitivity = (arg("sensitivity") ?? "low") as "low" | "high";
+  const llmProvider = (arg("llm") ?? "auto") as "auto" | "deepseek" | "anthropic";
 
   if (!projectPath || !owner || !repo || !outcome) {
     console.error(
@@ -114,7 +123,7 @@ async function main() {
   const absProjectPath = resolve(projectPath);
   const slug = projectSlug ?? basename(absProjectPath);
   const name = projectName ?? slug;
-  const project = await loadProjectFromPath(absProjectPath, slug, name, tech);
+  const project = await loadProjectFromPath(absProjectPath, slug, name, tech, sensitivity, llmProvider);
 
   if (!project.readmeMd) {
     console.error(`No README found under ${absProjectPath} — Stage 4 won't have project context to compare against`);

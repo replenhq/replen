@@ -13,7 +13,13 @@
 // good enough as a first pass. If we find Stage 4 needs more targeted queries
 // later, we can add a "pick keywords" mini-LLM call.
 
-import { buildIndex, findFreshIndex, searchIndex, type SearchHit } from "../lib/repo-index";
+import { buildIndex, findFreshIndex, loadIndex, searchLoadedIndex, type SearchHit } from "../lib/repo-index";
+import { shallowClone } from "../lib/repo-index/clone";
+import { scoreTargetedCandidate, type TargetedAssessment, type TargetedAttribution } from "./score-targeted";
+import type { SafetyReport } from "../scanner/safety";
+import type { LocalProject } from "../projects/loader";
+import { db, schema } from "../db/client";
+import { and, eq } from "drizzle-orm";
 
 export type SourceExcerptOpts = {
   /** Cap on the number of excerpts returned across all queries. */
@@ -81,9 +87,13 @@ export async function retrieveSourceExcerpts(
   // perQueryTopK is generous so the dedupe + score-merge has headroom. We
   // ultimately keep only `maxExcerpts` across all queries.
   const perQueryTopK = Math.max(maxExcerpts, 6);
+  // Load the BM25 postings + doc lengths once and reuse across all queries.
+  // Each call to searchIndex would otherwise re-pull every term posting from
+  // SQLite — for a candidate with 10k+ chunks that's the dominant cost.
+  const index = await loadIndex(indexId);
   const merged = new Map<number, SearchHit>();
   for (const q of queries) {
-    const hits = await searchIndex(indexId, q, perQueryTopK);
+    const hits = await searchLoadedIndex(index, q, perQueryTopK);
     for (const h of hits) {
       const existing = merged.get(h.chunkId);
       // When the same chunk comes back from multiple queries, take the max
@@ -153,4 +163,73 @@ function truncateMiddle(s: string, maxBytes: number): string {
   if (Buffer.byteLength(s, "utf8") <= maxBytes) return s;
   const half = Math.floor((maxBytes - 12) / 2);
   return `${s.slice(0, half)}\n… [truncated] …\n${s.slice(-half)}`;
+}
+
+/**
+ * Two-pass scoring with optional source-context verification.
+ *
+ * The first pass calls scoreTargetedCandidate against README + metadata only
+ * (cheap, ~10-15s LLM call). If that returns "general-awareness" the LLM has
+ * already cleanly rejected the candidate — the source-context pass would only
+ * confirm what we know, so we skip the clone/index/retrieve overhead entirely.
+ *
+ * If the first pass returns "medium" or "high" we treat that as a claim worth
+ * verifying: clone the repo, build the index (or reuse if it exists), retrieve
+ * source excerpts, and re-score with them. The LLM is instructed by the
+ * system prompt to treat source as ground truth and the README as a claim, so
+ * a baseline-high verdict can be downgraded when the source doesn't back it up.
+ *
+ * The fallback path (verification fails midway — clone error, no excerpts,
+ * scorer returns null) returns the baseline verdict unchanged. We never want
+ * verification failure to be worse than no verification.
+ */
+export async function scoreWithSourceVerification(
+  safety: SafetyReport,
+  project: LocalProject,
+  attribution: TargetedAttribution,
+  opts: { token?: string | null; force?: boolean } = {},
+): Promise<TargetedAssessment | null> {
+  const baseline = await scoreTargetedCandidate(safety, project, attribution);
+  if (!baseline) return null;
+
+  // Gate: skip verification on clear rejections unless the caller forces it.
+  // This is the cost-control knob — most candidates land here and we save
+  // the indexer round-trip on every one of them.
+  if (!opts.force && baseline.relevance === "general-awareness") return baseline;
+
+  // Get or create the repos row so the index can be keyed against a stable id.
+  const owner = safety.meta.owner;
+  const name = safety.meta.name;
+  const existing = await db
+    .select({ id: schema.repos.id })
+    .from(schema.repos)
+    .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+    .get();
+  // Fall back to baseline if we can't anchor an index to a real repos row.
+  // This shouldn't happen in the live pipeline (upsertRepo runs before
+  // scoring) but the inspector takes a different path.
+  if (!existing) return baseline;
+  const repoId = existing.id;
+
+  let cloned: Awaited<ReturnType<typeof shallowClone>> | null = null;
+  try {
+    cloned = await shallowClone(owner, name, { token: opts.token });
+    const indexId = await ensureRepoIndex(repoId, cloned.path, { readmeSha: safety.readmeSha });
+    const { excerpts } = await retrieveSourceExcerpts(
+      indexId,
+      { outcome: attribution.outcome, matchedTerm: attribution.matchedTerm },
+      project.techSummary,
+    );
+    if (excerpts.length === 0) return baseline;
+    const verified = await scoreTargetedCandidate(safety, project, attribution, {
+      sourceExcerpts: excerpts,
+    });
+    return verified ?? baseline;
+  } catch (err) {
+    // Verification failure should never demote the baseline. Log and fall back.
+    console.warn(`[source-verify] ${owner}/${name} → ${project.slug}: ${(err as Error).message}`);
+    return baseline;
+  } finally {
+    if (cloned) await cloned.cleanup();
+  }
 }
