@@ -27,22 +27,64 @@ export type LocalProject = {
   llmProvider?: "auto" | "deepseek" | "anthropic";
 };
 
+// All root-level doc-class files. Ordered so README (the most common entry
+// point) appears first in the concatenated profile and the LLM reads it first,
+// but every match is included — no first-hit-wins. A repo with README + SPEC
+// + ARCHITECTURE gets all three concatenated with file-name delimiters.
 const DOC_NAMES = [
-  // Conventional readmes first
+  // Conventional readmes
   "README.md", "Readme.md", "readme.md", "README.MD",
   // Architectural / design docs
   "SPEC.md", "Spec.md", "spec.md",
   "DESIGN.md", "design.md",
   "ARCHITECTURE.md", "Architecture.md", "architecture.md",
-  // Plans / roadmaps (lowest priority - used only if nothing else)
+  // Active-state docs (what's been changing recently — high signal for matching)
+  "CHANGELOG.md", "Changelog.md", "changelog.md",
+  // Plans / roadmaps
   "PRODUCT_PLAN.md", "PLAN.md", "plan.md",
   "roadmap.md", "ROADMAP.md", "Roadmap.md",
   "ACTION-PLAN.md", "ACTION_PLAN.md", "action-plan.md",
   "AUDIT.md", "AUDIT-REPORT.md", "FULL-AUDIT-REPORT.md",
   "NOTES.md", "OVERVIEW.md",
 ];
-const CLAUDE_NAMES = ["CLAUDE.md", "Claude.md", "claude.md"];
+// AI-context / handover files. Same multi-file concat as DOC_NAMES — a repo
+// using both CLAUDE.md and AGENTS.md gets both folded in. The .cursorrules and
+// .windsurfrules cases are root-level dotfiles from those tools' conventions.
+// Cursor's nested .cursor/rules/*.md dir is handled by DEFAULT_AUX_PATTERNS
+// below since it can have many files.
+const CLAUDE_NAMES = [
+  "CLAUDE.md", "Claude.md", "claude.md",
+  "AGENTS.md", "agents.md",
+  "HANDOVER.md", "Handover.md", "handover.md",
+  "HANDOFF.md", "Handoff.md", "handoff.md",
+  "GEMINI.md", "Gemini.md", "gemini.md",
+  "COPILOT.md", "Copilot.md", "copilot.md",
+  ".cursorrules",
+  ".windsurfrules",
+];
 const MANIFEST_NAMES = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "requirements.txt"];
+
+// Process / legal / GH-boilerplate docs we deliberately skip even when they'd
+// otherwise be in scope. CONTRIBUTING and CODE_OF_CONDUCT are typically pure
+// noise for project-shape matching. LICENSE / NOTICE describe legal terms not
+// project intent. SECURITY.md as a GH boilerplate is usually a "report at X@"
+// notice — when it's a real project-security doc, the user can add it back via
+// extra_doc_paths. This list also applies to the collectExtraDocs walker so
+// `docs/CONTRIBUTING.md` etc. aren't accidentally folded in.
+const DOC_DENY_LIST = new Set([
+  "CONTRIBUTING.md", "Contributing.md", "contributing.md",
+  "CODE_OF_CONDUCT.md", "Code_of_conduct.md", "code_of_conduct.md",
+  "LICENSE", "License", "license",
+  "LICENSE.md", "License.md", "license.md",
+  "LICENSE.txt", "License.txt", "license.txt",
+  "COPYING", "COPYING.md",
+  "NOTICE", "Notice", "notice",
+  "NOTICE.md", "Notice.md", "notice.md",
+  "SECURITY.md", "Security.md", "security.md",
+  "SUPPORT.md", "Support.md", "support.md",
+  "AUTHORS", "AUTHORS.md",
+  "FUNDING.yml",
+]);
 
 // Auto-included aux doc patterns. Applied to every project regardless of the
 // user's extra_doc_paths setting — these are the "free win" defaults that give
@@ -51,7 +93,11 @@ const MANIFEST_NAMES = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod"
 // user-configured extras. The user can still narrow these by setting
 // extra_doc_paths to something specific (their patterns are appended, not
 // replaced), or widen by adding e.g. "spec/**/*.md".
-const DEFAULT_AUX_PATTERNS = ["docs/**/*.md"];
+const DEFAULT_AUX_PATTERNS = [
+  "docs/**/*.md",          // project's own docs subdir (most common)
+  ".cursor/rules/**/*.md", // Cursor's nested rules dir
+  "*-SETUP.md",            // ops docs at repo root (AUTOMATION-SETUP.md, CRON_SETUP.md, etc.)
+];
 
 export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {}): Promise<LocalProject[]> {
   const entries = await readdir(root, { withFileTypes: true });
@@ -65,8 +111,11 @@ export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {
     if (!e.isDirectory()) continue;
     if (e.name.startsWith(".")) continue;
     const path = join(root, e.name);
-    const docMd = await readFirstExisting(path, DOC_NAMES);
-    const claudeMdRaw = await readFirstExisting(path, CLAUDE_NAMES);
+    // Concat all matching root-level doc files (no first-hit-wins). README +
+    // SPEC + ARCHITECTURE + CHANGELOG all get folded into the same blob, each
+    // prefixed with a delimiter the LLM can use to attribute statements.
+    const docMd = await readAllExisting(path, DOC_NAMES);
+    const claudeMdRaw = await readAllExisting(path, CLAUDE_NAMES);
     const extraDocs = allPatterns.length > 0
       ? await collectExtraDocs(path, allPatterns, opts.extraDocsBudget ?? 8, opts.extraDocCharLimit ?? 20_000)
       : [];
@@ -88,7 +137,12 @@ export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {
       claudeMd,
       techSummary,
       profileHash,
-      active: claudeMd !== null,
+      // A project is active if we found ANY useful input — README, CLAUDE.md,
+      // or a manifest. Previously this required CLAUDE.md, which silently
+      // marked README-only projects inactive and broke Stage 1's
+      // `WHERE active=true` filter — net effect: zero scouted matches for
+      // any user whose docs don't include a literal CLAUDE.md.
+      active: docMd !== null || claudeMd !== null || techSummary !== null,
     });
   }
   return out;
@@ -137,7 +191,11 @@ async function collectExtraDocs(
       return;
     }
     for (const e of entries) {
-      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      // Skip dotdirs UNLESS they're one we explicitly want (Cursor's .cursor/
+      // rules dir). Hardcoded list is small enough; keep it inline.
+      if (e.name === "node_modules") continue;
+      if (e.name.startsWith(".") && e.name !== ".cursor") continue;
+      if (DOC_DENY_LIST.has(e.name)) continue;
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         await walk(childRel);
@@ -170,14 +228,20 @@ async function collectExtraDocs(
   return collected;
 }
 
-async function readFirstExisting(dir: string, names: string[]): Promise<string | null> {
+// Read every matching file in `names` and concatenate with a delimiter naming
+// each source file. Per-file 20KB cap (same as the legacy `readFirstExisting`
+// per-call cap) bounds total bytes even when many files match.
+async function readAllExisting(dir: string, names: string[]): Promise<string | null> {
+  const parts: string[] = [];
   for (const n of names) {
+    if (DOC_DENY_LIST.has(n)) continue;
     try {
       const buf = await readFile(join(dir, n), "utf8");
-      return buf.slice(0, 20_000);
+      const slice = buf.slice(0, 20_000);
+      parts.push(`# === file: ${n} ===\n${slice}`);
     } catch {}
   }
-  return null;
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 async function anyExists(dir: string, names: string[]): Promise<boolean> {

@@ -206,6 +206,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
         </div>
       </div>
       <LivePipelineStatus
+        // Key on the run id so React remounts the component (resetting its
+        // useState) when a new run starts. Without this, clicking Refresh
+        // re-renders the page server-side with inFlight=true but the client
+        // component's state is stuck on the previous useState init value —
+        // user has to hard-reload the browser to see "Pipeline running…".
+        key={inFlightRun?.id ?? "idle"}
         initial={{
           inFlight: !!inFlightRun,
           runId: inFlightRun?.id,
