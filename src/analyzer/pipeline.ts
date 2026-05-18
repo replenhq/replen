@@ -8,7 +8,7 @@ import { scoreWithSourceVerification } from "./source-context";
 import { scoreBookmarkAgainstProject } from "./resurface";
 import { readRunOrEnv } from "./run-context";
 import type { ProjectSummary } from "../projects/summarize";
-import { discoverLocalProjects, upsertProjects, type LocalProject } from "../projects/loader";
+import { type LocalProject } from "../projects/loader";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, parseTrendingMembership, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
 import type { UserConfig } from "../scheduler/user-config";
@@ -43,19 +43,9 @@ export async function runAnalysis(
 }
 
 async function runAnalysisInner(runId: number, userId: number) {
-  const githubRoot = process.env.GITHUB_ROOT ?? process.cwd();
-  const settings = await db
-    .select({ extraDocPaths: schema.userSettings.extraDocPaths })
-    .from(schema.userSettings)
-    .where(eq(schema.userSettings.userId, userId))
-    .get();
-  const extraDocPaths = (settings?.extraDocPaths ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const discovered = await discoverLocalProjects(githubRoot, { extraDocPaths });
-  await upsertProjects(discovered, userId);
-  // Read back THIS USER's project rows so included/sensitivity flags apply.
+  // Project rows + Stage 1 summaries + Stage 2 search vectors were populated
+  // earlier in runPipelineInner (run-once.ts) before runFetchers, so they're
+  // ready to use here. Just read them back from the DB.
   const dbProjects = await db
     .select()
     .from(schema.projectProfiles)

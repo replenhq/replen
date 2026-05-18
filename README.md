@@ -58,14 +58,17 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 
 ## What it does
 
-1. **Characterises your projects.** Reads each project's docs (README, CLAUDE.md, manifests) to build a profile of what you're building (stack, niche, purpose, use cases) regardless of project type (library, CLI, app, infra, research code, etc.).
-2. **Ingests from the ecosystem.** gh-trending pages tailored to your stack, TikTok / Threads handles, Reddit subs, HN, plus niche-scouted GitHub searches derived from your project profile. Catches things trending feeds miss.
-3. **Compares each new repo against your code.** Bring your own LLM: any OpenAI-compatible endpoint for routine triage, plus an optional second slot (e.g. Anthropic, or a privately-hosted model) for high-sensitivity projects. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos.
-4. **Delivers** three ways:
-   - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs.
+1. **Reads your projects.** Builds a profile per project (purpose, outcome goals, stack, dependencies) so it knows what you'd actually adopt — regardless of project type (library, CLI, app, infra, research code).
+2. **Scouts and discovers.** Two passes feed the same triage funnel:
+   - **Scouted** — runs derive niche GitHub searches from each project's outcome goals and scout for repos solving exactly that. Catches things trending feeds miss.
+   - **Discovered** — sweeps gh-trending tailored to your stack, plus TikTok / Threads / Reddit / HN. The "background hum" of the ecosystem.
+3. **Compares each repo against your code.** Bring your own LLM: any OpenAI-compatible endpoint for routine triage, plus an optional second slot (e.g. Anthropic, or a privately-hosted model) for high-sensitivity projects. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos. For high-stakes scouted candidates, an optional **source-verification** pass shallow-clones the repo and cross-checks the README's claims against the actual code via a BM25 index — catches the case where a sales-pitch README promises functionality the code doesn't support.
+4. **Re-checks what you starred.** Every run re-evaluates your bookmarked general-awareness matches against *other* projects' outcome goals. If something you saved as "interesting for later" fits a different project's need today, it re-surfaces with a **re-checked** pill so you don't lose it to the backlog.
+5. **Delivers** three ways:
+   - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs. Each match wears a pill — `scouted`, `discovered`, or `re-checked` — so you know how it found you.
    - **HTML email** every morning at the UTC hour you set.
    - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
-5. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
+6. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
 
 ## What a match looks like
 
@@ -84,6 +87,17 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 > Do (1) first — single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
 
 The plug points reference your project's actual files because Replen reads them. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
+
+## Numbers we run on
+
+Engineering numbers we measure, not marketing claims we promise:
+
+- **~$0.09 / user / day** for the routine LLM pipeline on a cheap OpenAI-compatible model with prefix caching warm. Frontier models used only for high-sensitivity projects add ~$0.50-$2 on the days they fire. Hard cap default **$5 / user / day**, configurable on `/settings`.
+- **~1-15 s** to build a BM25 source index for a typical OSS repo (walk + tokenise + post-list). Cached per repo against `README sha` so subsequent verifications skip the rebuild.
+- **<250 ms** per source-context query against a built index — fast enough that the source-verification pass adds ~30-70 s end-to-end per candidate including the one-time clone.
+- **~70 s** typical end-to-end for a per-user pipeline run with no source verification: fetch fan-out, triage, reason, write digest.
+
+Everything in this list is observable in the `digest_runs` table and the structured pipeline logs. We'll add user-outcome metrics (acceptance rate, hit-rate vs gh-trending baseline, time-to-integration) once we've shipped telemetry — until then we won't claim them.
 
 ## Workflow
 

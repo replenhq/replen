@@ -2,6 +2,7 @@ import { db, schema } from "../db/client";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { runFetchers } from "../fetchers";
 import { runAnalysis } from "../analyzer/pipeline";
+import { discoverLocalProjects, upsertProjects } from "../projects/loader";
 import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
@@ -110,24 +111,32 @@ async function executePipeline(
 
   beginUsageTracking();
   try {
+    // Load project READMEs / CLAUDE.mds from the filesystem mirror into
+    // project_profiles BEFORE anything else. Subsequent Stage 1 + 2 + the
+    // gh-targeted fetcher all key off these rows; on a brand-new user this
+    // is the only chance to populate them before they're needed.
+    void recordEvent(runId, userId, "scan", "Loading project profiles from local docs…");
+    await loadProjectsForUser(userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} project load failed:`, e),
+    );
+    // Stage-1: structured summary + outcome goals per project.
+    // Stage-2: search vectors derived from the summary.
+    // Both run BEFORE the fetcher so that on the first pipeline run the
+    // gh-targeted scouter has search vectors to query GitHub with, and the
+    // reasoning step has summaries to compare candidates against. Cache check
+    // in needsRegeneration/vectorsNeedRegeneration skips both on subsequent
+    // runs unless profileHash/summaryHash changed — steady-state cost is zero.
+    await refreshStaleProjectSummaries(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} summary refresh failed:`, e),
+    );
+    await refreshStaleSearchVectors(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} vectors refresh failed:`, e),
+    );
     void recordEvent(runId, userId, "fetch_start", "Fetching candidates from your sources…");
     const fetched = await runFetchers(userId, cfg);
     candidatesFound = fetched.inserted;
     void recordEvent(runId, userId, "fetch_done", `Fetched ${fetched.inserted} new candidates (${fetched.total} total seen)`);
     const analysis = await runAnalysis(runId, userId, cfg);
-    // Stage-1 project understanding. runs AFTER analysis because analysis is
-    // what populates / refreshes project_profiles.readmeMd / claudeMd /
-    // techSummary / profileHash via discoverLocalProjects + upsertProjects.
-    // Summary persisted now feeds Stage-2 (when built) on the NEXT run.
-    await refreshStaleProjectSummaries(runId, userId).catch((e) =>
-      console.warn(`[pipeline] user=${userId} summary refresh failed:`, e),
-    );
-    // Stage-2: generate search vectors from each project's fresh summary.
-    // Runs AFTER summaries because vectors derive from them (chain:
-    // profileHash → summary → vectors).
-    await refreshStaleSearchVectors(runId, userId).catch((e) =>
-      console.warn(`[pipeline] user=${userId} vectors refresh failed:`, e),
-    );
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;
     emailSent = await sendDigestEmail(runId, userId, cfg);
@@ -219,6 +228,29 @@ export async function runPipeline() {
     }
   });
   await Promise.all(workers);
+}
+
+// Reads the user's project READMEs / CLAUDE.md files from the filesystem
+// mirror (GITHUB_ROOT) and upserts a row per project into project_profiles.
+// Idempotent: unchanged READMEs hash the same and the loader leaves their
+// row alone. The user's `included` / `sensitivity` UI toggles are preserved.
+//
+// This used to live inside runAnalysis (pipeline.ts) but was moved out so
+// that Stage 1 + 2 + the gh-targeted fetcher can all run with project rows
+// already populated — see comment in runPipelineInner above.
+async function loadProjectsForUser(userId: number): Promise<void> {
+  const githubRoot = process.env.GITHUB_ROOT ?? process.cwd();
+  const settings = await db
+    .select({ extraDocPaths: schema.userSettings.extraDocPaths })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, userId))
+    .get();
+  const extraDocPaths = (settings?.extraDocPaths ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const discovered = await discoverLocalProjects(githubRoot, { extraDocPaths });
+  await upsertProjects(discovered, userId);
 }
 
 // Stage-1 hook. Iterates the user's active projects, regenerates the
