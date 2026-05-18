@@ -44,9 +44,22 @@ const DOC_NAMES = [
 const CLAUDE_NAMES = ["CLAUDE.md", "Claude.md", "claude.md"];
 const MANIFEST_NAMES = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "requirements.txt"];
 
+// Auto-included aux doc patterns. Applied to every project regardless of the
+// user's extra_doc_paths setting — these are the "free win" defaults that give
+// the LLM more context for docs-heavy projects without anyone configuring
+// anything. Subject to the same per-pattern file count cap + char limit as
+// user-configured extras. The user can still narrow these by setting
+// extra_doc_paths to something specific (their patterns are appended, not
+// replaced), or widen by adding e.g. "spec/**/*.md".
+const DEFAULT_AUX_PATTERNS = ["docs/**/*.md"];
+
 export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {}): Promise<LocalProject[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const extraPatterns = (opts.extraDocPaths ?? []).map((s) => s.trim()).filter(Boolean);
+  // User-configured extras come AFTER defaults so a user can extend the
+  // auto-included set without losing it. Setting extra_doc_paths to e.g.
+  // "spec/**/*.md" supplements rather than overrides.
+  const userPatterns = (opts.extraDocPaths ?? []).map((s) => s.trim()).filter(Boolean);
+  const allPatterns = [...DEFAULT_AUX_PATTERNS, ...userPatterns];
   const out: LocalProject[] = [];
   for (const e of entries) {
     if (!e.isDirectory()) continue;
@@ -54,8 +67,8 @@ export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {
     const path = join(root, e.name);
     const docMd = await readFirstExisting(path, DOC_NAMES);
     const claudeMdRaw = await readFirstExisting(path, CLAUDE_NAMES);
-    const extraDocs = extraPatterns.length > 0
-      ? await collectExtraDocs(path, extraPatterns, opts.extraDocsBudget ?? 5, opts.extraDocCharLimit ?? 20_000)
+    const extraDocs = allPatterns.length > 0
+      ? await collectExtraDocs(path, allPatterns, opts.extraDocsBudget ?? 8, opts.extraDocCharLimit ?? 20_000)
       : [];
     // Fold extra docs into the claudeMd field so they ride through to the
     // reasoner without needing a new column. The separator banner stays in

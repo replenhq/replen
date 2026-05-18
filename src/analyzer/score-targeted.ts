@@ -26,6 +26,7 @@ import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import type { ProjectAssessment } from "./reason";
+import { renderSourceBlock, type FormattedExcerpt } from "./source-context";
 
 export type TargetedAssessment = ProjectAssessment & {
   matchedOutcome: string;
@@ -62,6 +63,7 @@ Then 2-4 sentences on the specific connection: which subsystem of the project it
 Cardinal rules:
 - Reference the user's project's actual components by name when possible.
 - If the repo only matches by superficial keyword (e.g. the outcome mentions "operator" and so does the repo, but for an unrelated technical sense), set relevance="general-awareness" and write a short note explaining why it's NOT a real fit. Don't manufacture plausibility.
+- If a "Candidate repo: source excerpts" block is provided, treat the source as ground truth and the README as a claim. A README that promises functionality not visible in the source is a strong signal of low relevance ("general-awareness"). Conversely, a sparse/generic README plus rich on-point source code is a positive signal.
 - No filler ("could be useful", "interesting potential"). Every sentence carries information.
 - 250-600 words for high/medium relevance; 60-150 for general-awareness.
 
@@ -95,6 +97,7 @@ export async function scoreTargetedCandidate(
   safety: SafetyReport,
   project: LocalProject,
   attribution: TargetedAttribution,
+  opts: { sourceExcerpts?: FormattedExcerpt[] } = {},
 ): Promise<TargetedAssessment | null> {
   // High-sensitivity gate — fail-closed.
   const override = project.llmProvider ?? "auto";
@@ -136,6 +139,13 @@ Safety scan:
 
 ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
 
+  // Source excerpts are wrapped in the same untrusted-content sanitizer as the
+  // README — they come from a third-party repo, so the same prompt-injection
+  // surface applies. The renderer returns null when there are no excerpts,
+  // which keeps the prompt clean rather than including an empty section.
+  const sourceBlockRaw = opts.sourceExcerpts ? renderSourceBlock(opts.sourceExcerpts) : null;
+  const sourceBlock = sourceBlockRaw ? sanitizeUntrusted(sourceBlockRaw, "REPO_SOURCE") : null;
+
   const res = await chatCompletion(
     {
       provider,
@@ -144,7 +154,12 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: `${TARGETED_SYSTEM}\n\n${UNTRUSTED_CONTENT_RULE}` },
-        { role: "user", content: `${projectBlock}\n\n${outcomeBlock}\n\n${repoBlock}` },
+        {
+          role: "user",
+          content: sourceBlock
+            ? `${projectBlock}\n\n${outcomeBlock}\n\n${repoBlock}\n\n${sourceBlock}`
+            : `${projectBlock}\n\n${outcomeBlock}\n\n${repoBlock}`,
+        },
       ],
     },
     { timeoutMs: 180_000, retries: 2 }
@@ -152,11 +167,17 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
 
   const text = res.choices[0]?.message?.content ?? "";
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
+  if (!m) {
+    console.warn(`[score-targeted] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: no JSON in response (len=${text.length})`);
+    return null;
+  }
   try {
     const o = JSON.parse(m[0]);
     const rel = (o.relevance as string) ?? "general-awareness";
-    if (rel !== "high" && rel !== "medium" && rel !== "general-awareness") return null;
+    if (rel !== "high" && rel !== "medium" && rel !== "general-awareness") {
+      console.warn(`[score-targeted] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: bad relevance value=${JSON.stringify(rel)}`);
+      return null;
+    }
 
     const writeup = scrubWriteup(String(o.writeup ?? "").trim());
     const summary = sanitizeMarkdown(String(o.summary ?? "").trim());
@@ -190,7 +211,8 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       matchedOutcomeSource: attribution.outcomeSource,
       matchedOutcomeConfidence: attribution.outcomeConfidence,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[score-targeted] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: JSON parse failed: ${(err as Error).message}`);
     return null;
   }
 }

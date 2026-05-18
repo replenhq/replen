@@ -183,6 +183,13 @@
       "when": 1779044400000,
       "tag": "0025_match_discovery_mode_and_resurface",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1779120000000,
+      "tag": "0026_repo_indexes",
+      "breakpoints": true
     }
   ]
 }

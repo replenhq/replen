@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 
 // Phase 2: users + per-user settings
 
@@ -333,6 +333,69 @@ export const matches = sqliteTable(
     idxRepoProject: index("idx_match_repo_project").on(t.repoId, t.projectId),
     idxRun: index("idx_match_run").on(t.runId),
     idxUser: index("idx_match_user").on(t.userId),
+  })
+);
+
+// Persistent BM25 code index over a candidate OSS repo's source. One row per
+// (repo, index_version) — the version is bumped whenever the chunking or
+// tokenisation algorithm changes, forcing a clean rebuild without touching
+// older rows. readme_sha pins the index to a specific README hash so a repo
+// that gets re-fetched with new content invalidates the index automatically.
+// See docs/repo-indexer-scope.md.
+export const repoIndexes = sqliteTable(
+  "repo_indexes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id").notNull().references(() => repos.id, { onDelete: "cascade" }),
+    readmeSha: text("readme_sha"),
+    builtAt: integer("built_at", { mode: "timestamp" }).notNull(),
+    chunkCount: integer("chunk_count").notNull(),
+    byteCount: integer("byte_count").notNull(),
+    indexVersion: text("index_version").notNull(),
+    totalTokens: integer("total_tokens").notNull(),
+  },
+  (t) => ({
+    uniqRepoVersion: uniqueIndex("uniq_repo_index_version").on(t.repoId, t.indexVersion),
+    idxBuilt: index("idx_repo_indexes_built").on(t.builtAt),
+  })
+);
+
+// One row per code chunk. file_path is repo-relative ("src/lib/foo.ts").
+// doc_length is the BM25 token count, pre-computed so BM25 scoring doesn't
+// re-tokenise content on every query. Content is materialised at index time
+// and never re-fetched from the original repo (the clone is throwaway).
+export const repoChunks = sqliteTable(
+  "repo_chunks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    indexId: integer("index_id").notNull().references(() => repoIndexes.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    startLine: integer("start_line").notNull(),
+    endLine: integer("end_line").notNull(),
+    language: text("language"),
+    content: text("content").notNull(),
+    docLength: integer("doc_length").notNull(),
+  },
+  (t) => ({
+    idxIndex: index("idx_repo_chunks_index").on(t.indexId),
+  })
+);
+
+// Inverted index: (term -> chunk_id, freq). Queried at search time as
+// `SELECT chunk_id, freq FROM repo_chunk_terms WHERE index_id = ? AND term = ?`
+// for each query token. Composite PK avoids duplicate entries and keeps
+// per-term lookup O(log n).
+export const repoChunkTerms = sqliteTable(
+  "repo_chunk_terms",
+  {
+    indexId: integer("index_id").notNull().references(() => repoIndexes.id, { onDelete: "cascade" }),
+    term: text("term").notNull(),
+    chunkId: integer("chunk_id").notNull().references(() => repoChunks.id, { onDelete: "cascade" }),
+    freq: integer("freq").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.indexId, t.term, t.chunkId] }),
+    idxTerm: index("idx_repo_chunk_terms_term").on(t.indexId, t.term),
   })
 );
 
