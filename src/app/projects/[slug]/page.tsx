@@ -3,6 +3,7 @@ import { desc, eq, ne, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { assessDocSparsity } from "@/projects/self-improvement";
+import { assessDocHealth, type DocHealth } from "@/projects/doc-health";
 import type { ProjectSummary } from "@/projects/summarize";
 import type { ProjectSearchVectors } from "@/projects/search-vectors";
 import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
@@ -36,6 +37,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
   const summary = parseSummary(project.summaryJson);
   const vectors = parseVectors(project.searchVectorsJson);
   const sparsity = assessDocSparsity(project);
+  const docHealth = await assessDocHealth(project.path);
   const hasGithubName = !!project.githubFullName;
 
   return (
@@ -46,35 +48,17 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
         {hasGithubName && <> · {project.githubFullName}</>}
       </p>
 
-      {sparsity.sparse && (
-        <div
-          role="alert"
-          style={{
-            margin: "12px 0",
-            padding: "12px 16px",
-            background: "var(--amber-soft, rgba(255, 200, 87, 0.08))",
-            border: "1px solid var(--amber-line, rgba(255, 200, 87, 0.35))",
-            borderRadius: 10,
-            fontSize: 14,
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>Docs are sparse: {sparsity.reasons.join("; ")}.</strong>
-          <p style={{ margin: "6px 0 8px" }}>
-            Replen can&apos;t infer your outcome goals from this little context, so any recommendation it surfaces for this project is guessing.
-            {hasGithubName
-              ? " Open a PR to your project with a docs handoff so your AI assistant (Claude Code, Codex) can draft a real README from the codebase. Once docs are richer, Replen's next run picks up the new context."
-              : " Set this project's GitHub repo (owner/name) below, then we can open a docs PR to it. Without a GitHub repo set, Replen can flag the issue but can't action it."}
-          </p>
-          {hasGithubName && (
-            <OpenDocsPRButton projectId={project.id} projectRepo={project.githubFullName!} />
-          )}
-        </div>
-      )}
+      <DocHealthBanner
+        health={docHealth}
+        sparse={sparsity.sparse}
+        hasGithubName={hasGithubName}
+        projectId={project.id}
+        githubFullName={project.githubFullName}
+      />
 
       {summary && <SummaryCard summary={summary} project={project} />}
       {vectors && <VectorsCard vectors={vectors} project={project} />}
-      {!summary && !sparsity.sparse && (
+      {!summary && docHealth.verdict !== "sparse" && (
         <div style={{ margin: "12px 0", padding: "12px 16px", border: "1px solid var(--line, rgba(255,255,255,0.1))", borderRadius: 10 }}>
           <p style={{ margin: 0 }}>No Replen summary computed yet. It will land on the next pipeline run.</p>
           <div style={{ marginTop: 8 }}>
@@ -119,6 +103,98 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
       })}
     </>
   );
+}
+
+function DocHealthBanner({
+  health,
+  sparse,
+  hasGithubName,
+  projectId,
+  githubFullName,
+}: {
+  health: DocHealth;
+  sparse: boolean;
+  hasGithubName: boolean;
+  projectId: number;
+  githubFullName: string | null;
+}) {
+  const palette = paletteForVerdict(health.verdict);
+  return (
+    <div
+      role={health.verdict === "sparse" ? "alert" : undefined}
+      style={{
+        margin: "12px 0",
+        padding: "12px 16px",
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 10,
+        fontSize: 14,
+        lineHeight: 1.5,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <strong style={{ textTransform: "capitalize" }}>Docs: {health.verdict.replace("-", " ")}</strong>
+        <span className="meta" style={{ fontSize: 12 }}>
+          score {health.score}/100 · {health.filesFound.length} file{health.filesFound.length === 1 ? "" : "s"} · {(health.totalBytes / 1024).toFixed(1)}kb
+        </span>
+      </div>
+
+      {health.reasons.length > 0 && (
+        <p style={{ margin: "6px 0 8px" }}>
+          {health.verdict === "excellent"
+            ? "Replen has plenty to work with on this project."
+            : `Gaps: ${health.reasons.join("; ")}.`}
+        </p>
+      )}
+
+      <details style={{ marginTop: 4 }}>
+        <summary className="meta" style={{ fontSize: 12, cursor: "pointer" }}>
+          What Replen read ({health.filesFound.length})
+        </summary>
+        <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+          {health.filesFound
+            .slice()
+            .sort((a, b) => b.bytes - a.bytes)
+            .map((f) => (
+              <li key={f.path} style={{ fontSize: 13 }}>
+                <code>{f.path}</code>{" "}
+                <span className="meta" style={{ fontSize: 11 }}>
+                  {(f.bytes / 1024).toFixed(1)}kb · {Math.round(f.ageDays)}d ago
+                  {f.stale && <span style={{ color: "rgba(255, 200, 87, 0.85)" }}> · stale</span>}
+                </span>
+              </li>
+            ))}
+          {health.filesFound.length === 0 && (
+            <li style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Nothing readable — Replen is flying blind on this project.</li>
+          )}
+        </ul>
+      </details>
+
+      {sparse && hasGithubName && githubFullName && (
+        <div style={{ marginTop: 10 }}>
+          <OpenDocsPRButton projectId={projectId} projectRepo={githubFullName} />
+        </div>
+      )}
+      {sparse && !hasGithubName && (
+        <p className="meta" style={{ fontSize: 12, marginTop: 8 }}>
+          Set this project&apos;s GitHub repo (owner/name) below to open a docs handoff PR.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function paletteForVerdict(verdict: DocHealth["verdict"]): { bg: string; border: string } {
+  switch (verdict) {
+    case "excellent":
+      return { bg: "rgba(120, 220, 140, 0.06)", border: "rgba(120, 220, 140, 0.3)" };
+    case "good":
+      return { bg: "rgba(120, 180, 255, 0.06)", border: "rgba(120, 180, 255, 0.3)" };
+    case "needs-work":
+      return { bg: "rgba(255, 200, 87, 0.06)", border: "rgba(255, 200, 87, 0.3)" };
+    case "sparse":
+      return { bg: "rgba(255, 200, 87, 0.08)", border: "rgba(255, 200, 87, 0.35)" };
+  }
 }
 
 function parseSummary(raw: string | null): ProjectSummary | null {
