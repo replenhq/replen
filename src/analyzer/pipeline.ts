@@ -343,10 +343,26 @@ async function runAnalysisInner(runId: number, userId: number) {
             continue;
           }
           if (!ta) continue;
-          // Drop low-score non-general matches. General-awareness rows are
-          // bookmarks — keep them at any score so they can resurface when a
-          // future project picks them up.
-          if (ta.relevance !== "general-awareness" && (ta.relevanceScore ?? 0) < 50) continue;
+          // Drop low-score scouted matches. Two floors:
+          //   - high/medium below 50: rubric mismatch; the LLM hedged on
+          //     fit while still calling it medium — treat as noise.
+          //   - general-awareness below 25: per the scoring rubric, <25
+          //     means "keyword overlap only, no real connection." For
+          //     scouted matches there's no resurface logic (they're
+          //     project-pinned), so persisting them just floods the feed
+          //     with writeups that say "no integration recommended."
+          //     Trust the LLM's own grading and drop.
+          const score = ta.relevanceScore ?? 0;
+          if (ta.relevance !== "general-awareness" && score < 50) continue;
+          if (ta.relevance === "general-awareness" && score < 25) {
+            void recordEvent(
+              runId,
+              userId,
+              "score",
+              `Dropped ${label} → ${project.slug}: GA at ${score} (below scouted floor 25)`,
+            );
+            continue;
+          }
           const writeup = renderWriteup(
             { owner: safety.meta.owner, name: safety.meta.name, url: `https://github.com/${safety.meta.owner}/${safety.meta.name}` },
             { oneLiner: "", safetyNotes: "", perProject: [ta] },

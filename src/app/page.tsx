@@ -9,6 +9,7 @@ import { Icon } from "@/components/Icons";
 import { LivePipelineStatus } from "@/components/LivePipelineStatus";
 import { RefreshButton } from "@/components/RefreshButton";
 import { formatTimestampToMinute } from "@/lib/format-date";
+import type { CSSProperties } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -311,6 +312,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         For discovered/re-checked, the source (gh-trending / hn / tiktok / etc.) is
                         actually useful information so keep showing it. */}
                     {srcKind && srcKind !== "gh-targeted" && <span className="tag">via {srcKind}</span>}
+                    {m.integrationApproach && m.integrationApproach !== "n/a" && (
+                      <span
+                        className="tag"
+                        style={integrationApproachStyle(m.integrationApproach)}
+                        title={integrationApproachTitle(m.integrationApproach)}
+                      >
+                        {integrationApproachLabel(m.integrationApproach)}
+                      </span>
+                    )}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                   </div>
                   <div className="writeup">{writeup}</div>
@@ -400,6 +410,39 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 // pausedReason values used for quota failures look like `llm-quota:primary` or
 // `llm-quota:sensitive`. Returns the slot name or null if this is some other
 // kind of pause (cost-cap, no-candidates, etc.).
+// integrationApproach badges give the user a one-glance read of HOW to extract
+// value from a match — drop-in vs. cherry-pick vs. study-and-rebuild. The
+// cleanroom-rebuild case is the one that's been historically under-served:
+// when a repo's ideas are good but the code itself won't transfer, the user
+// still wants to know it's worth a look.
+function integrationApproachLabel(a: string | null): string {
+  switch (a) {
+    case "depend-on-it": return "🔌 drop-in";
+    case "cherry-pick": return "✂️ cherry-pick";
+    case "vendor": return "📦 vendor";
+    case "cleanroom-rebuild": return "💡 idea to rebuild";
+    default: return "";
+  }
+}
+function integrationApproachTitle(a: string | null): string {
+  switch (a) {
+    case "depend-on-it": return "Import this repo directly — lightest touch integration";
+    case "cherry-pick": return "Lift specific files / functions from this repo into your project";
+    case "vendor": return "Copy the repo in-tree and adapt it as needed";
+    case "cleanroom-rebuild": return "The IDEA is worth lifting — write your own version, no code transferred";
+    default: return "";
+  }
+}
+function integrationApproachStyle(a: string | null): CSSProperties {
+  switch (a) {
+    case "cleanroom-rebuild": return { background: "#fef3c7", color: "#92400e" };
+    case "cherry-pick": return { background: "#ddd6fe", color: "#5b21b6" };
+    case "depend-on-it": return { background: "#d1fae5", color: "#065f46" };
+    case "vendor": return { background: "#e0e7ff", color: "#3730a3" };
+    default: return {};
+  }
+}
+
 function parseQuotaReason(reason: string | null): "primary" | "sensitive" | null {
   if (!reason) return null;
   if (reason.startsWith("llm-quota:primary")) return "primary";

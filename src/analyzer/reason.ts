@@ -79,7 +79,15 @@ ${projectLines}`;
 
 // Pass B: deep writeup for a single (project, repo) pair
 
-const DEEP_SYSTEM = `You are a senior engineer writing a scoping note that helps your colleague decide whether a newly-discovered open-source repo is worth integrating into their specific project.
+const DEEP_SYSTEM = `You are a senior engineer writing a scoping note about a newly-discovered open-source repo and what value (if any) your colleague's specific project can extract from it.
+
+Value comes in multiple forms — and "integration" is only one. A great repo for this user might:
+- Integrate end-to-end (drop-in dependency, or vendored adaptation).
+- Have a couple of components worth cherry-picking, ignore the rest.
+- Offer a clever ALGORITHM, DATA MODEL, ARCHITECTURE, or UX move worth reimplementing IN-HOUSE (idea extraction — often higher leverage than integration because it bypasses the licence + dep-tree burden).
+- Be a competitor with features worth re-building.
+
+"Doesn't integrate cleanly" is NOT the same as "no value to surface." Mining a repo for borrowable ideas counts. Only when integration AND idea-extraction are both weak (pure keyword overlap, no transferable concept) should you drop into the lowest band.
 
 WRITE IN PLAIN PROSE. NO markdown headers (no #, ##, ###). NO bold "Summary:" or "Risks:" labels. Use natural paragraphs separated by BLANK LINES (\\n\\n in the JSON string) and inline numbered lists only where it helps structure.
 
@@ -124,15 +132,29 @@ Cardinal rules:
 - License / star count / risk goes in the metadata fields, NOT in the writeup body.
 - 400-900 words. Aim for substance not length.
 
-If you genuinely can't justify even one concrete plug point, do not write a writeup - set relevance="general-awareness" and write a short 80-150 word note on why the repo is broadly interesting but not project-specific.
+If you can't justify even one concrete plug point AND can't name a specific borrowable idea or pattern, set relevance="general-awareness" with score under 25 and write a single sentence saying so — these get dropped before reaching the user.
+
+If you can name ONE idea worth lifting (algorithm, data model, UX pattern, framing) even though the repo doesn't integrate, that's a medium-tier result (50-79 range, integrationApproach="cleanroom-rebuild"). Don't grade these as general-awareness just because the code itself doesn't transfer.
 
 Also fill the structured fields:
-- relevance: "high" (would integrate this week), "medium" (real fit, needs work), or "general-awareness" (worth knowing only)
-- relevanceScore 0-100 (be conservative; reserve >80 for high-conviction)
+- relevance:
+    "high"               → integrate this week (whole repo OR multiple substantial cherry-picks)
+    "medium"             → real integration with adaptation, OR 1-2 specific ideas/patterns worth reimplementing in-house
+    "general-awareness"  → loose conceptual overlap, worth knowing exists but no clear action
+- relevanceScore 0-100. Calibration:
+    80-100: clear high-impact value (integration OR multiple borrowable patterns)
+    50-79:  solid medium value (integrate-with-adaptation, OR 1-2 specific ideas to rebuild in-house)
+    25-49:  loose conceptual link; worth a glance but no action
+    0-24:   pure keyword overlap; gets dropped
 - summary: 1 sentence on what the repo is (the "what" only, no fit assessment)
-- whyUseful: 1 sentence naming the single most important plug point in <PROJECT_NAME>
-- suggestedUse: 1 sentence - the concrete first action (file to create, function to replace, etc.)
-- integrationApproach: cherry-pick | vendor | cleanroom-rebuild | depend-on-it | n/a
+- whyUseful: 1 sentence naming the single most valuable thing (plug point OR idea to lift)
+- suggestedUse: 1 sentence - the concrete first action (file to create, function to replace, OR idea to study + rebuild)
+- integrationApproach:
+    "depend-on-it"      → import directly
+    "cherry-pick"       → lift specific files / functions into the project
+    "vendor"            → copy in-tree, adapt
+    "cleanroom-rebuild" → take the IDEA, write your own (no code transferred)
+    "n/a"               → nothing to integrate or rebuild
 - risks: 1 sentence - license issues, abandoned, single maintainer, weird hooks, recent star spike, anything to actually worry about
 
 Output JSON ONLY:
