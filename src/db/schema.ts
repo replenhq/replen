@@ -550,3 +550,37 @@ export const digestRuns = sqliteTable(
     idxUserTime: index("idx_digest_runs_user_time").on(t.userId, t.startedAt),
   })
 );
+
+// Initiative #3: synthesis across matches. One row per insight produced
+// by the synthesizer for a given run. The insight references its
+// supporting matches via evidence_match_ids (JSON array) so the feed UI
+// can render "Evidence: 4 matches" with a link out to each.
+//
+// kind dimensions:
+//   topic         — N matches share a topic / theme cluster
+//   cross-project — same theme hits ≥2 projects via separate matches
+//   approach      — N matches share an integrationApproach (e.g. lots
+//                   of cleanroom-rebuild candidates this run)
+//
+// user_status mirrors matches.user_status so the feed can hide / star
+// insights independent of the matches that fed them.
+export const matchInsights = sqliteTable(
+  "match_insights",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    runId: integer("run_id").notNull(),
+    kind: text("kind").notNull(), // 'topic' | 'cross-project' | 'approach'
+    title: text("title").notNull(),
+    bodyMd: text("body_md").notNull(),
+    evidenceMatchIds: text("evidence_match_ids").notNull(), // JSON array of match.id values
+    primaryProjectSlug: text("primary_project_slug"),
+    themes: text("themes"), // JSON array of shared theme tags
+    userStatus: text("user_status").notNull().default("unread"), // 'unread' | 'starred' | 'hidden'
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserRun: index("idx_insights_user_run").on(t.userId, t.runId),
+    idxUserCreated: index("idx_insights_user_created").on(t.userId, t.createdAt),
+  })
+);

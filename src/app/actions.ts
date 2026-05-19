@@ -113,6 +113,23 @@ export async function setMatchStatus(matchId: number, status: string) {
   revalidatePath("/starred");
 }
 
+// Initiative #3: status changes for synthesised insights. Three states:
+// 'unread' (default), 'starred' (pin / keep visible), 'hidden' (dismissed
+// from feed). Separate from matches.user_status so the user can hide an
+// insight without affecting any of the matches it cites.
+const ALLOWED_INSIGHT_STATUSES = new Set(["unread", "starred", "hidden"]);
+
+export async function setInsightStatus(insightId: number, status: string) {
+  const user = await requireUser();
+  if (!ALLOWED_INSIGHT_STATUSES.has(status)) throw new Error(`invalid insight status: ${status}`);
+  if (!Number.isInteger(insightId) || insightId <= 0) throw new Error("invalid insightId");
+  await db
+    .update(schema.matchInsights)
+    .set({ userStatus: status })
+    .where(and(eq(schema.matchInsights.id, insightId), eq(schema.matchInsights.userId, user.id)));
+  revalidatePath("/");
+}
+
 export async function createHandoff(matchId: number): Promise<{ ok: boolean; prUrl?: string; reason?: string }> {
   const user = await requireUser();
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");

@@ -17,6 +17,7 @@ import {
 import { probeActivity } from "../projects/activity";
 import { summariseActivity, needsActivityRefresh } from "../projects/activity-summary";
 import { runPruneSuggestions } from "../projects/run-prune-suggestions";
+import { runSynthesis } from "../projects/run-synthesis";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 import { readUserSecret } from "../lib/user-secrets";
@@ -160,6 +161,16 @@ async function executePipeline(
     } catch (e) {
       if (e instanceof LlmQuotaError) throw e;
       console.warn(`[pipeline] user=${userId} prune suggestions failed:`, e);
+    }
+    // Initiative #3: synthesise meta-insights across this run's matches.
+    // Runs after prune so prune matches are also eligible as evidence.
+    // Failures non-fatal: insights are a "nice to have" on top of the
+    // canonical match feed.
+    try {
+      await runSynthesis(runId, userId);
+    } catch (e) {
+      if (e instanceof LlmQuotaError) throw e;
+      console.warn(`[pipeline] user=${userId} synthesis failed:`, e);
     }
     emailSent = await sendDigestEmail(runId, userId, cfg);
     // Real-time webhook for `high` matches. Failures are logged but don't

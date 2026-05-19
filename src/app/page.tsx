@@ -8,6 +8,7 @@ import { LocalTime } from "@/components/LocalTime";
 import { Icon } from "@/components/Icons";
 import { LivePipelineStatus } from "@/components/LivePipelineStatus";
 import { RefreshButton } from "@/components/RefreshButton";
+import { InsightsStrip } from "@/components/InsightsStrip";
 import { formatTimestampToMinute } from "@/lib/format-date";
 import type { CSSProperties } from "react";
 
@@ -177,6 +178,81 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   const quotaSlot = parseQuotaReason(latestRun?.pausedReason ?? null);
   const lastRunAt = latestRun?.finishedAt ?? null;
 
+  // Initiative #3: load synthesised insights for the same window as the
+  // feed (last `days` days). Starred sort first, then newest unread. The
+  // strip is hidden entirely when there are none.
+  const insightsSince = new Date(Date.now() - days * 24 * 3600 * 1000);
+  const insightRows = await db
+    .select()
+    .from(schema.matchInsights)
+    .where(and(
+      eq(schema.matchInsights.userId, user.id),
+      gte(schema.matchInsights.createdAt, insightsSince),
+      ne(schema.matchInsights.userStatus, "hidden"),
+    ))
+    .orderBy(
+      sql`CASE ${schema.matchInsights.userStatus} WHEN 'starred' THEN 0 ELSE 1 END`,
+      desc(schema.matchInsights.createdAt),
+    );
+  // Hydrate each insight's evidence (owner/name/project) by batch-loading
+  // the cited matches. Keeps the strip cheap: one round-trip even when
+  // there are many insights.
+  const evidenceIds = [...new Set(
+    insightRows.flatMap((i) => {
+      try { return (JSON.parse(i.evidenceMatchIds) as number[]).filter((n) => Number.isFinite(n)); }
+      catch { return [] as number[]; }
+    }),
+  )];
+  const evidenceById = new Map<number, { id: number; repoOwner: string; repoName: string; projectSlug: string | null }>();
+  if (evidenceIds.length > 0) {
+    const evRows = await db
+      .select({
+        id: schema.matches.id,
+        repoOwner: schema.repos.owner,
+        repoName: schema.repos.name,
+        projectId: schema.matches.projectId,
+      })
+      .from(schema.matches)
+      .innerJoin(schema.repos, eq(schema.matches.repoId, schema.repos.id))
+      .where(and(
+        eq(schema.matches.userId, user.id),
+        inArray(schema.matches.id, evidenceIds),
+      ));
+    // Map projectId -> slug from the projects already loaded above. But
+    // projectMap is keyed off the *current feed window*, not insights —
+    // an evidence match could be older than the current `days` filter,
+    // so we resolve its slug from a fresh per-user lookup.
+    const evidenceProjectIds = [...new Set(evRows.map((r) => r.projectId).filter((x): x is number => !!x))];
+    const slugById = new Map<number, string>();
+    if (evidenceProjectIds.length > 0) {
+      const ps = await db
+        .select({ id: schema.projectProfiles.id, slug: schema.projectProfiles.slug })
+        .from(schema.projectProfiles)
+        .where(and(
+          eq(schema.projectProfiles.userId, user.id),
+          inArray(schema.projectProfiles.id, evidenceProjectIds),
+        ));
+      for (const p of ps) slugById.set(p.id, p.slug);
+    }
+    for (const r of evRows) {
+      evidenceById.set(r.id, {
+        id: r.id,
+        repoOwner: r.repoOwner,
+        repoName: r.repoName,
+        projectSlug: r.projectId ? slugById.get(r.projectId) ?? null : null,
+      });
+    }
+  }
+  const insights = insightRows.map((i) => {
+    let ids: number[] = [];
+    try { ids = (JSON.parse(i.evidenceMatchIds) as number[]).filter((n) => Number.isFinite(n)); }
+    catch { /* ignore */ }
+    return {
+      ...i,
+      evidence: ids.map((id) => evidenceById.get(id)).filter((x): x is NonNullable<typeof x> => !!x),
+    };
+  });
+
   // Group matches by project slug - matches the email digest layout. Order
   // groups by max relevanceScore so the highest-conviction project goes first.
   const groups = new Map<string, typeof matches>();
@@ -256,6 +332,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
         </div>
       )}
+      <InsightsStrip insights={insights} />
       <FilterBar
         relFilter={relFilter}
         days={days}

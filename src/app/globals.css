@@ -444,6 +444,87 @@ td.path {
 }
 .actions .spacer { flex: 1; }
 
+/* Initiative #3: synthesised insights strip above the match feed. The
+   strip sits between the LivePipelineStatus / banners and the FilterBar.
+   Visual weight is amber-tinted to distinguish meta-insights from the
+   default match card, but never louder than the feed itself. */
+.insights-strip {
+  margin: 14px 0 20px;
+  padding: 14px 16px 6px;
+  background: linear-gradient(180deg, rgba(255, 200, 87, 0.05) 0%, rgba(255, 200, 87, 0.015) 100%);
+  border: 1px solid var(--amber-line);
+  border-radius: 14px;
+}
+.insights-strip-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  display: flex; align-items: center;
+}
+.insight {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.insight:last-child { margin-bottom: 4px; }
+.insight-head {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.insight-title {
+  font-size: 15.5px; font-weight: 600; color: var(--fg);
+  margin: 4px 0 6px;
+  line-height: 1.35;
+}
+.insight-body {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 14px;
+  color: #d6d3cb;
+  margin-bottom: 8px;
+  overflow-wrap: break-word;
+}
+.insight-evidence {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin: 8px 0 4px;
+}
+.insight-evidence summary { color: var(--dim); }
+.insight-evidence ul {
+  margin: 6px 0 4px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.insight-evidence li { margin: 2px 0; }
+.insight-evidence li a { color: var(--fg); text-decoration: none; }
+.insight-evidence li a:hover { color: var(--amber); }
+.insight .actions {
+  margin-top: 10px;
+  padding-top: 10px;
+}
+.tag.insight-kind {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-color: var(--amber-line);
+}
+.tag.insight-kind-cross-project {
+  background: rgba(125, 156, 255, 0.13);
+  color: #9fb3ff;
+  border-color: rgba(125, 156, 255, 0.32);
+}
+.tag.insight-kind-approach {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: var(--green-line);
+}
+
 /* Mobile */
 @media (max-width: 720px) {
   main { padding: 12px 14px 48px; font-size: 14px; }
@@ -483,6 +564,13 @@ td.path {
 
   /* Pipeline status log can have very long repo paths; let them wrap. */
   .pipeline-log-line { word-break: break-word; overflow-wrap: break-word; }
+
+  /* Insights strip on narrow screens: tighter padding, smaller title. */
+  .insights-strip { padding: 12px 12px 4px; border-radius: 12px; }
+  .insight { padding: 12px 12px; border-radius: 10px; }
+  .insight-title { font-size: 15px; }
+  .insight-body { font-size: 13.5px; }
+  .insight-body { overflow-wrap: break-word; word-break: break-word; }
 }
 
 @media (max-width: 720px) {
