@@ -66,6 +66,7 @@ WRITING STYLE (writeup, summary, whyUseful, suggestedUse, risks):
 GRADING NOTES:
   - Don't dismiss a real fit because the project already has overlapping infra. New capability (better algorithm, friendlier licence, less ops burden, cleaner drop-in) still grades up.
   - "Planned, not yet wired" or "what's NOT in scope" sections in the project docs are STRONG opportunities - grade up if the repo fills one.
+  - If a "Currently building" block is provided, it lists what the user is actively working on THIS PERIOD. A match that fits the current work (themes, recent files, branch) grades stronger than one that fits only the project's general doc shape, AND should be referenced in the writeup by name (theme tag, file path, or PR number). If the candidate is unrelated to the current work but still useful for the project's general shape, grade normally without forcing the link.
   - If a "Candidate repo: source excerpts" block is provided, treat the source as ground truth and the README as a claim.
 
 Output JSON only:
@@ -106,6 +107,8 @@ ${sanitizeUntrusted((project.readmeMd ?? "").slice(0, 8000), "PROJECT_README")}
 
 ${project.claudeMd ? sanitizeUntrusted(project.claudeMd.slice(0, 10000), "PROJECT_CLAUDE_MD") + "\n\n" : ""}Tech: ${project.techSummary ?? "(none)"}`;
 
+  const activityBlock = renderActivityBlock(project.activitySummary);
+
   const outcomeBlock = `## Specific need this candidate is being checked against
 Need (verbatim, from the project's docs or inferred from them): ${attribution.outcome}
 Source: ${attribution.outcomeSource === "user" ? "stated by the project owner in their docs" : "inferred from project context"}
@@ -135,6 +138,16 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
   const sourceBlockRaw = opts.sourceExcerpts ? renderSourceBlock(opts.sourceExcerpts) : null;
   const sourceBlock = sourceBlockRaw ? sanitizeUntrusted(sourceBlockRaw, "REPO_SOURCE") : null;
 
+  // Activity block goes BETWEEN projectBlock and outcomeBlock so the LLM
+  // reads "what they generally do" -> "what they're doing this period" ->
+  // "specific need being checked" -> "candidate repo". The order matters:
+  // current work is context for the specific need, not for the project as
+  // a whole.
+  const userParts = [projectBlock];
+  if (activityBlock) userParts.push(activityBlock);
+  userParts.push(outcomeBlock, repoBlock);
+  if (sourceBlock) userParts.push(sourceBlock);
+
   const res = await chatCompletion(
     {
       provider,
@@ -143,12 +156,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: `${TARGETED_SYSTEM}\n\n${UNTRUSTED_CONTENT_RULE}` },
-        {
-          role: "user",
-          content: sourceBlock
-            ? `${projectBlock}\n\n${outcomeBlock}\n\n${repoBlock}\n\n${sourceBlock}`
-            : `${projectBlock}\n\n${outcomeBlock}\n\n${repoBlock}`,
-        },
+        { role: "user", content: userParts.join("\n\n") },
       ],
     },
     { timeoutMs: 180_000, retries: 2 }
@@ -204,6 +212,26 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     console.warn(`[score-targeted] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: JSON parse failed: ${(err as Error).message}`);
     return null;
   }
+}
+
+// Render the "Currently building" block from a project's cached activity
+// summary. Returns null when there's no signal (dormant project, no cached
+// summary yet) so callers can skip the section entirely rather than feed
+// the LLM an empty placeholder.
+//
+// Exported so reason.ts (the discovery path) and any future scoring layer
+// can use the same exact block shape. The system prompt's "Currently
+// building" reference assumes this rendering.
+export function renderActivityBlock(activity: import("../projects/activity-summary").ProjectActivitySummary | null | undefined): string | null {
+  if (!activity || activity.state !== "active" || !activity.summary) return null;
+  const parts = [`## Currently building (last 30 days)`, activity.summary];
+  if (activity.themes.length > 0) {
+    parts.push(`Themes: ${activity.themes.join(", ")}`);
+  }
+  if (activity.topFiles.length > 0) {
+    parts.push(`Recent files: ${activity.topFiles.slice(0, 8).join(", ")}`);
+  }
+  return parts.join("\n");
 }
 
 // Same scrub as reason.ts — strip markdown headers and standalone bold

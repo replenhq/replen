@@ -251,6 +251,16 @@ export const projectProfiles = sqliteTable(
     searchVectorsSummaryHash: text("search_vectors_summary_hash"),
     searchVectorsGeneratedAt: integer("search_vectors_generated_at", { mode: "timestamp" }),
     searchVectorsPromptVersion: text("search_vectors_prompt_version"),
+    // Initiative #1: activity-aware matching. JSON blob conforming to
+    // ProjectActivitySummary in src/projects/activity-summary.ts. Captures
+    // what the user has been ACTIVELY building (recent commits, open PRs,
+    // touched files, TODO clusters) so the LLM can grade matches against
+    // current work, not just the project's general doc shape.
+    // Refresh policy: re-probe when activityHeadSha != current git HEAD,
+    // OR when activityGeneratedAt is > 24h old.
+    activityJson: text("activity_json"),
+    activityGeneratedAt: integer("activity_generated_at", { mode: "timestamp" }),
+    activityHeadSha: text("activity_head_sha"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),
     sensitivity: text("sensitivity").notNull().default("low"),

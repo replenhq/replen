@@ -14,6 +14,8 @@ import {
   vectorsNeedRegeneration,
   VECTORS_PROMPT_VERSION,
 } from "../projects/search-vectors";
+import { probeActivity } from "../projects/activity";
+import { summariseActivity, needsActivityRefresh } from "../projects/activity-summary";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 import { readUserSecret } from "../lib/user-secrets";
@@ -131,6 +133,14 @@ async function executePipeline(
     );
     await refreshStaleSearchVectors(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} vectors refresh failed:`, e),
+    );
+    // Initiative #1: capture what each project's been actively working on
+    // (recent commits, open PRs, TODOs) so Stage 4 + reasonAboutRepo can
+    // grade matches against current work, not just the project's general
+    // doc shape. Cheap: short-circuits to dormant when no commits, caches
+    // 24h or until git HEAD moves.
+    await refreshStaleActivity(runId, userId, cfg).catch((e) =>
+      console.warn(`[pipeline] user=${userId} activity refresh failed:`, e),
     );
     void recordEvent(runId, userId, "fetch_start", "Fetching candidates from your sources…");
     const fetched = await runFetchers(userId, cfg);
@@ -383,6 +393,84 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
   );
   if (regenerated > 0) {
     void recordEvent(runId, userId, "scan", `Search vectors refreshed for ${regenerated} project(s)`);
+  }
+}
+
+// Initiative #1: activity refresh. For each active project, probe git for
+// recent commits + open PRs + TODO clusters (cheap, no LLM), then summarise
+// via LLM only when the cache is stale (>24h) or git HEAD has moved.
+// Mirrors the cache-invalidation pattern of refreshStaleProjectSummaries and
+// refreshStaleSearchVectors so steady-state cost is zero on subsequent runs.
+async function refreshStaleActivity(runId: number, userId: number, cfg: UserConfig): Promise<void> {
+  const projects = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+  if (projects.length === 0) return;
+
+  let regenerated = 0;
+  const ACTIVITY_CONCURRENCY = 3;
+  let cursor = 0;
+  const refreshOne = async () => {
+    while (cursor < projects.length) {
+      const idx = cursor++;
+      const p = projects[idx];
+
+      // Cheap pre-probe to get the current HEAD sha — the cache predicate
+      // wants to know whether HEAD has moved since the last summary, so
+      // we have to probe SOMETHING. Doing a full probeActivity is expensive;
+      // we just want the sha here, the full probe runs only when stale.
+      let currentHeadSha: string | null = null;
+      try {
+        const quick = await probeActivity(p.path, {});
+        currentHeadSha = quick.headSha;
+      } catch {
+        // Project path missing or not a git repo. Skip silently — same
+        // treatment as a project with no docs.
+        continue;
+      }
+
+      const decision = needsActivityRefresh({
+        activityJson: p.activityJson ?? null,
+        activityGeneratedAt: p.activityGeneratedAt ?? null,
+        activityHeadSha: p.activityHeadSha ?? null,
+        currentHeadSha,
+      });
+      if (!decision.regen) continue;
+
+      void recordEvent(runId, userId, "scan", `Refreshing activity for ${p.slug} (${decision.reason})`);
+
+      try {
+        // Full probe + LLM summary. The pre-probe above already proved
+        // the project is a git repo, so we expect this to produce real data.
+        const activity = await probeActivity(p.path, {
+          githubFullName: p.githubFullName,
+          ghToken: cfg.githubToken,
+        });
+        const summary = await summariseActivity(activity, p.name, p.slug, {
+          sensitivity: (p.sensitivity as "low" | "high") ?? "low",
+        });
+        if (!summary) continue;
+        await db
+          .update(schema.projectProfiles)
+          .set({
+            activityJson: JSON.stringify(summary),
+            activityGeneratedAt: new Date(),
+            activityHeadSha: activity.headSha,
+          })
+          .where(eq(schema.projectProfiles.id, p.id));
+        regenerated++;
+      } catch (e) {
+        if (e instanceof LlmQuotaError) throw e;
+        console.warn(`[pipeline] user=${userId} activity for ${p.slug} failed:`, e);
+      }
+    }
+  };
+  await Promise.allSettled(
+    Array.from({ length: Math.min(ACTIVITY_CONCURRENCY, projects.length) }, () => refreshOne()),
+  );
+  if (regenerated > 0) {
+    void recordEvent(runId, userId, "scan", `Activity refreshed for ${regenerated} project(s)`);
   }
 }
 

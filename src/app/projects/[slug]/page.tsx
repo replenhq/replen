@@ -6,6 +6,7 @@ import { assessDocSparsity } from "@/projects/self-improvement";
 import { assessDocHealth, type DocHealth } from "@/projects/doc-health";
 import type { ProjectSummary } from "@/projects/summarize";
 import type { ProjectSearchVectors } from "@/projects/search-vectors";
+import type { ProjectActivitySummary } from "@/projects/activity-summary";
 import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
 import { RecomputeSummaryButton } from "@/components/RecomputeSummaryButton";
 
@@ -36,6 +37,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
 
   const summary = parseSummary(project.summaryJson);
   const vectors = parseVectors(project.searchVectorsJson);
+  const activity = parseActivity(project.activityJson);
   const sparsity = assessDocSparsity(project);
   const docHealth = await assessDocHealth(project.path);
   const hasGithubName = !!project.githubFullName;
@@ -57,6 +59,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
       />
 
       {summary && <SummaryCard summary={summary} project={project} />}
+      {activity && <ActivityCard activity={activity} generatedAt={project.activityGeneratedAt} />}
       {vectors && <VectorsCard vectors={vectors} project={project} />}
       {!summary && docHealth.verdict !== "sparse" && (
         <div style={{ margin: "12px 0", padding: "12px 16px", border: "1px solid var(--line, rgba(255,255,255,0.1))", borderRadius: 10 }}>
@@ -204,6 +207,114 @@ function parseSummary(raw: string | null): ProjectSummary | null {
   } catch {
     return null;
   }
+}
+
+function parseActivity(raw: string | null): ProjectActivitySummary | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ProjectActivitySummary;
+  } catch {
+    return null;
+  }
+}
+
+// "Currently building" panel. Shows what the pipeline detected the user
+// has been actively working on in this project (themes, recent files,
+// summary). Initiative #1: this is the same data the matcher uses to
+// grade candidates against current work, surfaced so the user can verify
+// what Replen "sees" of their activity.
+function ActivityCard({
+  activity,
+  generatedAt,
+}: {
+  activity: ProjectActivitySummary;
+  generatedAt: Date | null;
+}) {
+  // Dormant projects render a quieter version — useful confirmation that
+  // Replen has looked, just hasn't found recent work to anchor on.
+  if (activity.state === "dormant" || !activity.summary) {
+    return (
+      <div
+        style={{
+          margin: "12px 0",
+          padding: "12px 16px",
+          border: "1px dashed var(--line, rgba(255,255,255,0.1))",
+          borderRadius: 10,
+          fontSize: 13,
+          color: "var(--dim)",
+        }}
+      >
+        <strong style={{ color: "var(--fg)" }}>Currently building</strong>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          dormant
+          {activity.daysSinceLastCommit !== null && (
+            <> · last commit {activity.daysSinceLastCommit}d ago</>
+          )}
+          {generatedAt && <> · checked {formatAge(generatedAt)}</>}
+        </span>
+        <p style={{ margin: "6px 0 0", fontSize: 13 }}>
+          No recent activity detected. Matches will grade against the project&apos;s general docs, not current work.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        margin: "12px 0",
+        padding: "16px 20px",
+        border: "1px solid var(--amber-line, rgba(255, 200, 87, 0.35))",
+        background: "var(--amber-soft, rgba(255, 200, 87, 0.05))",
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
+        <h2 style={{ margin: 0, fontSize: 16, color: "var(--amber)" }}>Currently building</h2>
+        <span className="meta" style={{ fontSize: 12 }}>
+          {activity.daysSinceLastCommit !== null && (
+            <>last commit {activity.daysSinceLastCommit}d ago · </>
+          )}
+          {generatedAt && <>refreshed {formatAge(generatedAt)}</>}
+        </span>
+      </div>
+      <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: 1.55 }}>{activity.summary}</p>
+      {activity.themes.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {activity.themes.map((t) => (
+            <span
+              key={t}
+              className="tag"
+              style={{
+                background: "rgba(255, 200, 87, 0.10)",
+                color: "var(--amber)",
+                border: "1px solid rgba(255, 200, 87, 0.25)",
+                fontSize: 11.5,
+              }}
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      {activity.topFiles.length > 0 && (
+        <details>
+          <summary className="meta" style={{ fontSize: 12, cursor: "pointer" }}>
+            Recent files ({activity.topFiles.length})
+          </summary>
+          <ul style={{ margin: "6px 0 0 18px", padding: 0, fontSize: 13 }}>
+            {activity.topFiles.map((f) => (
+              <li key={f}>
+                <code style={{ fontSize: 12.5 }}>{f}</code>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="meta" style={{ fontSize: 11, marginTop: 10 }}>
+        This drives match grading: candidates that fit your current work score higher and reference the themes above by name.
+      </p>
+    </div>
+  );
 }
 
 function parseVectors(raw: string | null): ProjectSearchVectors | null {

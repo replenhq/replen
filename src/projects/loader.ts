@@ -25,6 +25,11 @@ export type LocalProject = {
   included?: boolean;
   sensitivity?: "low" | "high";
   llmProvider?: "auto" | "deepseek" | "anthropic";
+  // Initiative #1: cached activity summary from project_profiles.activity_json.
+  // null when the project has no recent activity or the cache hasn't been
+  // populated yet. Consumers (score-targeted, reason.ts) gracefully skip the
+  // current-work block when null.
+  activitySummary?: import("./activity-summary").ProjectActivitySummary | null;
 };
 
 // All root-level doc-class files. Ordered so README (the most common entry

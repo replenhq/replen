@@ -4,7 +4,7 @@ import type { LocalProject } from "../projects/loader";
 import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } from "./guards";
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import { errorMsg } from "../lib/error-msg";
-import { scrubBannedVocab } from "./score-targeted";
+import { scrubBannedVocab, renderActivityBlock } from "./score-targeted";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -142,6 +142,8 @@ If you can't justify even one concrete plug point AND can't name a specific borr
 
 If you can name ONE idea worth lifting (algorithm, data model, UX pattern, framing) even though the repo doesn't integrate, that's a medium-tier result (50-79 range, integrationApproach="cleanroom-rebuild"). Don't grade these as general-awareness just because the code itself doesn't transfer.
 
+If a "Currently building" block is provided, it tells you what the project owner is ACTIVELY working on (themes, recent files, current branch). A match that fits the current work scores stronger than one that fits only the project's general doc shape, AND the writeup should reference the specific theme or file by name. If the candidate's unrelated to the current work but still useful for the project's general shape, grade normally without forcing the link.
+
 Also fill the structured fields:
 - relevance:
     "high"               → integrate this week (whole repo OR multiple substantial cherry-picks)
@@ -210,6 +212,11 @@ ${project.claudeMd ? sanitizeUntrusted(project.claudeMd.slice(0, 10000), "PROJEC
   // entirely for non-trending sources so it doesn't add noise.
   const trendingLine = renderTrendingSignal(discovery?.trendingWindows);
 
+  // Initiative #1: current-work context. Sits between project shape and
+  // candidate so the LLM reads "what they do in general" -> "what they're
+  // doing this period" -> "the candidate". Null for dormant projects.
+  const activityBlock = renderActivityBlock(project?.activitySummary);
+
   const repoBlock = `## Candidate repo: ${safety.meta.owner}/${safety.meta.name}
 
 URL: https://github.com/${safety.meta.owner}/${safety.meta.name}
@@ -242,6 +249,10 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
   }
   const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 
+  const userMessage = activityBlock
+    ? `${projectBlock}\n\n${activityBlock}\n\n${repoBlock}\n\n(One-liner hint from earlier triage: ${oneLiner})`
+    : `${projectBlock}\n\n${repoBlock}\n\n(One-liner hint from earlier triage: ${oneLiner})`;
+
   const res = await chatCompletion(
     {
       provider,
@@ -250,7 +261,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: `${DEEP_SYSTEM}\n\n${UNTRUSTED_CONTENT_RULE}` },
-        { role: "user", content: `${projectBlock}\n\n${repoBlock}\n\n(One-liner hint from earlier triage: ${oneLiner})` },
+        { role: "user", content: userMessage },
       ],
     },
     { timeoutMs: 180_000, retries: 2 }

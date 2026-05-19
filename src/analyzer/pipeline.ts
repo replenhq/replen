@@ -9,6 +9,7 @@ import { scoreBookmarkAgainstProject } from "./resurface";
 import { readRunOrEnv } from "./run-context";
 import type { ProjectSummary } from "../projects/summarize";
 import { type LocalProject } from "../projects/loader";
+import type { ProjectActivitySummary } from "../projects/activity-summary";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, parseTrendingMembership, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
 import type { UserConfig } from "../scheduler/user-config";
@@ -17,6 +18,19 @@ import { recordEvent } from "../scheduler/events";
 import { LlmQuotaError } from "./llm";
 
 const HOURS = 36;
+
+// Parse the persisted activity blob from project_profiles.activity_json
+// into a typed summary. Returns null on missing/corrupt JSON so downstream
+// callers can guard with `if (project.activitySummary)` and skip the
+// current-work block in their prompts.
+function parseActivitySummary(raw: string | null | undefined): ProjectActivitySummary | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ProjectActivitySummary;
+  } catch {
+    return null;
+  }
+}
 
 export async function runAnalysis(
   runId: number,
@@ -62,6 +76,7 @@ async function runAnalysisInner(runId: number, userId: number) {
     included: !!p.included,
     sensitivity: (p.sensitivity as "low" | "high") ?? "low",
     llmProvider: (p.llmProvider as "auto" | "deepseek" | "anthropic") ?? "auto",
+    activitySummary: parseActivitySummary(p.activityJson),
   }));
   const projectIdBySlug = new Map(dbProjects.map((p) => [p.slug, p.id]));
 
@@ -746,6 +761,7 @@ async function runResurfacePass(
       included: !!project.included,
       sensitivity: (project.sensitivity as "low" | "high") ?? "low",
       llmProvider: (project.llmProvider as "auto" | "deepseek" | "anthropic") ?? "auto",
+      activitySummary: parseActivitySummary(project.activityJson),
     };
 
     let result;
