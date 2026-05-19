@@ -409,8 +409,17 @@ async function runAnalysisInner(runId: number, userId: number) {
         trendingWindows ? { trendingWindows } : null,
       );
 
+      // Split floors: social sources are human-curated (a creator already
+      // thought the repo was interesting) so we trust a lower score from
+      // them. Algorithmic sources (gh-trending / ossinsight / gh-search-*)
+      // are firehoses where stars alone aren't a strong fit signal, so the
+      // 50 floor stays. Scouted (gh-targeted) has its own floor of 25
+      // handled in the earlier code path.
+      const candidateSourceKind = bestSourceByKey.get(t.key) ?? null;
+      const SOCIAL_KINDS = new Set(["hn", "reddit", "threads", "tiktok"]);
+      const floor = candidateSourceKind && SOCIAL_KINDS.has(candidateSourceKind) ? 30 : 50;
       for (const pa of reasoning.perProject) {
-        if ((pa.relevanceScore ?? 0) < 50) continue;
+        if ((pa.relevanceScore ?? 0) < floor) continue;
         const project = projectsForReasoning.find((p) => p.slug === pa.projectSlug);
         if (project && !project.included) {
           console.warn(`[analyze] dropping match: project ${project.slug} not included`);
