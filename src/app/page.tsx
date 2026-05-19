@@ -199,8 +199,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ margin: 0, flex: 1 }}>What could you make better today?</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <h1 className="feed-title">
+          What could you make better today<span style={{ color: "var(--amber)" }}>?</span>
+        </h1>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
           <form action={runPipelineNow}>
             <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
@@ -304,23 +306,21 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
               return (
                 <div className="match" key={m.id}>
                   <div className="match-head">
-                    <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
-                    <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
-                    {/* Per-card project ref — when you've scrolled past the
-                        group header you can still tell which project this
-                        match belongs to. Click to focus the feed on that
-                        project. _general / _unknown groups don't render a
-                        project tag (the slug isn't meaningful). */}
+                    {/* Project tag FIRST so the user immediately sees which
+                        of their projects this match relates to, before
+                        the repo name. _general / _unknown groups don't get
+                        a tag (slug isn't meaningful). */}
                     {project && (
                       <a
                         href={`/?project=${slug}`}
-                        className="tag"
-                        style={{ background: "rgba(255,255,255,0.06)", color: "var(--dim, #aaa)", textDecoration: "none" }}
+                        className="tag project-tag"
                         title={`Show only ${slug} matches`}
                       >
                         📁 {slug}
                       </a>
                     )}
+                    <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
+                    <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
                     {m.discoveryMode === "re-checked" && bookmarkDate && (
                       <a
                         href="/?discovery=re-checked"

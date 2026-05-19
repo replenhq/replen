@@ -219,6 +219,30 @@ header .user a { padding: 0 4px; }
 }
 
 h1 { margin-top: 0; font-size: 24px; letter-spacing: -0.02em; }
+
+/* Feed-page hero title. Uses clamp() so it scales smoothly from phone (22px)
+   to desktop (30px) without per-breakpoint media-query overrides. The amber
+   accent on the question mark is applied inline at the call site. */
+.feed-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: clamp(22px, 5vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  color: var(--fg);
+}
+
+/* Per-card project chip. Subtle so it doesn't fight the repo title, but
+   visible enough to scan when you scroll past the group header. */
+.project-tag {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--dim);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.project-tag:hover { background: var(--surface-2); color: var(--fg); }
 h2 { font-size: 17px; color: var(--fg); }
 
 .match {
@@ -387,7 +411,6 @@ td.path {
 /* Mobile */
 @media (max-width: 720px) {
   main { padding: 12px 14px 48px; font-size: 14px; }
-  h1 { font-size: 20px; }
   h2 { font-size: 16px; }
 
   header {
@@ -397,13 +420,22 @@ td.path {
     font-size: 13px;
   }
   header a { margin: 2px 0; padding: 5px 10px; }
-  header .search input { width: 120px; }
+  /* Search input flex-shrinks so it doesn't push the counters off-screen
+     when there's not enough room. flex: 1 1 100px lets it claim leftover
+     space but contract down to ~100px when it has to. */
+  header .search { flex: 1 1 100px; min-width: 0; }
+  header .search input { width: auto; min-width: 0; flex: 1; }
   header .user { width: 100%; margin: 6px 0 0; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11px; }
 
+  .match { padding: 14px 14px; border-radius: 12px; }
   .match-head { gap: 6px; }
-  .match a.repo { display: block; width: 100%; margin-bottom: 2px; font-size: 15px; }
+  .match a.repo { display: block; width: 100%; margin-bottom: 2px; font-size: 15px; word-break: break-word; }
   .tag { font-size: 11px; padding: 1px 7px; }
   .meta { font-size: 11px; }
+  /* Long markdown writeups + code samples — prevent horizontal page scroll
+     from a single long URL or unbroken token. */
+  .writeup { overflow-wrap: break-word; word-break: break-word; }
+  .writeup code, .writeup pre { white-space: pre-wrap; word-break: break-all; }
 
   button, .btn { padding: 5px 10px; font-size: 12.5px; }
 
@@ -411,10 +443,16 @@ td.path {
   table th, table td { padding: 5px 6px; }
 
   iframe { max-width: 100% !important; }
-  pre { font-size: 12px; }
+  pre { font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+
+  /* Pipeline status log can have very long repo paths; let them wrap. */
+  .pipeline-log-line { word-break: break-word; overflow-wrap: break-word; }
 }
 
 @media (max-width: 380px) {
   main { padding: 10px; }
   header { margin: 8px 6px 12px; padding: 7px 10px; }
+  /* On very narrow screens the .feed-title + RefreshButton cluster needs
+     more breathing room — pull the title down a touch and stack tighter. */
+  .feed-title { font-size: clamp(20px, 6vw, 24px); }
 }

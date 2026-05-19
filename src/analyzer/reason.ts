@@ -94,7 +94,7 @@ WRITE IN PLAIN PROSE. NO markdown headers (no #, ##, ###). NO bold "Summary:" or
 PARAGRAPH BREAKS ARE REQUIRED. The intro, the bridge sentence, each numbered plug point, and the scoping paragraph must all be separated by a blank line (two newlines, \\n\\n).
 
 WRITING STYLE — applies to writeup, summary, whyUseful, suggestedUse, risks:
-- NO em dashes (—). NO en dashes (–). Use a hyphen (-), comma, or sentence break instead. Hyphens BETWEEN words (e.g. "drop-in", "cherry-pick") are fine.
+- NO em dashes (—). NO en dashes (–). Use a comma or sentence break instead. Hyphens between words (e.g. "drop-in", "cherry-pick", "co-operative") are fine because they're ASCII hyphens, not dashes; the ban is on unicode dashes only.
 - Vary paragraph lengths. Some sentences stand alone as a single-line paragraph; others group 2-3 sentences together. Avoid uniform walls of text.
 - Aim for visual rhythm: a punchy one-liner, then a longer paragraph, then another short one. Scannable.
 - Lead with the substance, not setup phrases ("It is worth noting that...", "This repository provides...").

@@ -60,7 +60,7 @@ A repo that scores low on #1 but high on #2 is still valuable. "Doesn't integrat
 WRITE IN PLAIN PROSE. NO markdown headers (no #, ##). NO bold "Summary:" labels. Use natural paragraphs separated by BLANK LINES (\\n\\n in the JSON string).
 
 WRITING STYLE — these rules apply to writeup, summary, whyUseful, suggestedUse, and risks:
-- NO em dashes (—). NO en dashes (–). Use a hyphen (-), comma, or sentence break instead. Hyphens BETWEEN words (e.g. "drop-in", "cherry-pick", "20-day") are fine.
+- NO em dashes (—). NO en dashes (–). Use a comma or a sentence break instead. Hyphens between words (e.g. "drop-in", "cherry-pick", "co-operative", "20-day") are fine because those are normal ASCII hyphens, not dashes; the ban is on unicode dashes only.
 - Vary paragraph lengths. Some sentences stand alone as a single-line paragraph. Others group 2-3 sentences. Avoid uniform 5-sentence walls of text.
 - Aim for visual rhythm: a punchy one-liner, then a longer paragraph, then another short one. Make the page scannable.
 - Start with the lede, not the setup. Don't open with "It is important to note that..." or "This repo provides...". Open with what the user actually needs to know.
@@ -297,12 +297,13 @@ export function scrubBannedVocab(s: string): string {
     .replace(/\boutcome\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Need" : "need"))
     .replace(/\bgoals\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Needs" : "needs"))
     .replace(/\bgoal\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Need" : "need"))
-    // Em/en dash → hyphen. The model loves these for parenthetical clauses
+    // Em/en dash → comma. The model loves these for parenthetical clauses
     // ("FooBar is a Python library — actively maintained — that does X").
-    // User prefers plain hyphens; downstream renderers don't always handle
-    // unicode dashes uniformly either. Convert " — " and " – " (with
-    // surrounding spaces) to " - "; also handle the no-space form just in
-    // case ("word—word" → "word-word").
-    .replace(/\s+[—–]\s+/g, " - ")
-    .replace(/[—–]/g, "-");
+    // User prefers natural sentence punctuation. Hyphens between words
+    // ("drop-in", "co-operative") stay untouched because those use the
+    // ASCII hyphen `-`, not the unicode em/en dash characters.
+    // The pattern consumes surrounding whitespace so " — " collapses to
+    // ", " (no double-space). The unspaced "word—word" form is rarer but
+    // covered too.
+    .replace(/\s*[—–]\s*/g, ", ");
 }
