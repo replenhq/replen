@@ -14,6 +14,7 @@ import { recordEvent } from "../scheduler/events";
 import { findClusters, type Cluster } from "./synthesis-cluster";
 import { synthesiseInsight, type SynthesisMatch, type SynthesisProjectContext } from "./synthesise-insight";
 import { LlmQuotaError } from "../analyzer/llm";
+import { resolveClusterProvider } from "../lib/llm-routing";
 import type { ProjectSummary } from "./summarize";
 import type { ProjectActivitySummary } from "./activity-summary";
 
@@ -75,6 +76,7 @@ export async function runSynthesis(runId: number, userId: number): Promise<{ ins
       slug: schema.projectProfiles.slug,
       name: schema.projectProfiles.name,
       sensitivity: schema.projectProfiles.sensitivity,
+      llmProvider: schema.projectProfiles.llmProvider,
       summaryJson: schema.projectProfiles.summaryJson,
       activityJson: schema.projectProfiles.activityJson,
     })
@@ -168,17 +170,21 @@ export async function runSynthesis(runId: number, userId: number): Promise<{ ins
     }
     synthMatches.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
 
-    // Collect project contexts for projects represented in this cluster.
+    // Collect project contexts + routing inputs for projects in this
+    // cluster. The provider decision honors per-project llmProvider
+    // overrides (a user can opt sensitive projects into DeepSeek
+    // without an Anthropic key) — see src/lib/llm-routing.ts.
     const slugsInCluster = new Set(synthMatches.map((m) => m.projectSlug).filter((s): s is string => !!s));
     const projectContexts: SynthesisProjectContext[] = [];
-    let clusterSensitivity: "low" | "high" = "low";
+    const routingInputs: { sensitivity?: string | null; llmProvider?: string | null }[] = [];
     for (const slug of slugsInCluster) {
       const p = projectBySlug.get(slug);
       if (!p) continue;
-      if (p.sensitivity === "high") clusterSensitivity = "high";
+      routingInputs.push({ sensitivity: p.sensitivity, llmProvider: p.llmProvider });
       const ctx = buildProjectContext(p);
       if (ctx) projectContexts.push(ctx);
     }
+    const clusterProvider = resolveClusterProvider(routingInputs);
 
     let result;
     try {
@@ -186,7 +192,7 @@ export async function runSynthesis(runId: number, userId: number): Promise<{ ins
         cluster,
         matches: synthMatches,
         projects: projectContexts,
-        sensitivity: clusterSensitivity,
+        provider: clusterProvider,
       });
     } catch (e) {
       if (e instanceof LlmQuotaError) throw e;

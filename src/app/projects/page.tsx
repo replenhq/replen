@@ -7,6 +7,7 @@ import { readUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 import { assessDocSparsity } from "@/projects/self-improvement";
 import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
+import { Icon } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -77,21 +78,24 @@ export default async function Projects() {
                   {needsRepo && (
                     <span
                       title="Replen reads this project via the GitHub API. Set the owner/repo on the right so Init #1 (activity matching), Init #2 (prune), and doc refresh can fire."
-                      style={{ marginLeft: 6, color: "var(--amber, #ffc857)", cursor: "help" }}
+                      style={{ marginLeft: 6, color: "var(--amber, #ffc857)", cursor: "help", display: "inline-flex", verticalAlign: "middle" }}
+                      aria-label="needs GitHub repo"
                     >
-                      ⚠
+                      <Icon name="warning" size={13} />
                     </span>
                   )}
                 </td>
                 <td>
                   <form className="inline" action={async () => { "use server"; await toggleIncluded(p.id, !p.included); }}>
-                    <button>{p.included ? "✓ in" : "-"}</button>
+                    <button>{p.included ? <><Icon name="check" size={11} /> in</> : "-"}</button>
                   </form>
                 </td>
                 <td>
                   <form className="inline" action={async () => { "use server"; await toggleSensitivity(p.id, p.sensitivity === "high" ? "low" : "high"); }}>
                     <button style={p.sensitivity === "high" ? { background: "#ffadad", color: "#1a1a1a" } : undefined}>
-                      {p.sensitivity === "high" ? "🔒 high" : "low"}
+                      {p.sensitivity === "high" ? (
+                        <><Icon name="shield" size={12} /> high</>
+                      ) : "low"}
                     </button>
                   </form>
                 </td>
@@ -162,13 +166,19 @@ export default async function Projects() {
 function renderDocsCell(p: typeof schema.projectProfiles.$inferSelect) {
   const sparsity = assessDocSparsity({ readmeMd: p.readmeMd, claudeMd: p.claudeMd });
   if (!sparsity.sparse) {
-    return <span title="Docs healthy">✓</span>;
+    return (
+      <span title="Docs healthy" style={{ display: "inline-flex", color: "var(--green, #6fce82)" }} aria-label="docs healthy">
+        <Icon name="check" size={14} />
+      </span>
+    );
   }
   const reasonTitle = `Sparse docs: ${sparsity.reasons.join("; ")}`;
   if (p.githubFullName) {
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={reasonTitle}>
-        <span style={{ color: "var(--amber, #ffc857)" }}>⚠</span>
+        <span style={{ display: "inline-flex", color: "var(--amber, #ffc857)" }} aria-label="sparse docs">
+          <Icon name="warning" size={13} />
+        </span>
         <OpenDocsPRButton projectId={p.id} projectRepo={p.githubFullName} variant="compact" />
       </span>
     );
@@ -177,9 +187,9 @@ function renderDocsCell(p: typeof schema.projectProfiles.$inferSelect) {
     <a
       href={`/projects/${p.slug}`}
       title={`${reasonTitle}. Set this project's GitHub repo on /projects/${p.slug} to enable the docs PR action.`}
-      style={{ color: "var(--amber, #ffc857)", textDecoration: "none", fontSize: 12 }}
+      style={{ color: "var(--amber, #ffc857)", textDecoration: "none", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
     >
-      ⚠ set repo
+      <Icon name="warning" size={12} /> set repo
     </a>
   );
 }

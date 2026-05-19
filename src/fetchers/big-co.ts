@@ -25,7 +25,14 @@ export const BIG_CO_OWNERS = new Set<string>([
 
 // Drop anything above this star count as "established, not under-the-radar".
 // The whole point of the digest is *new* projects worth knowing about.
-export const STAR_CEILING = parseInt(process.env.REPLEN_STAR_CEILING ?? "30000", 10);
+//
+// Raised from 30k → 120k 2026-05-19. The original 30k cap predated the
+// 2025-26 era where viral AI/dev-tooling repos routinely cross 100k stars
+// in days (e.g. github/spec-kit hit 100k+ within its first week). At 30k
+// we were filtering out projects that are genuinely new + worth surfacing,
+// not big-co-tax projects (isBigCoOwner handles that orthogonally).
+// REPLEN_STAR_CEILING env still wins for ops tuning.
+export const STAR_CEILING = parseInt(process.env.REPLEN_STAR_CEILING ?? "120000", 10);
 
 export function isBigCoOwner(owner: string): boolean {
   return BIG_CO_OWNERS.has(owner.toLowerCase());

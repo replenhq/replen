@@ -9,27 +9,35 @@ type InsightWithEvidence = Insight & {
 };
 
 // Initiative #3: surfaces synthesised meta-insights above the per-project
-// match list. Server component — relies on server-action forms for star /
-// hide, same pattern as match cards.
+// match list. Two-level disclosure to keep the feed scannable:
 //
-// Visual: a "This week's insights" header followed by 1-N cards. Hidden
-// insights are filtered upstream; this component only renders the live
-// ones. Starred sort first, then unread by recency.
+//   1. Outer <details> "This week's insights · N · click to expand"
+//      collapsed by default. One click reveals the title list.
+//   2. Each insight is its own <details> whose summary is the head row
+//      (kind + project + themes + match count) plus the title. Click
+//      to expand body + evidence + actions.
+//
+// Bodies can be 200-400 words each; collapsing twice means the user
+// reads at most one full body at a time and can scan titles cheaply.
+// Native <details> means no JS state, no client component required.
 export function InsightsStrip({ insights }: { insights: InsightWithEvidence[] }) {
   if (insights.length === 0) return null;
 
   return (
-    <section className="insights-strip">
-      <h2 className="insights-strip-heading">
-        <span>This week’s insights</span>
-        <span className="meta" style={{ fontWeight: 400, marginLeft: 8 }}>
-          {insights.length}
+    <details className="insights-strip">
+      <summary className="insights-strip-summary">
+        <span className="insights-strip-label">
+          <Icon name="sparkles" /> This week&rsquo;s insights
         </span>
-      </h2>
-      {insights.map((i) => (
-        <InsightCard key={i.id} insight={i} />
-      ))}
-    </section>
+        <span className="insights-strip-count">{insights.length}</span>
+        <span className="insights-strip-hint">click to expand</span>
+      </summary>
+      <div className="insights-list">
+        {insights.map((i) => (
+          <InsightCard key={i.id} insight={i} />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -37,26 +45,24 @@ function InsightCard({ insight }: { insight: InsightWithEvidence }) {
   const isStarred = insight.userStatus === "starred";
   const themes = parseThemes(insight.themes);
   return (
-    <article className="insight">
-      <div className="insight-head">
-        <span className={`tag insight-kind insight-kind-${insight.kind}`} title={kindTitle(insight.kind)}>
-          {kindLabel(insight.kind)}
-        </span>
-        {insight.primaryProjectSlug && (
-          <a
-            href={`/?project=${insight.primaryProjectSlug}`}
-            className="tag project-tag"
-            title={`Show only ${insight.primaryProjectSlug} matches`}
-          >
-            📁 {insight.primaryProjectSlug}
-          </a>
-        )}
-        {themes.slice(0, 4).map((t) => (
-          <span key={t} className="tag" style={{ fontFamily: "ui-monospace, monospace" }}>{t}</span>
-        ))}
-        <span className="meta">{insight.evidence.length} match{insight.evidence.length === 1 ? "" : "es"}</span>
-      </div>
-      <h3 className="insight-title">{insight.title}</h3>
+    <details className="insight">
+      <summary className="insight-summary">
+        <div className="insight-head">
+          <span className={`tag insight-kind insight-kind-${insight.kind}`} title={kindTitle(insight.kind)}>
+            <KindIcon kind={insight.kind} /> {kindLabel(insight.kind)}
+          </span>
+          {insight.primaryProjectSlug && (
+            <span className="tag project-tag" title={`Project: ${insight.primaryProjectSlug}`}>
+              <Icon name="folder" /> {insight.primaryProjectSlug}
+            </span>
+          )}
+          {themes.slice(0, 3).map((t) => (
+            <span key={t} className="tag" style={{ fontFamily: "ui-monospace, monospace" }}>{t}</span>
+          ))}
+          <span className="meta">{insight.evidence.length} match{insight.evidence.length === 1 ? "" : "es"}</span>
+        </div>
+        <h3 className="insight-title">{insight.title}</h3>
+      </summary>
       <div className="insight-body">{insight.bodyMd}</div>
       {insight.evidence.length > 0 && (
         <details className="insight-evidence">
@@ -96,15 +102,22 @@ function InsightCard({ insight }: { insight: InsightWithEvidence }) {
           </button>
         </form>
       </div>
-    </article>
+    </details>
   );
 }
 
 function kindLabel(kind: string): string {
-  if (kind === "topic") return "✨ Topic";
-  if (kind === "cross-project") return "🔀 Cross-project";
-  if (kind === "approach") return "🧭 Approach";
+  if (kind === "topic") return "Topic";
+  if (kind === "cross-project") return "Cross-project";
+  if (kind === "approach") return "Approach";
   return kind;
+}
+
+function KindIcon({ kind }: { kind: string }) {
+  if (kind === "topic") return <Icon name="sparkles" />;
+  if (kind === "cross-project") return <Icon name="split" />;
+  if (kind === "approach") return <Icon name="compass" />;
+  return null;
 }
 
 function kindTitle(kind: string): string {

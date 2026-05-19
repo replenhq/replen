@@ -91,20 +91,17 @@ export type PruneInput = {
   activity: ProjectActivitySummary | null;
   dep: { name: string; version: string; ecosystem: string };
   health: UpstreamHealth;
-  sensitivity: "low" | "high";
+  // Pre-resolved by resolveProvider — honors the project's llmProvider
+  // override (auto / deepseek / anthropic). Was previously raw
+  // sensitivity which ignored explicit user overrides.
+  provider: "deepseek" | "anthropic";
 };
 
 export async function suggestPrune(input: PruneInput): Promise<PruneVerdict | null> {
-  // Sensitivity gate.
-  let provider: "deepseek" | "anthropic";
-  if (input.sensitivity === "high") {
-    if (!hasAnthropicKey()) {
-      console.warn(`[prune] ${input.projectSlug}/${input.dep.name}: high-sensitivity but no Anthropic key — skipping`);
-      return null;
-    }
-    provider = "anthropic";
-  } else {
-    provider = "deepseek";
+  const provider = input.provider;
+  if (provider === "anthropic" && !hasAnthropicKey()) {
+    console.warn(`[prune] ${input.projectSlug}/${input.dep.name}: provider=anthropic but no Anthropic key — skipping`);
+    return null;
   }
   const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 

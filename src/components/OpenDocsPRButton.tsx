@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { openDocsImprovementPR } from "@/app/actions";
+import { Icon } from "./Icons";
 
 type State =
   | { kind: "idle" }
@@ -48,16 +49,16 @@ export function OpenDocsPRButton({
   if (state.kind === "success") {
     const shortPath = state.prUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "");
     return (
-      <span style={{ fontSize: compact ? 11 : 13 }}>
-        ✓ <a href={state.prUrl} target="_blank" rel="noreferrer">{compact ? "PR opened" : shortPath}</a>
+      <span style={{ fontSize: compact ? 11 : 13, display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Icon name="check" size={compact ? 12 : 14} />
+        <a href={state.prUrl} target="_blank" rel="noreferrer">{compact ? "PR opened" : shortPath}</a>
       </span>
     );
   }
 
-  const label = compact
-    ? (state.kind === "pending" ? "Opening…" : "✏ docs PR")
-    : (state.kind === "pending" ? "Opening…" : `Open docs PR on ${projectRepo}`);
   const buttonStyle = compact ? { padding: "1px 8px", fontSize: 11 } : undefined;
+  const compactLabel = state.kind === "pending" ? "Opening…" : "docs PR";
+  const defaultLabel = state.kind === "pending" ? "Opening…" : `Open docs PR on ${projectRepo}`;
 
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -69,11 +70,12 @@ export function OpenDocsPRButton({
         style={buttonStyle}
         title={compact ? `Open a docs improvement PR on ${projectRepo}` : undefined}
       >
-        {label}
+        {compact ? <Icon name="pencil" size={11} /> : null}
+        {compact ? compactLabel : defaultLabel}
       </button>
       {state.kind === "error" && (
-        <span style={{ fontSize: compact ? 11 : 13, color: "var(--amber, #ffc857)" }} title={state.reason}>
-          ✗
+        <span style={{ display: "inline-flex", color: "var(--amber, #ffc857)" }} title={state.reason} aria-label={state.reason}>
+          <Icon name="warning" size={compact ? 11 : 13} />
         </span>
       )}
     </span>

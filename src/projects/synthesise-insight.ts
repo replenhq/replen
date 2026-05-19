@@ -43,7 +43,10 @@ export type SynthesisInput = {
   cluster: Cluster;
   matches: SynthesisMatch[];        // ordered by relevanceScore desc
   projects: SynthesisProjectContext[]; // projects touched by this cluster
-  sensitivity: "low" | "high";       // routes provider
+  // Pre-resolved by resolveClusterProvider — caller honors per-project
+  // llmProvider overrides so a user can opt sensitive projects into
+  // DeepSeek without paying for an Anthropic key.
+  provider: "deepseek" | "anthropic";
 };
 
 export type SynthesisOutput = {
@@ -90,15 +93,10 @@ OUTPUT JSON ONLY:
 // One LLM call. Returns null on parse / quota-recoverable failure;
 // throws LlmQuotaError so the run-level catch can pause the pipeline.
 export async function synthesiseInsight(input: SynthesisInput): Promise<SynthesisOutput | null> {
-  let provider: "deepseek" | "anthropic";
-  if (input.sensitivity === "high") {
-    if (!hasAnthropicKey()) {
-      console.warn(`[synth] cluster kind=${input.cluster.kind} matches=${input.cluster.matchIds.length}: high-sensitivity but no Anthropic key, skipping`);
-      return null;
-    }
-    provider = "anthropic";
-  } else {
-    provider = "deepseek";
+  const provider = input.provider;
+  if (provider === "anthropic" && !hasAnthropicKey()) {
+    console.warn(`[synth] cluster kind=${input.cluster.kind} matches=${input.cluster.matchIds.length}: provider=anthropic but no Anthropic key, skipping`);
+    return null;
   }
   const model = provider === "anthropic" ? reasoningModelHigh() : reasoningModel();
 

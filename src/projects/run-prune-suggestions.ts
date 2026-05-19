@@ -22,6 +22,7 @@ import {
   cacheKey,
 } from "./dep-health";
 import { suggestPrune, tierForVerdict, approachForVerdict, type PruneVerdict } from "./prune-suggester";
+import { resolveProvider } from "../lib/llm-routing";
 import type { ProjectActivitySummary } from "./activity-summary";
 import type { ProjectSummary } from "./summarize";
 import { LlmQuotaError } from "../analyzer/llm";
@@ -184,7 +185,7 @@ export async function runPruneSuggestions(runId: number, userId: number, ghToken
           activity: activitySummary,
           dep: { name: dep.name, version: dep.version, ecosystem: dep.ecosystem },
           health,
-          sensitivity: (p.sensitivity as "low" | "high") ?? "low",
+          provider: resolveProvider({ sensitivity: p.sensitivity, llmProvider: p.llmProvider }),
         });
       } catch (e) {
         if (e instanceof LlmQuotaError) throw e;

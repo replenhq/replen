@@ -9,6 +9,8 @@ import { Icon } from "@/components/Icons";
 import { LivePipelineStatus } from "@/components/LivePipelineStatus";
 import { RefreshButton } from "@/components/RefreshButton";
 import { InsightsStrip } from "@/components/InsightsStrip";
+import { SparseDocsCards, buildSparseProject, type SparseProject } from "@/components/SparseDocsCards";
+import { assessDocSparsity } from "@/projects/self-improvement";
 import { formatTimestampToMinute } from "@/lib/format-date";
 import type { CSSProperties } from "react";
 
@@ -243,6 +245,34 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       });
     }
   }
+  // Sparse-docs feed cards: list every active+included project whose
+  // README/CLAUDE.md combo is too thin to drive accurate matching, so
+  // the user can issue a docs-improvement PR right from the feed instead
+  // of having to remember to visit /projects after seeing the streamer
+  // line scroll past. Same assessment the streamer uses; one query,
+  // pure-CPU.
+  const userActiveProjects = await db
+    .select({
+      id: schema.projectProfiles.id,
+      slug: schema.projectProfiles.slug,
+      name: schema.projectProfiles.name,
+      readmeMd: schema.projectProfiles.readmeMd,
+      claudeMd: schema.projectProfiles.claudeMd,
+      githubFullName: schema.projectProfiles.githubFullName,
+    })
+    .from(schema.projectProfiles)
+    .where(and(
+      eq(schema.projectProfiles.userId, user.id),
+      eq(schema.projectProfiles.active, true),
+      eq(schema.projectProfiles.included, true),
+    ));
+  const sparseProjects: SparseProject[] = [];
+  for (const p of userActiveProjects) {
+    const a = assessDocSparsity({ readmeMd: p.readmeMd, claudeMd: p.claudeMd });
+    if (a.sparse) sparseProjects.push(buildSparseProject(p, a.reasons));
+  }
+  sparseProjects.sort((a, b) => a.slug.localeCompare(b.slug));
+
   const insights = insightRows.map((i) => {
     let ids: number[] = [];
     try { ids = (JSON.parse(i.evidenceMatchIds) as number[]).filter((n) => Number.isFinite(n)); }
@@ -332,6 +362,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
         </div>
       )}
+      <SparseDocsCards projects={sparseProjects} />
       <InsightsStrip insights={insights} />
       <FilterBar
         relFilter={relFilter}
@@ -372,7 +403,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                 <a href={`/?project=${slug}`} style={{ color: "inherit", textDecoration: "none" }}>{slug}</a>
                 <span className="meta" style={{ marginLeft: 8, fontWeight: 400 }}>
                   {list.length} {list.length === 1 ? "match" : "matches"}
-                  {project?.sensitivity === "high" && " · 🔒 sensitive"}
+                  {project?.sensitivity === "high" && (
+                    <> · <span style={{ display: "inline-flex", verticalAlign: "middle", marginRight: 2 }}><Icon name="shield" size={12} /></span>sensitive</>
+                  )}
                 </span>
               </h2>
             )}
@@ -404,7 +437,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         className="tag project-tag"
                         title={`Show only ${slug} matches`}
                       >
-                        📁 {slug}
+                        <Icon name="folder" /> {slug}
                       </a>
                     )}
                     {project && activityActive && (
@@ -414,7 +447,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         style={{ background: "var(--amber-soft)", color: "var(--amber)", borderColor: "var(--amber-line)", textDecoration: "none" }}
                         title="This project had live activity context (recent commits/PRs/TODOs) when the match was scored. The reasoner graded this repo against what you're currently building, not just the static README."
                       >
-                        ⚡ vs current work
+                        <Icon name="zap" /> vs current work
                       </a>
                     )}
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
@@ -619,8 +652,9 @@ function PersonalNote({ matchId, value }: { matchId: number; value: string }) {
   // there's content saves a click to remind yourself why you flagged it.
   return (
     <details open={!!value} style={{ marginTop: 8 }}>
-      <summary style={{ cursor: "pointer", fontSize: 12, color: "#666" }}>
-        {value ? "📝 note (saved)" : "📝 add a personal note"}
+      <summary style={{ cursor: "pointer", fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 4 }}>
+        <Icon name="pencil" size={12} />
+        {value ? "note (saved)" : "add a personal note"}
       </summary>
       <form
         action={async (form: FormData) => {
