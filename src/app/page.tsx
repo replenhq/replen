@@ -351,6 +351,28 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         Scouted
                       </a>
                     )}
+                    {m.discoveryMode === "prune" && (
+                      <a
+                        href="/?discovery=prune"
+                        className="tag"
+                        style={{ background: "#fef2f2", color: "#991b1b", textDecoration: "none" }}
+                        title="Flagged dependency: Replen detected this dep is stale, dead, or archived upstream. Click to show only prune suggestions."
+                      >
+                        🪓 Prune
+                      </a>
+                    )}
+                    {/* For prune matches, show the target dep + action prominently so
+                        the user can scan "drop moment" vs "replace moment with date-fns"
+                        at a glance. This pill goes right after the Prune badge. */}
+                    {m.discoveryMode === "prune" && m.prunedDepName && (
+                      <span
+                        className="tag"
+                        style={{ background: "rgba(255,255,255,0.04)", color: "var(--dim)", fontFamily: "ui-monospace, monospace" }}
+                        title={`Ecosystem: ${m.prunedDepEcosystem ?? "?"}${m.prunedDepVersion ? ` · constraint: ${m.prunedDepVersion}` : ""}`}
+                      >
+                        {m.prunedDepAction === "replace" ? "replace" : "drop"} <strong style={{ color: "var(--fg)" }}>{m.prunedDepName}</strong>
+                      </span>
+                    )}
                     {/* Suppress "via gh-targeted" — redundant with the Scouted pill.
                         For discovered/re-checked, the source (gh-trending / hn / tiktok / etc.) is
                         actually useful information so keep showing it. */}

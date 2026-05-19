@@ -261,6 +261,13 @@ export const projectProfiles = sqliteTable(
     activityJson: text("activity_json"),
     activityGeneratedAt: integer("activity_generated_at", { mode: "timestamp" }),
     activityHeadSha: text("activity_head_sha"),
+    // Initiative #2: per-project cached dep health probe. JSON blob keyed
+    // by ecosystem-qualified dep name ("npm:moment", "cargo:serde") with
+    // upstream-health metadata (last_push, archived, etc.). Refreshed
+    // weekly because deps don't go stale daily; faster TTL would just
+    // burn GH API quota.
+    depHealthJson: text("dep_health_json"),
+    depHealthGeneratedAt: integer("dep_health_generated_at", { mode: "timestamp" }),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),
     sensitivity: text("sensitivity").notNull().default("low"),
@@ -342,12 +349,23 @@ export const matches = sqliteTable(
     //                  reserved, not yet used by any insert path.
     // Renamed 2026-05-18 by migration 0027 to use plainer English vocabulary
     // on the UI pill. See docs/stage-5-scope.md and docs/bookmark-resurface-scope.md.
-    discoveryMode: text("discovery_mode"), // 'scouted' | 'discovered' | 're-checked' | 'manual'
+    discoveryMode: text("discovery_mode"), // 'scouted' | 'discovered' | 're-checked' | 'manual' | 'prune'
     // Resurface back-link: when a bookmarked general-awareness match
     // re-surfaces as a fit for a different project, the new row references
     // the original starred match. The UI uses this to render the "saved on
     // <date>" chip linking back to the bookmark.
     resurfacedFromMatchId: integer("resurfaced_from_match_id"),
+    // Initiative #2: prune matches recommend dropping or replacing one of
+    // the project's existing dependencies. repoId points at the suggested
+    // replacement (or the targeted dep's own repo when the action is just
+    // "drop"). These columns identify which dep is being targeted so the
+    // UI can render it and the handoff PR can write the right `npm
+    // uninstall` / `cargo remove` / etc. command. Null for non-prune
+    // matches.
+    prunedDepName: text("pruned_dep_name"),
+    prunedDepEcosystem: text("pruned_dep_ecosystem"), // 'npm' | 'python' | 'cargo' | 'go'
+    prunedDepAction: text("pruned_dep_action"),       // 'drop' | 'replace'
+    prunedDepVersion: text("pruned_dep_version"),     // raw version string from the manifest
   },
   (t) => ({
     idxRepoProject: index("idx_match_repo_project").on(t.repoId, t.projectId),

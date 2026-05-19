@@ -16,6 +16,7 @@ import {
 } from "../projects/search-vectors";
 import { probeActivity } from "../projects/activity";
 import { summariseActivity, needsActivityRefresh } from "../projects/activity-summary";
+import { runPruneSuggestions } from "../projects/run-prune-suggestions";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 import { readUserSecret } from "../lib/user-secrets";
@@ -149,6 +150,17 @@ async function executePipeline(
     const analysis = await runAnalysis(runId, userId, cfg);
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;
+    // Initiative #2: prune suggestions for stale dependencies. Runs after
+    // analysis so prune matches show up in the same digest email as the
+    // discovery + scouted matches. Failures are logged but never poison
+    // the run — the regular feed has already shipped by now.
+    try {
+      const pruneResult = await runPruneSuggestions(runId, userId);
+      matchesCreated += pruneResult.matchesCreated;
+    } catch (e) {
+      if (e instanceof LlmQuotaError) throw e;
+      console.warn(`[pipeline] user=${userId} prune suggestions failed:`, e);
+    }
     emailSent = await sendDigestEmail(runId, userId, cfg);
     // Real-time webhook for `high` matches. Failures are logged but don't
     // poison the run - email is the canonical delivery. The URL is stored

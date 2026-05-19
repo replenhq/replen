@@ -7,6 +7,7 @@ import { assessDocHealth, type DocHealth } from "@/projects/doc-health";
 import type { ProjectSummary } from "@/projects/summarize";
 import type { ProjectSearchVectors } from "@/projects/search-vectors";
 import type { ProjectActivitySummary } from "@/projects/activity-summary";
+import type { DepHealthCache, UpstreamHealth } from "@/projects/dep-health";
 import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
 import { RecomputeSummaryButton } from "@/components/RecomputeSummaryButton";
 
@@ -38,6 +39,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
   const summary = parseSummary(project.summaryJson);
   const vectors = parseVectors(project.searchVectorsJson);
   const activity = parseActivity(project.activityJson);
+  const depHealth = parseDepHealth(project.depHealthJson);
   const sparsity = assessDocSparsity(project);
   const docHealth = await assessDocHealth(project.path);
   const hasGithubName = !!project.githubFullName;
@@ -60,6 +62,7 @@ export default async function ProjectView({ params }: { params: Promise<{ slug: 
 
       {summary && <SummaryCard summary={summary} project={project} />}
       {activity && <ActivityCard activity={activity} generatedAt={project.activityGeneratedAt} />}
+      {depHealth && <DepHealthCard cache={depHealth} generatedAt={project.depHealthGeneratedAt} />}
       {vectors && <VectorsCard vectors={vectors} project={project} />}
       {!summary && docHealth.verdict !== "sparse" && (
         <div style={{ margin: "12px 0", padding: "12px 16px", border: "1px solid var(--line, rgba(255,255,255,0.1))", borderRadius: 10 }}>
@@ -216,6 +219,113 @@ function parseActivity(raw: string | null): ProjectActivitySummary | null {
   } catch {
     return null;
   }
+}
+
+function parseDepHealth(raw: string | null): DepHealthCache | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as DepHealthCache;
+  } catch {
+    return null;
+  }
+}
+
+// Stale-dependency panel. Lists every dep the upstream-health probe
+// flagged (stale / dead / archived) so the user has full visibility
+// into what Replen is considering for pruning — even before the LLM
+// produces match writeups for them. The matches feed shows individual
+// recommendations; this card shows the universe.
+function DepHealthCard({
+  cache,
+  generatedAt,
+}: {
+  cache: DepHealthCache;
+  generatedAt: Date | null;
+}) {
+  const flagged = Object.values(cache.entries).filter(
+    (h) => h.verdict === "stale" || h.verdict === "dead" || h.verdict === "archived",
+  );
+  if (flagged.length === 0) {
+    return (
+      <div
+        style={{
+          margin: "12px 0",
+          padding: "12px 16px",
+          border: "1px dashed var(--line, rgba(255,255,255,0.1))",
+          borderRadius: 10,
+          fontSize: 13,
+          color: "var(--dim)",
+        }}
+      >
+        <strong style={{ color: "var(--fg)" }}>Dependency health</strong>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          all fresh
+          {generatedAt && <> · checked {formatAge(generatedAt)}</>}
+        </span>
+      </div>
+    );
+  }
+  // Sort: archived first, then dead, then stale; within each, oldest-push first.
+  const order: Record<UpstreamHealth["verdict"], number> = { archived: 0, dead: 1, stale: 2, fresh: 3, unresolved: 4 };
+  const sorted = flagged
+    .slice()
+    .sort((a, b) => {
+      const o = order[a.verdict] - order[b.verdict];
+      if (o !== 0) return o;
+      return (b.daysSinceLastPush ?? 0) - (a.daysSinceLastPush ?? 0);
+    });
+  return (
+    <div
+      style={{
+        margin: "12px 0",
+        padding: "16px 20px",
+        border: "1px solid rgba(239, 68, 68, 0.25)",
+        background: "rgba(239, 68, 68, 0.04)",
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+        <h2 style={{ margin: 0, fontSize: 16, color: "#fca5a5" }}>Dependency health</h2>
+        <span className="meta" style={{ fontSize: 12 }}>
+          {flagged.length} flagged
+          {generatedAt && <> · checked {formatAge(generatedAt)}</>}
+        </span>
+      </div>
+      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        {sorted.map((h) => (
+          <li
+            key={`${h.ecosystem}:${h.depName}`}
+            style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px dashed rgba(255,255,255,0.05)" }}
+          >
+            <code style={{ fontSize: 13, color: "var(--fg)", minWidth: 0, overflowWrap: "anywhere" }}>{h.depName}</code>
+            <span
+              className="tag"
+              style={{
+                fontSize: 11,
+                background:
+                  h.verdict === "archived" ? "rgba(239,68,68,0.15)" :
+                  h.verdict === "dead" ? "rgba(239,68,68,0.10)" :
+                  "rgba(250,204,21,0.10)",
+                color:
+                  h.verdict === "archived" || h.verdict === "dead" ? "#fca5a5" : "#facc15",
+              }}
+            >
+              {h.verdict}
+            </span>
+            <span className="meta" style={{ fontSize: 11 }}>
+              {h.ecosystem} · {h.daysSinceLastPush !== null ? `${h.daysSinceLastPush}d since last push` : "no push date"}
+              {h.githubFullName && (
+                <> · <a href={`https://github.com/${h.githubFullName}`} target="_blank" rel="noreferrer">{h.githubFullName}</a></>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="meta" style={{ fontSize: 11, marginTop: 10 }}>
+        Replen will produce individual prune recommendations (drop / replace) for each of these in the feed as the LLM works through them.
+      </p>
+    </div>
+  );
 }
 
 // "Currently building" panel. Shows what the pipeline detected the user
