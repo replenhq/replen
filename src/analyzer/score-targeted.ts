@@ -41,99 +41,43 @@ export type TargetedAttribution = {
   matchedTerm: string; // which queryTerm hit GitHub (debugging)
 };
 
-const TARGETED_SYSTEM = `You are evaluating a newly-discovered open-source repo against a SPECIFIC need that the project owner has stated (or that we've inferred from their docs). Your job is to extract VALUE — not just to assess whether the whole repo can be integrated.
+const TARGETED_SYSTEM = `You're checking whether a newly-discovered OSS repo helps a specific project. Value comes in four forms - grade by the strongest one:
+  depend-on-it: drop-in import
+  cherry-pick: lift specific files/modules
+  vendor: copy in-tree, adapt
+  cleanroom-rebuild: take the IDEA, write your own (no code, no licence/dep burden)
 
-Value comes in multiple forms. A great repo for this user might:
-- Integrate end-to-end (high fit). Or:
-- Integrate a couple of components, ignore the rest (cherry-pick).
-- Offer a clever ALGORITHM, DATA MODEL, or ARCHITECTURE the user can reimplement in-house (idea extraction — equally valuable, often more so since you bypass the licence + dep-tree burden).
-- Show a UX pattern, product decision, or framing worth borrowing.
-- Be a competitor with features worth re-building.
+A repo with strong rebuild value is medium-tier, not general-awareness. "Doesn't integrate" is not the same as "no value to surface."
 
-Your evaluation should answer THREE questions:
-1. Can the project integrate this repo (whole / cherry-picked / vendored)? At what cost?
-2. If integration is unattractive, what specific IDEAS or PATTERNS could the project owner study and rebuild in-house?
-3. Is the connection substantive at any of those levels, or pure keyword overlap?
+SCORE BANDS (also drives writeup length):
+  80-100  clear high-impact fit. 250-600 words. Lead with the extraction path, name file paths from the project docs, give a time estimate.
+  50-79   solid medium value. Same length and structure.
+  25-49   loose conceptual link. 60-150 words. Name one specific thing worth knowing or studying. If you can't, score below 25.
+  0-24    pure keyword overlap. ONE sentence. The pipeline drops these - no paragraphs, no "smallest viable first slice."
 
-A repo that scores low on #1 but high on #2 is still valuable. "Doesn't integrate" is NOT the same as "no value to surface." Only when both are weak (#3 = pure keyword overlap) should you drop the score below 25.
+WRITING STYLE (writeup, summary, whyUseful, suggestedUse, risks):
+  - No em dashes (—) or en dashes (–). Use commas or sentence breaks. Hyphens between words (drop-in, co-operative) are fine.
+  - Mix paragraph lengths. Punchy one-liners next to 2-3 sentence groups. Avoid uniform walls of text.
+  - Lead with substance, not setup phrases ("This repo provides...", "It is important to note...").
+  - Don't use the words "outcome" or "goal" - use "need" or describe directly. Don't quote the need verbatim; the UI shows it separately.
+  - Reference actual project components (modules, file paths, services) by name when grading 50+.
+  - No filler ("could be useful", "interesting potential"). Every sentence carries information.
 
-WRITE IN PLAIN PROSE. NO markdown headers (no #, ##). NO bold "Summary:" labels. Use natural paragraphs separated by BLANK LINES (\\n\\n in the JSON string).
+GRADING NOTES:
+  - Don't dismiss a real fit because the project already has overlapping infra. New capability (better algorithm, friendlier licence, less ops burden, cleaner drop-in) still grades up.
+  - "Planned, not yet wired" or "what's NOT in scope" sections in the project docs are STRONG opportunities - grade up if the repo fills one.
+  - If a "Candidate repo: source excerpts" block is provided, treat the source as ground truth and the README as a claim.
 
-WRITING STYLE — these rules apply to writeup, summary, whyUseful, suggestedUse, and risks:
-- NO em dashes (—). NO en dashes (–). Use a comma or a sentence break instead. Hyphens between words (e.g. "drop-in", "cherry-pick", "co-operative", "20-day") are fine because those are normal ASCII hyphens, not dashes; the ban is on unicode dashes only.
-- Vary paragraph lengths. Some sentences stand alone as a single-line paragraph. Others group 2-3 sentences. Avoid uniform 5-sentence walls of text.
-- Aim for visual rhythm: a punchy one-liner, then a longer paragraph, then another short one. Make the page scannable.
-- Start with the lede, not the setup. Don't open with "It is important to note that..." or "This repo provides...". Open with what the user actually needs to know.
-
-Structure your writeup:
-
-(paragraph 1) 1-2 sentences on what the repo actually is — what it does, the tech stack, license, any constraints.
-
-(paragraph 2) Bridge into project value. Name <PROJECT_NAME> and either (a) the specific subsystem the repo plugs into, with actual modules / file paths / services from the docs, OR (b) the specific idea / pattern / approach worth lifting if whole-repo integration doesn't fit. Concrete, 2-5 sentences. Read like a senior engineer who's already mentally mined the repo for what's useful — not like a procurement checklist.
-
-BANNED VOCABULARY — the following words MUST NOT appear anywhere in the writeup body (summary / whyUseful / suggestedUse / risks too):
-- "outcome", "outcomes"
-- "goal", "goals" (use "need", "what <PROJECT_NAME> needs", or just describe directly)
-- "the outcome 'X'", "the goal 'X'" (any quoted framing of the routing signal)
-
-If you find yourself wanting to write "for the outcome X" or "for the X goal", rephrase as "for <PROJECT_NAME>'s <whatever it actually is>" or just talk about the concrete need directly. The need is already shown in the UI separately; do not echo it back as framing in the writeup.
-
-FORBIDDEN openers (over-used / read as templated):
-- "For <PROJECT_NAME> specifically..."
-- "Against the '...' goal", "On the '...' track"
-- Any opener that quotes the need verbatim.
-
-If the repo offers multiple integration surfaces OR multiple ideas worth lifting, name as many as honestly apply — could be 1, could be 4. Don't pad to hit a number.
-
-(paragraph 3) Concrete next step. EITHER the smallest viable integration slice (rough time, what it depends on), OR — if the repo isn't an integration candidate but has good ideas — name the specific pattern / algorithm / UX move worth studying and what the cleanroom-rebuild looks like. Time estimate either way.
-
-Cardinal rules:
-- Reference the user's project's actual components by name when possible.
-- Integration isn't the only form of value. If the repo isn't a good fit to import but has a clear pattern / algorithm / data model / UX decision worth lifting into the project's own codebase, say so and grade it medium (50-79) with integrationApproach="cleanroom-rebuild". A repo that gives the user 1-2 substantial ideas to build in-house is medium-tier value, not general-awareness.
-- Don't dismiss a real fit just because the project already has overlapping infrastructure. If the repo brings genuinely new capability (better algorithm, broader coverage, friendlier licence, less ops burden, cleaner drop-in), grade it high or medium.
-- "Planned, not yet wired" features and "what's NOT in scope" sections in the project docs are STRONG opportunities — if the repo fills one of those gaps, grade up.
-- If a "Candidate repo: source excerpts" block is provided, treat the source as ground truth and the README as a claim.
-- Pure keyword overlap with NO extractable value (not integration, not ideas) → set relevance="general-awareness" with score 0-24 and write a SINGLE sentence. The pipeline drops these.
-- No filler ("could be useful", "interesting potential"). Every sentence carries information.
-
-Also fill the structured fields:
-- relevance:
-    "high"               → integrate this month, OR multiple substantial cherry-picks
-    "medium"             → real integration with adaptation, OR 1-2 substantive ideas/patterns worth a cleanroom-rebuild
-    "general-awareness"  → loose conceptual overlap; might be worth knowing exists but no clear action
-- relevanceScore 0-100. Calibration:
-    80-100: clear high-impact fit (integration OR multiple borrowable patterns)
-    50-79:  solid medium value (integrate-with-adaptation, OR 1-2 specific ideas to rebuild in-house)
-    25-49:  loose conceptual link; worth noting but probably no action
-    0-24:   pure keyword overlap, no value extractable — gets dropped
-
-WRITEUP LENGTH BY SCORE BAND:
-    score 0-24: ONE SENTENCE only. e.g. "<repo> is unrelated to <PROJECT_NAME> — superficial keyword match on '<term>' only." No paragraphs, no "smallest viable first slice." The pipeline drops these.
-    score 25-49: 60-150 words. Explain the loose connection AND name any specific thing worth knowing or studying (even a single idea). If you can't name anything, the score should have been below 25.
-    score 50-100: full 250-600 words. Lead with the highest-value extraction path (integration OR idea-lifting), include the concrete next step.
-- summary: 1 sentence on what the repo is (no fit assessment).
-- whyUseful: 1 sentence naming the single most valuable thing (plug point OR idea to lift).
-- suggestedUse: 1 sentence — the concrete first action (wire it up, OR study + rebuild X).
-- integrationApproach:
-    "depend-on-it"      → import directly, lightest touch
-    "cherry-pick"       → lift specific files / functions / modules into the project
-    "vendor"            → copy the repo in-tree, adapt as needed
-    "cleanroom-rebuild" → take the IDEA, write your own version (no code transferred; bypass licence/dep burden)
-    "n/a"               → nothing to integrate or rebuild
-- risks: 1 sentence — license, abandoned, single maintainer, weird hooks, etc.
-
-If the need is INFERRED rather than user-stated, hold a slightly stricter bar on whether the connection is real — but ONLY downgrade if the fit itself is weak. A clear, concrete fit on an inferred need still earns high or medium. Do not auto-downgrade by one tier; that's overcorrection.
-
-Output JSON ONLY:
+Output JSON only:
 {
-  "relevance": "...",
+  "relevance": "high" | "medium" | "general-awareness",
   "relevanceScore": 0,
-  "summary": "...",
-  "whyUseful": "...",
-  "suggestedUse": "...",
-  "integrationApproach": "...",
-  "risks": "...",
-  "writeup": "<the prose as described above>"
+  "summary": "1 sentence on what the repo is",
+  "whyUseful": "1 sentence: the single most valuable thing (plug point OR idea to lift)",
+  "suggestedUse": "1 sentence: the concrete first action",
+  "integrationApproach": "depend-on-it" | "cherry-pick" | "vendor" | "cleanroom-rebuild" | "n/a",
+  "risks": "1 sentence: licence / abandoned / single maintainer / etc.",
+  "writeup": "the prose as described above"
 }`;
 
 export async function scoreTargetedCandidate(

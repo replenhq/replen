@@ -22,6 +22,21 @@
 
 * { box-sizing: border-box; }
 
+/* Belt and braces against horizontal overflow on narrow viewports. `clip`
+   (preferred) prevents any rogue child from pushing the page wider than
+   the viewport WITHOUT creating a scrolling container, so position:sticky
+   on the header keeps working. `hidden` would break sticky. */
+html, body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* Media defaults so a stray image / iframe / video never bursts the
+   layout, regardless of where it's used. */
+img, video, iframe, embed, object, svg {
+  max-width: 100%;
+}
+
 body {
   margin: 0; background: var(--bg); color: var(--fg);
   font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
@@ -220,6 +235,23 @@ header .user a { padding: 0 4px; }
 
 h1 { margin-top: 0; font-size: 24px; letter-spacing: -0.02em; }
 
+/* Feed-page header row: title on the left, refresh-button cluster on the
+   right. On mobile (<=720px) the row stacks vertically with the title above
+   so it has the full viewport width to stay on a single line. */
+.feed-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.feed-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
 /* Feed-page hero title. Uses clamp() so it scales smoothly from phone (22px)
    to desktop (30px) without per-breakpoint media-query overrides. The amber
    accent on the question mark is applied inline at the call site. */
@@ -232,6 +264,10 @@ h1 { margin-top: 0; font-size: 24px; letter-spacing: -0.02em; }
   letter-spacing: -0.025em;
   line-height: 1.1;
   color: var(--fg);
+  /* Title is short enough (33 chars) that single-line is desirable; only
+     break to second line if absolutely forced by viewport. nowrap on
+     desktop, mobile rule below relaxes for very narrow phones. */
+  white-space: nowrap;
 }
 
 /* Per-card project chip. Subtle so it doesn't fight the repo title, but
@@ -449,10 +485,25 @@ td.path {
   .pipeline-log-line { word-break: break-word; overflow-wrap: break-word; }
 }
 
+@media (max-width: 720px) {
+  /* Stack the feed header: title on its own row at the top, refresh
+     button cluster below it aligned right. Prevents the title from being
+     squashed into 2-3 lines by sharing horizontal space with the button. */
+  .feed-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .feed-header-actions {
+    align-self: flex-end;
+  }
+}
+
 @media (max-width: 380px) {
   main { padding: 10px; }
   header { margin: 8px 6px 12px; padding: 7px 10px; }
-  /* On very narrow screens the .feed-title + RefreshButton cluster needs
-     more breathing room — pull the title down a touch and stack tighter. */
-  .feed-title { font-size: clamp(20px, 6vw, 24px); }
+  /* On very narrow screens the .feed-title needs to scale down further to
+     keep the 33-character question on a single line. clamp picks ~20px
+     at 320px viewport. */
+  .feed-title { font-size: clamp(18px, 5.5vw, 22px); }
 }

@@ -30,9 +30,17 @@ function buildUserPrompt(p: KeywordDerivationInput): string {
 }
 
 export async function deriveSearchKeywords(p: KeywordDerivationInput): Promise<string | null> {
+  // Skip entirely if there's nothing meaningful to read.
+  if (!p.readmeMd && !p.claudeMd && !p.techSummary) {
+    console.log(`[keywords] ${p.slug}: no docs to read, skipping`);
+    return null;
+  }
+  // Try LLM derivation first. Fall back to heuristic extraction if the LLM
+  // returns garbage / empty / unparseable, rather than silently producing
+  // null and disabling gh-search for the project (which was the prior
+  // behaviour and disabled the whole fetcher for every project in prod).
   const userPrompt = buildUserPrompt(p);
-  // Skip the LLM call entirely if there's nothing meaningful to read.
-  if (!p.readmeMd && !p.claudeMd && !p.techSummary) return null;
+  let raw = "";
   try {
     const res = await chatCompletion({
       model: triageModel(),
@@ -43,23 +51,70 @@ export async function deriveSearchKeywords(p: KeywordDerivationInput): Promise<s
       max_tokens: 80,
       temperature: 0.2,
     });
-    const raw = res.choices?.[0]?.message?.content ?? "";
-    return normalize(raw);
+    raw = res.choices?.[0]?.message?.content ?? "";
   } catch (e) {
-    console.warn(`[keywords] LLM derivation failed for ${p.slug}:`, e);
-    return null;
+    console.warn(`[keywords] ${p.slug}: LLM derivation failed: ${(e as Error).message}`);
   }
+
+  const llmResult = normalize(raw);
+  if (llmResult) return llmResult;
+
+  // LLM produced nothing parseable. Log what it actually returned so the
+  // failure mode is visible in logs, then fall back to heuristic extraction.
+  if (raw.trim().length > 0) {
+    console.warn(`[keywords] ${p.slug}: LLM returned unparseable content (len=${raw.length}): ${raw.slice(0, 120).replace(/\n/g, " ")}`);
+  }
+  const fallback = heuristicKeywords(p);
+  if (fallback) {
+    console.log(`[keywords] ${p.slug}: using heuristic fallback: ${fallback}`);
+    return fallback;
+  }
+  return null;
+}
+
+// Last-resort keyword extraction from project metadata. Used when the LLM
+// path fails (timeout, empty response, prose instead of CSV). Lower quality
+// than the LLM path but keeps gh-search alive for the project rather than
+// disabling it silently.
+//
+// Strategy: extract deps from techSummary's "deps: react, next-auth, ..."
+// line, plus meaningful tokens from the project slug (drop generic ones
+// like "app", "site", "api"). Returns up to 5 hyphenated tokens.
+function heuristicKeywords(p: KeywordDerivationInput): string | null {
+  const tokens = new Set<string>();
+  // techSummary line is "node project: foo; deps: react, next-auth, ..."
+  // Pull deps out and keep the first 4: highest-signal stack hints.
+  if (p.techSummary) {
+    const depMatch = p.techSummary.match(/deps?:\s*([^\n]+)/i);
+    if (depMatch) {
+      for (const t of depMatch[1].split(",").slice(0, 4)) {
+        const cleaned = t.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+        if (cleaned.length >= 3 && cleaned.length <= 30) tokens.add(cleaned);
+      }
+    }
+  }
+  // Project slug tokens (e.g. "acme-phase2" -> "acme", "phase2"),
+  // filtered to drop generic suffixes that wouldn't help a GitHub search.
+  const SLUG_NOISE = new Set(["app", "site", "api", "web", "ui", "frontend", "backend", "v1", "v2", "v3", "stage", "test", "demo", "old", "new"]);
+  for (const t of p.slug.toLowerCase().split(/[-_]/)) {
+    if (t.length >= 3 && !SLUG_NOISE.has(t) && !/^\d+$/.test(t)) tokens.add(t);
+  }
+  if (tokens.size === 0) return null;
+  return [...tokens].slice(0, 5).join(",");
 }
 
 function normalize(raw: string): string | null {
   // The LLM occasionally wraps the list in quotes, prefixes with "Keywords:",
-  // or adds trailing punctuation. Strip aggressively and validate.
+  // adds trailing punctuation, or returns each token on a new line. Strip
+  // and validate. Splits on commas AND newlines so multi-line responses
+  // ("foo\nbar\nbaz") parse correctly. Strips leading list-markers
+  // ("1. ", "- ", "* ") so numbered/bulleted output normalises too.
   const cleaned = raw
     .replace(/^\s*keywords?\s*:\s*/i, "")
     .replace(/^["'\s]+|["'\s.]+$/g, "")
-    .split(",")
-    .map((t) => t.trim().toLowerCase().replace(/[^a-z0-9-]/g, ""))
+    .split(/[,\n]/)
+    .map((t) => t.trim().toLowerCase().replace(/^[*\-\d.)\s]+/, "").replace(/[^a-z0-9-]/g, ""))
     .filter((t) => t.length >= 2 && t.length <= 40);
   if (cleaned.length === 0) return null;
-  return cleaned.slice(0, 5).join(",");
+  return [...new Set(cleaned)].slice(0, 5).join(",");
 }

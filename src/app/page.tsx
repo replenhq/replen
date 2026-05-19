@@ -199,11 +199,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="feed-header">
         <h1 className="feed-title">
           What could you make better today<span style={{ color: "var(--amber)" }}>?</span>
         </h1>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+        <div className="feed-header-actions">
           <form action={runPipelineNow}>
             <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
           </form>
