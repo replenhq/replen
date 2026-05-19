@@ -17,12 +17,17 @@ type State =
 export function OpenDocsPRButton({
   projectId,
   projectRepo,
+  variant = "default",
 }: {
   projectId: number;
   projectRepo: string;
+  // 'compact' renders a small in-table button suitable for the /projects
+  // listing; default is the wider button used on /projects/<slug>.
+  variant?: "default" | "compact";
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [, startTransition] = useTransition();
+  const compact = variant === "compact";
 
   function onClick() {
     setState({ kind: "pending" });
@@ -41,24 +46,36 @@ export function OpenDocsPRButton({
   }
 
   if (state.kind === "success") {
+    const shortPath = state.prUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "");
     return (
-      <div style={{ fontSize: 13 }}>
-        ✓ PR opened:{" "}
-        <a href={state.prUrl} target="_blank" rel="noreferrer">
-          {state.prUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "")}
-        </a>
-      </div>
+      <span style={{ fontSize: compact ? 11 : 13 }}>
+        ✓ <a href={state.prUrl} target="_blank" rel="noreferrer">{compact ? "PR opened" : shortPath}</a>
+      </span>
     );
   }
 
+  const label = compact
+    ? (state.kind === "pending" ? "Opening…" : "✏ docs PR")
+    : (state.kind === "pending" ? "Opening…" : `Open docs PR on ${projectRepo}`);
+  const buttonStyle = compact ? { padding: "1px 8px", fontSize: 11 } : undefined;
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <button type="button" onClick={onClick} disabled={state.kind === "pending"} aria-busy={state.kind === "pending"}>
-        {state.kind === "pending" ? "Opening…" : `Open docs PR on ${projectRepo}`}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={state.kind === "pending"}
+        aria-busy={state.kind === "pending"}
+        style={buttonStyle}
+        title={compact ? `Open a docs improvement PR on ${projectRepo}` : undefined}
+      >
+        {label}
       </button>
       {state.kind === "error" && (
-        <span style={{ fontSize: 13, color: "var(--amber, #ffc857)" }}>✗ {state.reason}</span>
+        <span style={{ fontSize: compact ? 11 : 13, color: "var(--amber, #ffc857)" }} title={state.reason}>
+          ✗
+        </span>
       )}
-    </div>
+    </span>
   );
 }

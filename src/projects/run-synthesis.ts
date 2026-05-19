@@ -9,7 +9,7 @@
 //      starred insight from a previous run this week (cheap dedup).
 
 import { db, schema } from "../db/client";
-import { and, eq, gt, inArray, ne } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, ne, isNull } from "drizzle-orm";
 import { recordEvent } from "../scheduler/events";
 import { findClusters, type Cluster } from "./synthesis-cluster";
 import { synthesiseInsight, type SynthesisMatch, type SynthesisProjectContext } from "./synthesise-insight";
@@ -17,10 +17,23 @@ import { LlmQuotaError } from "../analyzer/llm";
 import type { ProjectSummary } from "./summarize";
 import type { ProjectActivitySummary } from "./activity-summary";
 
+// Synthesis looks across the last N days of matches, not just this run's
+// matches. A single pipeline run typically produces 1-6 matches, which is
+// below the clustering floor — but a week's worth (~15-30) reliably forms
+// real clusters. The 7-day window matches the dedup window so the same
+// cluster doesn't get re-shipped day-after-day. Insights still get tagged
+// with the CURRENT run id so the feed can scope by "this week" the same
+// way it scopes matches.
+const SYNTHESIS_LOOKBACK_DAYS = 7;
+
 export async function runSynthesis(runId: number, userId: number): Promise<{ insightsCreated: number }> {
-  // Pull this-run's matches. We don't restrict by relevance tier; even
-  // general-awareness matches can be evidence for a topic insight ("you
-  // keep seeing X this week, the pattern is Y").
+  // Pull recent matches (last 7 days). We don't restrict by relevance
+  // tier; even general-awareness matches can be evidence for a topic
+  // insight ("you keep seeing X this week, the pattern is Y"). Hidden /
+  // archived matches are excluded so the user's "hide" signal also
+  // suppresses them as evidence — synthesising over things the user
+  // already dismissed would be noise.
+  const since = new Date(Date.now() - SYNTHESIS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const matchRows = await db
     .select({
       id: schema.matches.id,
@@ -42,7 +55,9 @@ export async function runSynthesis(runId: number, userId: number): Promise<{ ins
     .innerJoin(schema.repos, eq(schema.matches.repoId, schema.repos.id))
     .where(and(
       eq(schema.matches.userId, userId),
-      eq(schema.matches.runId, runId),
+      gte(schema.matches.createdAt, since),
+      ne(schema.matches.userStatus, "hidden"),
+      isNull(schema.matches.archivedAt),
     ));
 
   if (matchRows.length < 3) {

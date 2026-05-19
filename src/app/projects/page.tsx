@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/auth/current-user";
 import { reprocessForUser } from "@/scheduler/reprocess-matches";
 import { readUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
+import { assessDocSparsity } from "@/projects/self-improvement";
+import { OpenDocsPRButton } from "@/components/OpenDocsPRButton";
 
 export const dynamic = "force-dynamic";
 
@@ -49,20 +51,38 @@ export default async function Projects() {
             <th>Include</th>
             <th>Sensitive</th>
             <th>Model</th>
-            <th style={{ textAlign: "center" }}>CLAUDE.md</th>
+            <th style={{ textAlign: "center" }} title="Docs health: ✓ when README+CLAUDE.md give Replen enough to work with; ⚠ when too sparse for accurate matching — click to open a docs-improvement PR.">Docs</th>
             <th style={{ textAlign: "right" }}>Matches</th>
             <th></th>
             <th>GitHub repo</th>
-            <th>Path</th>
+            <th title="github:owner/name when sourced via API. Filesystem paths shown for rows that haven't refreshed since the GitHub-pull rebuild — they'll switch on next pipeline run once a repo is set.">Source</th>
           </tr>
         </thead>
         <tbody>
           {projects.map((p) => {
             const effective =
               p.llmProvider === "auto" ? (p.sensitivity === "high" ? "anthropic" : "deepseek") : p.llmProvider;
+            // Surfaces "needs a GitHub repo set" inline. Replen reads
+            // each project's docs/manifests/activity via the GitHub API
+            // now (no more laptop sync), so a project with no
+            // github_full_name silently can't be matched against new
+            // OSS — its cached docs go stale and Init #1/#2 never fire
+            // for it. Warning + amber tint on the repo input makes the
+            // fix obvious.
+            const needsRepo = p.included && p.active && !p.githubFullName;
             return (
               <tr key={p.id} style={{ opacity: p.included ? 1 : 0.45 }}>
-                <td><a href={`/projects/${p.slug}`}>{p.name}</a></td>
+                <td>
+                  <a href={`/projects/${p.slug}`}>{p.name}</a>
+                  {needsRepo && (
+                    <span
+                      title="Replen reads this project via the GitHub API. Set the owner/repo on the right so Init #1 (activity matching), Init #2 (prune), and doc refresh can fire."
+                      style={{ marginLeft: 6, color: "var(--amber, #ffc857)", cursor: "help" }}
+                    >
+                      ⚠
+                    </span>
+                  )}
+                </td>
                 <td>
                   <form className="inline" action={async () => { "use server"; await toggleIncluded(p.id, !p.included); }}>
                     <button>{p.included ? "✓ in" : "-"}</button>
@@ -91,7 +111,7 @@ export default async function Projects() {
                     </button>
                   </form>
                 </td>
-                <td style={{ textAlign: "center" }}>{p.claudeMd ? "✓" : "-"}</td>
+                <td style={{ textAlign: "center" }}>{renderDocsCell(p)}</td>
                 <td style={{ textAlign: "right" }}>{matchMap.get(p.id) ?? 0}</td>
                 <td>
                   {(matchMap.get(p.id) ?? 0) > 0 && (
@@ -108,9 +128,17 @@ export default async function Projects() {
                       name="ghFullName"
                       defaultValue={p.githubFullName ?? ""}
                       placeholder="owner/repo"
-                      style={{ padding: "1px 4px", fontSize: 12, width: 150, fontFamily: "ui-monospace, monospace" }}
+                      style={{
+                        padding: "1px 4px",
+                        fontSize: 12,
+                        width: 150,
+                        fontFamily: "ui-monospace, monospace",
+                        ...(needsRepo
+                          ? { background: "rgba(255, 200, 87, 0.18)", borderColor: "rgba(255, 200, 87, 0.6)" }
+                          : {}),
+                      }}
                     />
-                    <button title="Save GitHub repo for handoff PRs" style={{ padding: "1px 6px", fontSize: 11 }}>save</button>
+                    <button title="Save GitHub repo. Replen uses this to fetch docs/activity/manifests via the API and to open handoff PRs." style={{ padding: "1px 6px", fontSize: 11 }}>save</button>
                   </form>
                 </td>
                 <td className="path">{p.path}</td>
@@ -120,6 +148,39 @@ export default async function Projects() {
         </tbody>
       </table>
     </>
+  );
+}
+
+// Renders the Docs column cell. Three states:
+//   sparse + has github repo  → compact "✏ docs PR" button (one click → PR)
+//   sparse + no github repo   → "⚠ set repo" link to /projects/<slug>
+//   not sparse                → "✓"
+// The pipeline already streams a "Sparse docs in <slug>" event during a run;
+// this surfaces the same call-to-action persistently on the listing so the
+// user can act on it after the run has finished and the streamer has scrolled
+// away.
+function renderDocsCell(p: typeof schema.projectProfiles.$inferSelect) {
+  const sparsity = assessDocSparsity({ readmeMd: p.readmeMd, claudeMd: p.claudeMd });
+  if (!sparsity.sparse) {
+    return <span title="Docs healthy">✓</span>;
+  }
+  const reasonTitle = `Sparse docs: ${sparsity.reasons.join("; ")}`;
+  if (p.githubFullName) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={reasonTitle}>
+        <span style={{ color: "var(--amber, #ffc857)" }}>⚠</span>
+        <OpenDocsPRButton projectId={p.id} projectRepo={p.githubFullName} variant="compact" />
+      </span>
+    );
+  }
+  return (
+    <a
+      href={`/projects/${p.slug}`}
+      title={`${reasonTitle}. Set this project's GitHub repo on /projects/${p.slug} to enable the docs PR action.`}
+      style={{ color: "var(--amber, #ffc857)", textDecoration: "none", fontSize: 12 }}
+    >
+      ⚠ set repo
+    </a>
   );
 }
 

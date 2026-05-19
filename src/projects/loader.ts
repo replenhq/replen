@@ -1,8 +1,7 @@
-import { readFile, readdir } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+import { fetchRepoHead, fetchFile, fetchTree, GitHubApiError, type TreeEntry } from "../github/repo-content";
 
 // Options for discoverLocalProjects. Adds the per-user "extra doc paths"
 // feature: globs, relative to each project root, that point at additional
@@ -99,58 +98,224 @@ const DOC_DENY_LIST = new Set([
 // extra_doc_paths to something specific (their patterns are appended, not
 // replaced), or widen by adding e.g. "spec/**/*.md".
 const DEFAULT_AUX_PATTERNS = [
-  "docs/**/*.md",          // project's own docs subdir (most common)
-  ".cursor/rules/**/*.md", // Cursor's nested rules dir
-  "*-SETUP.md",            // ops docs at repo root (AUTOMATION-SETUP.md, CRON_SETUP.md, etc.)
+  "docs/**/*.md",                    // project's own docs subdir (most common)
+  ".cursor/rules/**/*.md",           // Cursor's nested rules dir
+  "*-SETUP.md",                      // ops docs at repo root (AUTOMATION-SETUP.md, CRON_SETUP.md, etc.)
+  // GitHub spec-kit: when a project uses Spec-Driven Development, each
+  // feature gets a .specify/specs/<name>/{spec,plan,tasks,data-model}.md
+  // describing exactly what the user is building right now. Far higher
+  // signal than inferring from git diff churn — these files literally
+  // describe intent, not just "what changed". The constitution.md in
+  // .specify/memory/ encodes project-wide principles. See github.com/github/spec-kit.
+  ".specify/specs/**/*.md",
+  ".specify/memory/*.md",
 ];
 
-export async function discoverLocalProjects(root: string, opts: DiscoverOpts = {}): Promise<LocalProject[]> {
-  const entries = await readdir(root, { withFileTypes: true });
-  // User-configured extras come AFTER defaults so a user can extend the
-  // auto-included set without losing it. Setting extra_doc_paths to e.g.
-  // "spec/**/*.md" supplements rather than overrides.
+// GitHub-pull version: iterates the user's existing project_profiles
+// rows and fetches docs/manifests via the GitHub API instead of the
+// local filesystem mirror. Same DOC_NAMES / CLAUDE_NAMES / glob set,
+// same profile-hash construction, same LocalProject output shape — so
+// upsertProjects and every downstream consumer (Stage 1, Stage 2, etc.)
+// stay unchanged.
+//
+// New projects must be added separately via autoDetectAndStoreRepos
+// (already exists, runs on PAT save and the /projects "Re-detect"
+// button). This function only refreshes rows that already exist.
+// Rows with no githubFullName set are skipped — they can't be
+// addressed via API. Their existing docs stay cached until the user
+// sets the repo on /projects.
+export type DiscoverResult = {
+  projects: LocalProject[];
+  // Slugs of project_profiles rows that were skipped because they
+  // have no usable github_full_name. The pipeline orchestrator surfaces
+  // these in the streamer so the user can see which projects need a
+  // repo set on /projects.
+  skippedNoRepo: string[];
+};
+
+export async function discoverProjectsForUser(
+  userId: number,
+  token: string,
+  opts: DiscoverOpts = {},
+): Promise<DiscoverResult> {
+  const rows = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(eq(schema.projectProfiles.userId, userId));
+
   const userPatterns = (opts.extraDocPaths ?? []).map((s) => s.trim()).filter(Boolean);
   const allPatterns = [...DEFAULT_AUX_PATTERNS, ...userPatterns];
+  const perPatternCap = opts.extraDocsBudget ?? 8;
+  const charLimit = opts.extraDocCharLimit ?? 20_000;
+
   const out: LocalProject[] = [];
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    if (e.name.startsWith(".")) continue;
-    const path = join(root, e.name);
-    // Concat all matching root-level doc files (no first-hit-wins). README +
-    // SPEC + ARCHITECTURE + CHANGELOG all get folded into the same blob, each
-    // prefixed with a delimiter the LLM can use to attribute statements.
-    const docMd = await readAllExisting(path, DOC_NAMES);
-    const claudeMdRaw = await readAllExisting(path, CLAUDE_NAMES);
+  const skippedNoRepo: string[] = [];
+  for (const row of rows) {
+    if (!row.githubFullName || !/^[\w.-]+\/[\w.-]+$/.test(row.githubFullName)) {
+      // Only track skips for rows the user actively wants matched —
+      // archived / un-included projects don't pollute the streamer.
+      if (row.active && row.included) skippedNoRepo.push(row.slug);
+      continue;
+    }
+    const [owner, repoName] = row.githubFullName.split("/");
+
+    let head;
+    try {
+      head = await fetchRepoHead(owner, repoName, token);
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      console.warn(`[loader] head ${row.githubFullName} failed:`, (e as Error).message);
+      continue;
+    }
+    if (!head) continue; // 404 — repo gone or PAT lost access
+
+    let tree;
+    try {
+      tree = await fetchTree(owner, repoName, head.headSha, token);
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      console.warn(`[loader] tree ${row.githubFullName} failed:`, (e as Error).message);
+      continue;
+    }
+    if (!tree) continue;
+    const blobs = tree.entries.filter((t) => t.type === "blob");
+    const blobPaths = new Set(blobs.map((b) => b.path));
+
+    const docMd = await fetchAllByName(owner, repoName, head.headSha, blobPaths, DOC_NAMES, token);
+    const claudeMdRaw = await fetchAllByName(owner, repoName, head.headSha, blobPaths, CLAUDE_NAMES, token);
     const extraDocs = allPatterns.length > 0
-      ? await collectExtraDocs(path, allPatterns, opts.extraDocsBudget ?? 8, opts.extraDocCharLimit ?? 20_000)
+      ? await fetchExtraDocsByGlob(owner, repoName, head.headSha, blobs, allPatterns, perPatternCap, charLimit, token)
       : [];
-    // Fold extra docs into the claudeMd field so they ride through to the
-    // reasoner without needing a new column. The separator banner stays in
-    // place so the LLM can tell what's user-authored vs auto-included.
     const claudeMd = mergeExtraIntoClaudeMd(claudeMdRaw, extraDocs);
-    const techSummary = await summarizeTech(path);
-    // Discover the project if we have ANY of: a doc file, a CLAUDE.md, or a manifest.
-    const hasManifest = await anyExists(path, MANIFEST_NAMES);
+    const techSummary = await buildTechSummaryFromTree(owner, repoName, head.headSha, blobs, blobPaths, token);
+
+    const hasManifest = MANIFEST_NAMES.some((n) => blobPaths.has(n));
     if (!docMd && !claudeMd && !hasManifest) continue;
+
     const profile = `${docMd ?? ""}\n---\n${claudeMd ?? ""}\n---\n${techSummary ?? ""}`;
     const profileHash = createHash("sha1").update(profile).digest("hex");
     out.push({
-      slug: e.name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""),
-      path,
-      name: e.name,
+      slug: row.slug,
+      // Synthetic path: keeps existing UI columns rendering something
+      // human-readable, and prefix "github:" makes it obvious this row
+      // came from the API path. Filesystem callers that still expect
+      // a real path are tracked + retired in commit (6/6).
+      path: `github:${row.githubFullName}`,
+      name: row.name,
       readmeMd: docMd,
       claudeMd,
       techSummary,
       profileHash,
-      // A project is active if we found ANY useful input — README, CLAUDE.md,
-      // or a manifest. Previously this required CLAUDE.md, which silently
-      // marked README-only projects inactive and broke Stage 1's
-      // `WHERE active=true` filter — net effect: zero scouted matches for
-      // any user whose docs don't include a literal CLAUDE.md.
       active: docMd !== null || claudeMd !== null || techSummary !== null,
     });
   }
-  return out;
+  return { projects: out, skippedNoRepo };
+}
+
+async function fetchAllByName(
+  owner: string,
+  repoName: string,
+  ref: string,
+  blobPaths: Set<string>,
+  names: string[],
+  token: string,
+): Promise<string | null> {
+  const parts: string[] = [];
+  for (const n of names) {
+    if (DOC_DENY_LIST.has(n)) continue;
+    if (!blobPaths.has(n)) continue;
+    try {
+      const content = await fetchFile(owner, repoName, n, token, ref);
+      if (!content) continue;
+      parts.push(`# === file: ${n} ===\n${content.slice(0, 20_000)}`);
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      // Other failures (transient 5xx etc.): skip this file, the rest
+      // of the project's docs still get folded in.
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+async function fetchExtraDocsByGlob(
+  owner: string,
+  repoName: string,
+  ref: string,
+  blobs: TreeEntry[],
+  patterns: string[],
+  perPatternCap: number,
+  charLimit: number,
+  token: string,
+): Promise<Array<{ path: string; content: string }>> {
+  const collected: Array<{ path: string; content: string }> = [];
+  const regexes = patterns.map(globToRegex);
+  const counts = new Array(patterns.length).fill(0);
+  const seen = new Set<string>();
+  for (const b of blobs) {
+    if (b.path.startsWith("node_modules/") || b.path.includes("/node_modules/")) continue;
+    // Mirror the filesystem walker's dot-dir rule: skip dot-dirs unless
+    // they're a tool we explicitly want (Cursor, spec-kit). For these we
+    // already added globs in DEFAULT_AUX_PATTERNS, so the regex match
+    // gates inclusion anyway — this just keeps loops tight on big trees.
+    if (b.path.startsWith(".") && !b.path.startsWith(".cursor/") && !b.path.startsWith(".specify/")) continue;
+    const base = b.path.includes("/") ? b.path.slice(b.path.lastIndexOf("/") + 1) : b.path;
+    if (DOC_DENY_LIST.has(base)) continue;
+    for (let i = 0; i < regexes.length; i++) {
+      if (counts[i] >= perPatternCap) continue;
+      if (regexes[i].test(b.path) && !seen.has(b.path)) {
+        seen.add(b.path);
+        try {
+          const content = await fetchFile(owner, repoName, b.path, token, ref);
+          if (content) {
+            collected.push({ path: b.path, content: content.slice(0, charLimit) });
+            counts[i]++;
+          }
+        } catch (e) {
+          if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+          // skip
+        }
+        break;
+      }
+    }
+  }
+  return collected;
+}
+
+async function buildTechSummaryFromTree(
+  owner: string,
+  repoName: string,
+  ref: string,
+  blobs: TreeEntry[],
+  blobPaths: Set<string>,
+  token: string,
+): Promise<string> {
+  const parts: string[] = [];
+  if (blobPaths.has("package.json")) {
+    try {
+      const raw = await fetchFile(owner, repoName, "package.json", token, ref);
+      if (raw) {
+        const pkg = JSON.parse(raw) as { name?: string; dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+        const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+        parts.push(`node project: ${pkg.name ?? "?"}; deps: ${Object.keys(deps).slice(0, 30).join(", ")}`);
+      }
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      // malformed package.json: skip the node-deps line
+    }
+  }
+  if (blobPaths.has("pyproject.toml")) parts.push("python project (pyproject.toml present)");
+  if (blobPaths.has("Cargo.toml")) parts.push("rust project (Cargo.toml present)");
+  if (blobPaths.has("go.mod")) parts.push("go project (go.mod present)");
+  // Top-level dirs: derive from the tree paths so we don't need a
+  // separate listing call.
+  const topDirs = new Set<string>();
+  for (const b of blobs) {
+    const slash = b.path.indexOf("/");
+    if (slash > 0) topDirs.add(b.path.slice(0, slash));
+  }
+  const interesting = ["src", "app", "lib", "server", "client", "api"].filter((d) => topDirs.has(d));
+  if (interesting.length) parts.push(`top-level: ${interesting.join(", ")}`);
+  return parts.join("\n");
 }
 
 function mergeExtraIntoClaudeMd(claudeMd: string | null, extras: Array<{ path: string; content: string }>): string | null {
@@ -176,128 +341,6 @@ function globToRegex(glob: string): RegExp {
   return new RegExp("^" + escaped + "$");
 }
 
-async function collectExtraDocs(
-  projectRoot: string,
-  patterns: string[],
-  perPatternCap: number,
-  charLimit: number,
-): Promise<Array<{ path: string; content: string }>> {
-  const collected: Array<{ path: string; content: string }> = [];
-  const regexes = patterns.map(globToRegex);
-  // One walk of the tree, gated by perPatternCap counts.
-  const counts: number[] = new Array(patterns.length).fill(0);
-  const seen = new Set<string>();
-  async function walk(rel: string) {
-    const abs = rel ? join(projectRoot, rel) : projectRoot;
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await readdir(abs, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      // Skip dotdirs UNLESS they're one we explicitly want (Cursor's .cursor/
-      // rules dir). Hardcoded list is small enough; keep it inline.
-      if (e.name === "node_modules") continue;
-      if (e.name.startsWith(".") && e.name !== ".cursor") continue;
-      if (DOC_DENY_LIST.has(e.name)) continue;
-      const childRel = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        await walk(childRel);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      for (let i = 0; i < regexes.length; i++) {
-        if (counts[i] >= perPatternCap) continue;
-        if (regexes[i].test(childRel) && !seen.has(childRel)) {
-          seen.add(childRel);
-          // Defence in depth against a glob that somehow ranges outside the
-          // project root (symlinks, edge cases in the regex). resolve() the
-          // candidate and refuse to read anything that escapes projectRoot.
-          const absPath = resolve(projectRoot, childRel);
-          const rootWithSep = resolve(projectRoot) + sep;
-          if (!absPath.startsWith(rootWithSep) && absPath !== resolve(projectRoot)) {
-            break;
-          }
-          try {
-            const buf = await readFile(absPath, "utf8");
-            collected.push({ path: childRel, content: buf.slice(0, charLimit) });
-            counts[i]++;
-          } catch { /* unreadable; skip */ }
-          break;
-        }
-      }
-    }
-  }
-  await walk("");
-  return collected;
-}
-
-// Read every matching file in `names` and concatenate with a delimiter naming
-// each source file. Per-file 20KB cap (same as the legacy `readFirstExisting`
-// per-call cap) bounds total bytes even when many files match.
-async function readAllExisting(dir: string, names: string[]): Promise<string | null> {
-  const parts: string[] = [];
-  for (const n of names) {
-    if (DOC_DENY_LIST.has(n)) continue;
-    try {
-      const buf = await readFile(join(dir, n), "utf8");
-      const slice = buf.slice(0, 20_000);
-      parts.push(`# === file: ${n} ===\n${slice}`);
-    } catch {}
-  }
-  return parts.length > 0 ? parts.join("\n\n") : null;
-}
-
-async function anyExists(dir: string, names: string[]): Promise<boolean> {
-  for (const n of names) {
-    try {
-      await readFile(join(dir, n), "utf8");
-      return true;
-    } catch {}
-  }
-  return false;
-}
-
-async function summarizeTech(dir: string): Promise<string> {
-  const parts: string[] = [];
-  const pkg = await tryReadJson(join(dir, "package.json"));
-  if (pkg) {
-    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
-    parts.push(`node project: ${pkg.name ?? "?"}; deps: ${Object.keys(deps).slice(0, 30).join(", ")}`);
-  }
-  const py = await tryRead(join(dir, "pyproject.toml"));
-  if (py) parts.push("python project (pyproject.toml present)");
-  const cargo = await tryRead(join(dir, "Cargo.toml"));
-  if (cargo) parts.push("rust project (Cargo.toml present)");
-  const goMod = await tryRead(join(dir, "go.mod"));
-  if (goMod) parts.push("go project (go.mod present)");
-  try {
-    const top = await readdir(dir);
-    const interesting = top.filter((n) => ["src", "app", "lib", "server", "client", "api"].includes(n));
-    if (interesting.length) parts.push(`top-level: ${interesting.join(", ")}`);
-  } catch {}
-  return parts.join("\n");
-}
-
-async function tryRead(p: string): Promise<string | null> {
-  try {
-    return await readFile(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function tryReadJson(p: string): Promise<any | null> {
-  const s = await tryRead(p);
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
 export async function upsertProjects(projects: LocalProject[], userId: number) {
   const now = new Date();
   for (const p of projects) {
@@ -307,7 +350,12 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
       .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.slug, p.slug)))
       .get();
     if (existing) {
-      if (existing.profileHash !== p.profileHash || existing.active !== p.active) {
+      // `path` is included in the change check so a renamed mirror dir
+      // (e.g. /opt/oss-digest/projects-mirror → /opt/replen/projects-mirror)
+      // doesn't silently leave existing rows pointing at a now-missing
+      // location. Without this, activity/dep-health probes return empty
+      // and the writeups appear "dormant" with no error.
+      if (existing.profileHash !== p.profileHash || existing.active !== p.active || existing.path !== p.path) {
         // NOTE: included + sensitivity are user-managed via the dashboard.
         // The loader never overwrites them.
         // searchKeywords is wiped on hash change so the gh-search fetcher

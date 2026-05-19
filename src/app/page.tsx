@@ -347,6 +347,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       )}
       {orderedGroups.map(([slug, list]) => {
         const project = list[0].projectId ? projectMap.get(list[0].projectId) : null;
+        // Initiative #1 visibility: show an "⚡ matched against current work"
+        // pill on cards in projects whose activity probe is currently in the
+        // "active" state. Tells the user that the reasoner had real
+        // current-work context to grade against (not just the static README).
+        const activityActive = (() => {
+          if (!project?.activityJson) return false;
+          try {
+            const a = JSON.parse(project.activityJson) as { state?: string };
+            return a.state === "active";
+          } catch { return false; }
+        })();
         const isGeneral = slug === "_general" || slug === "_unknown";
         // _general / _unknown rolled up into a collapsed details - these are
         // "keep on the radar" rather than today's actionable matches, so they
@@ -394,6 +405,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         title={`Show only ${slug} matches`}
                       >
                         📁 {slug}
+                      </a>
+                    )}
+                    {project && activityActive && (
+                      <a
+                        href={`/projects/${slug}`}
+                        className="tag"
+                        style={{ background: "var(--amber-soft)", color: "var(--amber)", borderColor: "var(--amber-line)", textDecoration: "none" }}
+                        title="This project had live activity context (recent commits/PRs/TODOs) when the match was scored. The reasoner graded this repo against what you're currently building, not just the static README."
+                      >
+                        ⚡ vs current work
                       </a>
                     )}
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>

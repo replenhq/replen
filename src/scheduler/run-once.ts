@@ -2,7 +2,7 @@ import { db, schema } from "../db/client";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { runFetchers } from "../fetchers";
 import { runAnalysis } from "../analyzer/pipeline";
-import { discoverLocalProjects, upsertProjects } from "../projects/loader";
+import { discoverProjectsForUser, upsertProjects } from "../projects/loader";
 import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
@@ -14,7 +14,8 @@ import {
   vectorsNeedRegeneration,
   VECTORS_PROMPT_VERSION,
 } from "../projects/search-vectors";
-import { probeActivity } from "../projects/activity";
+import { probeActivityViaApi } from "../github/activity-via-api";
+import { GitHubApiError } from "../github/repo-content";
 import { summariseActivity, needsActivityRefresh } from "../projects/activity-summary";
 import { runPruneSuggestions } from "../projects/run-prune-suggestions";
 import { runSynthesis } from "../projects/run-synthesis";
@@ -119,8 +120,8 @@ async function executePipeline(
     // project_profiles BEFORE anything else. Subsequent Stage 1 + 2 + the
     // gh-targeted fetcher all key off these rows; on a brand-new user this
     // is the only chance to populate them before they're needed.
-    void recordEvent(runId, userId, "scan", "Loading project profiles from local docs…");
-    await loadProjectsForUser(userId).catch((e) =>
+    void recordEvent(runId, userId, "scan", "Loading project profiles from GitHub…");
+    await loadProjectsForUser(runId, userId, cfg).catch((e) =>
       console.warn(`[pipeline] user=${userId} project load failed:`, e),
     );
     // Stage-1: structured summary + outcome goals per project.
@@ -156,7 +157,7 @@ async function executePipeline(
     // discovery + scouted matches. Failures are logged but never poison
     // the run — the regular feed has already shipped by now.
     try {
-      const pruneResult = await runPruneSuggestions(runId, userId);
+      const pruneResult = await runPruneSuggestions(runId, userId, cfg.githubToken);
       matchesCreated += pruneResult.matchesCreated;
     } catch (e) {
       if (e instanceof LlmQuotaError) throw e;
@@ -263,16 +264,27 @@ export async function runPipeline() {
   await Promise.all(workers);
 }
 
-// Reads the user's project READMEs / CLAUDE.md files from the filesystem
-// mirror (GITHUB_ROOT) and upserts a row per project into project_profiles.
-// Idempotent: unchanged READMEs hash the same and the loader leaves their
-// row alone. The user's `included` / `sensitivity` UI toggles are preserved.
+// Reads the user's project READMEs / CLAUDE.md files via the GitHub
+// API (using the per-user PAT from user_settings.githubToken) and
+// upserts a row per project into project_profiles. Idempotent:
+// unchanged repo contents hash the same and the loader leaves their
+// row alone. The user's `included` / `sensitivity` UI toggles are
+// preserved.
 //
-// This used to live inside runAnalysis (pipeline.ts) but was moved out so
-// that Stage 1 + 2 + the gh-targeted fetcher can all run with project rows
-// already populated — see comment in runPipelineInner above.
-async function loadProjectsForUser(userId: number): Promise<void> {
-  const githubRoot = process.env.GITHUB_ROOT ?? process.cwd();
+// Only refreshes rows that already exist + have github_full_name set.
+// New repos enter project_profiles via autoDetectAndStoreRepos (on
+// settings PAT save + the explicit /projects Re-detect button), so
+// pipeline runs stay cheap.
+//
+// When the user has no PAT, this no-ops and existing rows continue
+// serving whatever docs they were last loaded with — the steady-state
+// matching pipeline keeps working with stale data rather than going
+// blank.
+async function loadProjectsForUser(runId: number, userId: number, cfg: UserConfig): Promise<void> {
+  if (!cfg.githubToken) {
+    void recordEvent(runId, userId, "scan", "Project load skipped: no GitHub PAT on /settings");
+    return;
+  }
   const settings = await db
     .select({ extraDocPaths: schema.userSettings.extraDocPaths })
     .from(schema.userSettings)
@@ -282,8 +294,16 @@ async function loadProjectsForUser(userId: number): Promise<void> {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const discovered = await discoverLocalProjects(githubRoot, { extraDocPaths });
-  await upsertProjects(discovered, userId);
+  const { projects, skippedNoRepo } = await discoverProjectsForUser(userId, cfg.githubToken, { extraDocPaths });
+  await upsertProjects(projects, userId);
+  if (skippedNoRepo.length > 0) {
+    void recordEvent(
+      runId,
+      userId,
+      "scan",
+      `Project load: ${skippedNoRepo.length} project(s) need a GitHub repo set on /projects: ${skippedNoRepo.slice(0, 5).join(", ")}${skippedNoRepo.length > 5 ? `, +${skippedNoRepo.length - 5} more` : ""}`,
+    );
+  }
 }
 
 // Stage-1 hook. Iterates the user's active projects, regenerates the
@@ -419,57 +439,76 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
   }
 }
 
-// Initiative #1: activity refresh. For each active project, probe git for
-// recent commits + open PRs + TODO clusters (cheap, no LLM), then summarise
-// via LLM only when the cache is stale (>24h) or git HEAD has moved.
-// Mirrors the cache-invalidation pattern of refreshStaleProjectSummaries and
-// refreshStaleSearchVectors so steady-state cost is zero on subsequent runs.
+// Initiative #1: activity refresh. For each active project with a known
+// github_full_name, probe via GitHub API for recent commits + open PRs +
+// TODO clusters (cheap, no LLM), then summarise via LLM only when the
+// cache is stale (>24h) or git HEAD has moved.
+//
+// Replaces the previous filesystem-based probe: prod doesn't have
+// .git/ in the projects-mirror so the local probe always returned
+// empty. GitHub API works wherever the pipeline runs.
+//
+// Projects with no github_full_name are skipped (can't address them).
+// The auto-detect on /settings PAT save normally fills this in;
+// /projects also lets the user set it manually.
 async function refreshStaleActivity(runId: number, userId: number, cfg: UserConfig): Promise<void> {
+  if (!cfg.githubToken) {
+    void recordEvent(runId, userId, "scan", "Activity refresh skipped: no GitHub PAT on /settings");
+    return;
+  }
   const projects = await db
     .select()
     .from(schema.projectProfiles)
     .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
   if (projects.length === 0) return;
+  const token = cfg.githubToken;
 
   let regenerated = 0;
+  // Use a box so TS preserves the type across the closure boundary
+  // even when only one branch ever assigns it.
+  const rateLimitBox: { value: { retryAfterMs: number | undefined } | null } = { value: null };
   const ACTIVITY_CONCURRENCY = 3;
   let cursor = 0;
   const refreshOne = async () => {
     while (cursor < projects.length) {
       const idx = cursor++;
       const p = projects[idx];
+      if (rateLimitBox.value) return;
 
-      // Cheap pre-probe to get the current HEAD sha — the cache predicate
-      // wants to know whether HEAD has moved since the last summary, so
-      // we have to probe SOMETHING. Doing a full probeActivity is expensive;
-      // we just want the sha here, the full probe runs only when stale.
-      let currentHeadSha: string | null = null;
-      try {
-        const quick = await probeActivity(p.path, {});
-        currentHeadSha = quick.headSha;
-      } catch {
-        // Project path missing or not a git repo. Skip silently — same
-        // treatment as a project with no docs.
+      if (!p.githubFullName || !/^[\w.-]+\/[\w.-]+$/.test(p.githubFullName)) {
+        // No GitHub repo set: can't probe via API. Don't log per-project
+        // (would spam); summary line at the end covers it.
         continue;
       }
+      const [owner, repoName] = p.githubFullName.split("/");
+
+      let activity;
+      try {
+        activity = await probeActivityViaApi(owner, repoName, token);
+      } catch (e) {
+        if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) {
+          // Rate-limited. Stop the loop — no point burning more calls.
+          // The orchestrator-level catch in runPipelineInner records a
+          // separate event; here we just bail.
+          rateLimitBox.value = { retryAfterMs: e.retryAfterMs };
+          return;
+        }
+        console.warn(`[pipeline] user=${userId} activity probe for ${p.slug} (${p.githubFullName}) failed:`, e);
+        continue;
+      }
+      if (!activity.isGitRepo) continue;
 
       const decision = needsActivityRefresh({
         activityJson: p.activityJson ?? null,
         activityGeneratedAt: p.activityGeneratedAt ?? null,
         activityHeadSha: p.activityHeadSha ?? null,
-        currentHeadSha,
+        currentHeadSha: activity.headSha,
       });
       if (!decision.regen) continue;
 
       void recordEvent(runId, userId, "scan", `Refreshing activity for ${p.slug} (${decision.reason})`);
 
       try {
-        // Full probe + LLM summary. The pre-probe above already proved
-        // the project is a git repo, so we expect this to produce real data.
-        const activity = await probeActivity(p.path, {
-          githubFullName: p.githubFullName,
-          ghToken: cfg.githubToken,
-        });
         const summary = await summariseActivity(activity, p.name, p.slug, {
           sensitivity: (p.sensitivity as "low" | "high") ?? "low",
         });
@@ -485,13 +524,22 @@ async function refreshStaleActivity(runId: number, userId: number, cfg: UserConf
         regenerated++;
       } catch (e) {
         if (e instanceof LlmQuotaError) throw e;
-        console.warn(`[pipeline] user=${userId} activity for ${p.slug} failed:`, e);
+        console.warn(`[pipeline] user=${userId} activity summarise for ${p.slug} failed:`, e);
       }
     }
   };
   await Promise.allSettled(
     Array.from({ length: Math.min(ACTIVITY_CONCURRENCY, projects.length) }, () => refreshOne()),
   );
+  if (rateLimitBox.value) {
+    const waitSec = rateLimitBox.value.retryAfterMs ? Math.ceil(rateLimitBox.value.retryAfterMs / 1000) : null;
+    void recordEvent(
+      runId,
+      userId,
+      "scan",
+      `Activity refresh paused: GitHub API rate-limited${waitSec ? ` (retry in ${waitSec}s)` : ""}`,
+    );
+  }
   if (regenerated > 0) {
     void recordEvent(runId, userId, "scan", `Activity refreshed for ${regenerated} project(s)`);
   }

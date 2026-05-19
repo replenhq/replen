@@ -9,10 +9,13 @@
 // We deliberately DO NOT parse lockfiles. Lockfiles have all transitive
 // deps; we only care about direct ones the user can actually act on.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-
 export type DepEcosystem = "npm" | "python" | "cargo" | "go";
+
+// Source-agnostic manifest accessor. Returns the file's utf-8 content
+// or null if the manifest is absent / unreadable. parseManifests
+// doesn't care whether the underlying read comes from the local
+// filesystem, the GitHub Contents API, or anywhere else.
+export type ManifestFetcher = (filename: string) => Promise<string | null>;
 export type ProjectDep = {
   name: string;
   version: string; // raw constraint as written: "^1.0", ">=2.0,<3", "1.2.3"
@@ -32,62 +35,64 @@ export type ManifestParseResult = {
 // rarely have >200 direct deps.
 const MAX_DEPS_PER_PROJECT = 200;
 
-export async function parseManifests(projectPath: string): Promise<ManifestParseResult> {
+export async function parseManifests(fetcher: ManifestFetcher): Promise<ManifestParseResult> {
   const allDeps: ProjectDep[] = [];
   const filesRead: string[] = [];
 
   // npm
-  try {
-    const buf = await readFile(join(projectPath, "package.json"), "utf8");
-    const pkg = JSON.parse(buf) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-      peerDependencies?: Record<string, string>;
-      optionalDependencies?: Record<string, string>;
-    };
-    for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
-      allDeps.push({ name, version, ecosystem: "npm", kind: "runtime" });
-    }
-    for (const [name, version] of Object.entries(pkg.devDependencies ?? {})) {
-      allDeps.push({ name, version, ecosystem: "npm", kind: "dev" });
-    }
-    for (const [name, version] of Object.entries(pkg.peerDependencies ?? {})) {
-      allDeps.push({ name, version, ecosystem: "npm", kind: "runtime" });
-    }
-    if (pkg.dependencies || pkg.devDependencies) filesRead.push("package.json");
-  } catch { /* no package.json or unparseable; fine */ }
+  const pkgRaw = await fetcher("package.json");
+  if (pkgRaw) {
+    try {
+      const pkg = JSON.parse(pkgRaw) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+      };
+      for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
+        allDeps.push({ name, version, ecosystem: "npm", kind: "runtime" });
+      }
+      for (const [name, version] of Object.entries(pkg.devDependencies ?? {})) {
+        allDeps.push({ name, version, ecosystem: "npm", kind: "dev" });
+      }
+      for (const [name, version] of Object.entries(pkg.peerDependencies ?? {})) {
+        allDeps.push({ name, version, ecosystem: "npm", kind: "runtime" });
+      }
+      if (pkg.dependencies || pkg.devDependencies) filesRead.push("package.json");
+    } catch { /* malformed; skip */ }
+  }
 
   // pyproject.toml — covers PEP 621, poetry, uv.
-  try {
-    const buf = await readFile(join(projectPath, "pyproject.toml"), "utf8");
-    const pyDeps = parsePyprojectDeps(buf);
+  const pyRaw = await fetcher("pyproject.toml");
+  if (pyRaw) {
+    const pyDeps = parsePyprojectDeps(pyRaw);
     allDeps.push(...pyDeps);
     if (pyDeps.length > 0) filesRead.push("pyproject.toml");
-  } catch { /* no pyproject */ }
+  }
 
   // requirements.txt — older Python, still common
-  try {
-    const buf = await readFile(join(projectPath, "requirements.txt"), "utf8");
-    const reqDeps = parseRequirementsTxt(buf);
+  const reqRaw = await fetcher("requirements.txt");
+  if (reqRaw) {
+    const reqDeps = parseRequirementsTxt(reqRaw);
     allDeps.push(...reqDeps);
     if (reqDeps.length > 0) filesRead.push("requirements.txt");
-  } catch { /* not present */ }
+  }
 
   // Cargo.toml
-  try {
-    const buf = await readFile(join(projectPath, "Cargo.toml"), "utf8");
-    const cargoDeps = parseCargoToml(buf);
+  const cargoRaw = await fetcher("Cargo.toml");
+  if (cargoRaw) {
+    const cargoDeps = parseCargoToml(cargoRaw);
     allDeps.push(...cargoDeps);
     if (cargoDeps.length > 0) filesRead.push("Cargo.toml");
-  } catch { /* not present */ }
+  }
 
   // go.mod
-  try {
-    const buf = await readFile(join(projectPath, "go.mod"), "utf8");
-    const goDeps = parseGoMod(buf);
+  const goRaw = await fetcher("go.mod");
+  if (goRaw) {
+    const goDeps = parseGoMod(goRaw);
     allDeps.push(...goDeps);
     if (goDeps.length > 0) filesRead.push("go.mod");
-  } catch { /* not present */ }
+  }
 
   // Dedup by (ecosystem, name) — peerDependencies often duplicates
   // dependencies, requirements.txt might shadow pyproject.toml, etc.

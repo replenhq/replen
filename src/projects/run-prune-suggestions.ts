@@ -11,6 +11,7 @@ import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
 import { recordEvent } from "../scheduler/events";
 import { parseManifests } from "./manifest-parser";
+import { fetchFile, GitHubApiError } from "../github/repo-content";
 import {
   probeDepHealth,
   mapWithConcurrency,
@@ -30,7 +31,7 @@ import { LlmQuotaError } from "../analyzer/llm";
 // single run. Default 20; env-tunable for ops.
 const MAX_LLM_CALLS_PER_RUN = parseInt(process.env.PRUNE_MAX_LLM_PER_RUN ?? "20", 10);
 
-export async function runPruneSuggestions(runId: number, userId: number): Promise<{ matchesCreated: number }> {
+export async function runPruneSuggestions(runId: number, userId: number, ghToken: string | undefined): Promise<{ matchesCreated: number }> {
   const projects = await db
     .select()
     .from(schema.projectProfiles)
@@ -40,6 +41,13 @@ export async function runPruneSuggestions(runId: number, userId: number): Promis
       eq(schema.projectProfiles.included, true),
     ));
   if (projects.length === 0) return { matchesCreated: 0 };
+  if (!ghToken) {
+    // Prune needs to read user manifests via the GitHub API. No PAT
+    // means we can't scan their deps. Don't fail the run — the rest
+    // of the feed still works without prune signal.
+    void recordEvent(runId, userId, "scan", "Prune skipped: no GitHub PAT on /settings");
+    return { matchesCreated: 0 };
+  }
 
   let llmCallsThisRun = 0;
   let totalMatches = 0;
@@ -50,8 +58,30 @@ export async function runPruneSuggestions(runId: number, userId: number): Promis
       break;
     }
 
-    // Step 1: parse manifests. Cheap, no caching needed.
-    const manifest = await parseManifests(p.path);
+    // Need a github_full_name to address the manifest via API.
+    if (!p.githubFullName || !/^[\w.-]+\/[\w.-]+$/.test(p.githubFullName)) continue;
+    const [pOwner, pName] = p.githubFullName.split("/");
+
+    // Step 1: parse manifests from GitHub. Cheap (~5 API calls per
+    // project, most return 404 quickly). The fetcher closure binds the
+    // repo + token so parseManifests itself stays source-agnostic.
+    let manifest;
+    try {
+      manifest = await parseManifests(async (filename) => {
+        try { return await fetchFile(pOwner, pName, filename, ghToken); }
+        catch (e) {
+          if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+          return null;
+        }
+      });
+    } catch (e) {
+      if (e instanceof GitHubApiError) {
+        void recordEvent(runId, userId, "scan", `Prune: GitHub API ${e.status} fetching manifests for ${p.slug} — pausing`);
+        break;
+      }
+      console.warn(`[prune] ${p.slug} manifest fetch failed:`, e);
+      continue;
+    }
     if (!manifest.hasManifest || manifest.deps.length === 0) {
       continue;
     }

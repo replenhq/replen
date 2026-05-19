@@ -9,7 +9,6 @@ User=ubuntu
 WorkingDirectory=/opt/replen
 EnvironmentFile=/opt/replen/.env
 Environment=NODE_ENV=production
-Environment=GITHUB_ROOT=/opt/replen/projects-mirror
 ExecStartPre=+/bin/mkdir -p /var/log/replen
 ExecStartPre=+/bin/chmod 0750 /var/log/replen
 ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen

@@ -15,8 +15,6 @@ Environment=PORT=3030
 # the origin IP if UFW rules ever drift. The `npm start` script already
 # passes `-H 127.0.0.1`, but HOSTNAME is read by Next as a fallback.
 Environment=HOSTNAME=127.0.0.1
-# Override laptop-side .env values for the VPS
-Environment=GITHUB_ROOT=/opt/replen/projects-mirror
 # Lock the log dir + files to 0640 (ubuntu:adm). Any user with a shell on
 # the box could otherwise tail the file and see auth-middleware error
 # traces. Two-step: dir first (so the touch can land), then files.
