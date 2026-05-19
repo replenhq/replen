@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_RELEVANCES = ["high", "medium", "general-awareness"];
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ rel?: string; days?: string; project?: string }> }) {
+export default async function Home({ searchParams }: { searchParams: Promise<{ rel?: string; days?: string; project?: string; discovery?: string; approach?: string }> }) {
   const user = await requireUser();
   // Send users without basic config to onboarding. Bypassed if they've ever
   // run a pipeline (returning visitor) - they might have just cleared their
@@ -41,8 +41,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 
   const sp = await searchParams;
   const relFilter = (sp.rel?.split(",").filter(Boolean) ?? DEFAULT_RELEVANCES) as string[];
-  const days = Math.min(Math.max(parseInt(sp.days ?? "2", 10) || 2, 1), 30);
+  // 7d default — 2d was too narrow, frequently producing empty feeds for
+  // anyone who only ran the pipeline yesterday.
+  const days = Math.min(Math.max(parseInt(sp.days ?? "7", 10) || 7, 1), 30);
   const projectFilter = sp.project;
+  const discoveryFilter = sp.discovery;
+  const approachFilter = sp.approach;
 
   const since = new Date(Date.now() - days * 24 * 3600 * 1000);
   const conds = [
@@ -60,6 +64,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       .get();
     if (p) conds.push(eq(schema.matches.projectId, p.id));
   }
+  if (discoveryFilter) conds.push(eq(schema.matches.discoveryMode, discoveryFilter));
+  if (approachFilter) conds.push(eq(schema.matches.integrationApproach, approachFilter));
 
   const matches = await db.select().from(schema.matches).where(and(...conds)).orderBy(desc(schema.matches.relevanceScore));
   // Batch-fetch repos + projects via IN(...) - avoids N+1 round-trips when a
@@ -194,7 +200,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ margin: 0, flex: 1 }}>Your feed</h1>
+        <h1 style={{ margin: 0, flex: 1 }}>What could you make better today?</h1>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
           <form action={runPipelineNow}>
             <RefreshButton inFlightAt={inFlightRun?.startedAt?.toISOString() ?? null} />
@@ -248,7 +254,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
         </div>
       )}
-      <FilterBar relFilter={relFilter} days={days} projectFilter={projectFilter} countMap={countMap} />
+      <FilterBar
+        relFilter={relFilter}
+        days={days}
+        projectFilter={projectFilter}
+        discoveryFilter={discoveryFilter}
+        approachFilter={approachFilter}
+        countMap={countMap}
+      />
       <p className="meta">{matches.length} matches shown · {orderedGroups.length} projects · window: last {days}d</p>
       {matches.length === 0 && (
         <p>No matches in this window. Try widening the day filter, or click <b>Refresh</b> above to run the pipeline now.</p>
@@ -293,33 +306,64 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                   <div className="match-head">
                     <a className="repo" href={repo.url} target="_blank" rel="noreferrer">{repo.owner}/{repo.name}</a>
                     <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
+                    {/* Per-card project ref — when you've scrolled past the
+                        group header you can still tell which project this
+                        match belongs to. Click to focus the feed on that
+                        project. _general / _unknown groups don't render a
+                        project tag (the slug isn't meaningful). */}
+                    {project && (
+                      <a
+                        href={`/?project=${slug}`}
+                        className="tag"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "var(--dim, #aaa)", textDecoration: "none" }}
+                        title={`Show only ${slug} matches`}
+                      >
+                        📁 {slug}
+                      </a>
+                    )}
                     {m.discoveryMode === "re-checked" && bookmarkDate && (
-                      <span className="tag" style={{ background: "#eef6ff", color: "#1d4ed8" }} title="Re-checked from your bookmarks — Replen re-evaluates bookmarked repos against your projects every 20 days">
+                      <a
+                        href="/?discovery=re-checked"
+                        className="tag"
+                        style={{ background: "#eef6ff", color: "#1d4ed8", textDecoration: "none" }}
+                        title="Re-checked from your bookmarks. Click to show only re-checked matches."
+                      >
                         Re-checked — saved {bookmarkDate.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
-                      </span>
+                      </a>
                     )}
                     {m.discoveryMode === "discovered" && (
-                      <span className="tag" style={{ background: "#fff7ed", color: "#9a3412" }} title="Found via a broad-net feed (GitHub trending, HN, Reddit, etc.) — not tied to a specific gap in your project">
+                      <a
+                        href="/?discovery=discovered"
+                        className="tag"
+                        style={{ background: "#fff7ed", color: "#9a3412", textDecoration: "none" }}
+                        title="Found via a broad-net feed (GitHub trending, HN, Reddit, etc.). Click to show only discovered matches."
+                      >
                         Discovered
-                      </span>
+                      </a>
                     )}
                     {m.discoveryMode === "scouted" && m.matchedOutcome && (
-                      <span className="tag" style={{ background: "#ecfdf5", color: "#065f46" }} title="Surfaced by a niche GitHub search Replen ran for this project's open work">
+                      <a
+                        href="/?discovery=scouted"
+                        className="tag"
+                        style={{ background: "#ecfdf5", color: "#065f46", textDecoration: "none" }}
+                        title="Surfaced by a niche GitHub search Replen ran for this project. Click to show only scouted matches."
+                      >
                         Scouted
-                      </span>
+                      </a>
                     )}
                     {/* Suppress "via gh-targeted" — redundant with the Scouted pill.
                         For discovered/re-checked, the source (gh-trending / hn / tiktok / etc.) is
                         actually useful information so keep showing it. */}
                     {srcKind && srcKind !== "gh-targeted" && <span className="tag">via {srcKind}</span>}
                     {m.integrationApproach && m.integrationApproach !== "n/a" && (
-                      <span
+                      <a
+                        href={`/?approach=${m.integrationApproach}`}
                         className="tag"
-                        style={integrationApproachStyle(m.integrationApproach)}
-                        title={integrationApproachTitle(m.integrationApproach)}
+                        style={{ ...integrationApproachStyle(m.integrationApproach), textDecoration: "none" }}
+                        title={`${integrationApproachTitle(m.integrationApproach)} · Click to show only this approach.`}
                       >
                         {integrationApproachLabel(m.integrationApproach)}
-                      </span>
+                      </a>
                     )}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                   </div>
@@ -417,10 +461,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 // still wants to know it's worth a look.
 function integrationApproachLabel(a: string | null): string {
   switch (a) {
-    case "depend-on-it": return "🔌 drop-in";
-    case "cherry-pick": return "✂️ cherry-pick";
-    case "vendor": return "📦 vendor";
-    case "cleanroom-rebuild": return "💡 idea to rebuild";
+    case "depend-on-it": return "🔌 Drop-in";
+    case "cherry-pick": return "✂️ Cherry-pick";
+    case "vendor": return "📦 Vendor";
+    case "cleanroom-rebuild": return "💡 Rebuild in-house";
     default: return "";
   }
 }
@@ -537,39 +581,101 @@ function SourcePost({ candidate }: { candidate: typeof schema.candidates.$inferS
   );
 }
 
-function FilterBar({ relFilter, days, projectFilter, countMap }: {
-  relFilter: string[]; days: number; projectFilter?: string; countMap: Map<string, number>;
+function FilterBar({ relFilter, days, projectFilter, discoveryFilter, approachFilter, countMap }: {
+  relFilter: string[];
+  days: number;
+  projectFilter?: string;
+  discoveryFilter?: string;
+  approachFilter?: string;
+  countMap: Map<string, number>;
 }) {
-  const allRels = ["high", "medium", "general-awareness", "low"] as const;
-  const make = (rels: string[]) => {
+  // "low" dropped — never a valid relevance value (high/medium/general-awareness only).
+  const allRels = ["high", "medium", "general-awareness"] as const;
+  // Build a URL with the current filters as a base, then merge overrides.
+  // Empty-string in override clears the param.
+  const make = (overrides: Record<string, string | string[]>) => {
     const qs = new URLSearchParams();
-    qs.set("rel", rels.join(","));
+    qs.set("rel", relFilter.join(","));
     qs.set("days", String(days));
     if (projectFilter) qs.set("project", projectFilter);
+    if (discoveryFilter) qs.set("discovery", discoveryFilter);
+    if (approachFilter) qs.set("approach", approachFilter);
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v === "" || (Array.isArray(v) && v.length === 0)) qs.delete(k);
+      else qs.set(k, Array.isArray(v) ? v.join(",") : v);
+    }
     return `/?${qs.toString()}`;
   };
+  const allRelsActive = allRels.every((r) => relFilter.includes(r));
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 16px", fontSize: 13 }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "8px 0 16px", fontSize: 13 }}>
       {allRels.map((r) => {
-        const active = relFilter.includes(r);
-        const next = active ? relFilter.filter((x) => x !== r) : [...relFilter, r];
+        // Solo-toggle: clicking a tier focuses on just that tier. Clicking
+        // again clears the filter back to "all tiers shown". Much closer to
+        // what users expect than the previous additive toggle.
+        const isSolo = relFilter.length === 1 && relFilter[0] === r;
+        const isActive = allRelsActive || isSolo;
+        const next = isSolo ? [...allRels] : [r];
         return (
-          <a key={r} href={make(next)} className={`tag ${r}`} style={{ opacity: active ? 1 : 0.4, textDecoration: "none" }}>
+          <a
+            key={r}
+            href={make({ rel: next })}
+            className={`tag ${r}`}
+            style={{ opacity: isActive ? 1 : 0.4, textDecoration: "none" }}
+            title={isSolo ? `Showing only ${r} — click to show all tiers` : `Show only ${r} matches`}
+          >
             {r} ({countMap.get(r) ?? 0})
           </a>
         );
       })}
-      <span style={{ marginLeft: "auto", opacity: 0.6 }}>days:</span>
-      {[1, 2, 7, 30].map((d) => (
-        <a key={d} href={`/?rel=${relFilter.join(",")}&days=${d}${projectFilter ? "&project=" + projectFilter : ""}`}
-           style={{ fontWeight: d === days ? 700 : 400, textDecoration: "none", color: "inherit" }}>
-          {d}d
+      {!allRelsActive && (
+        <a href={make({ rel: [...allRels] })} className="meta" style={{ fontSize: 12, textDecoration: "underline", opacity: 0.7 }}>
+          show all
         </a>
-      ))}
-      {projectFilter && (
-        <a href={make(relFilter)} style={{ marginLeft: 8 }}>
-          clear project filter ({projectFilter}) ✕
-        </a>
+      )}
+
+      <span style={{ marginLeft: "auto", opacity: 0.55, fontSize: 12 }}>last</span>
+      <div style={{ display: "inline-flex", gap: 2, padding: 2, background: "rgba(0,0,0,0.25)", border: "1px solid var(--line-strong, rgba(255,255,255,0.1))", borderRadius: 999 }}>
+        {[1, 2, 7, 30].map((d) => (
+          <a
+            key={d}
+            href={make({ days: String(d) })}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 999,
+              textDecoration: "none",
+              fontSize: 12,
+              fontWeight: d === days ? 600 : 400,
+              background: d === days ? "var(--fg)" : "transparent",
+              color: d === days ? "var(--bg)" : "inherit",
+              transition: "background 0.15s",
+            }}
+            title={`Last ${d} day${d === 1 ? "" : "s"}`}
+          >
+            {d}d
+          </a>
+        ))}
+      </div>
+
+      {(projectFilter || discoveryFilter || approachFilter) && (
+        <div style={{ flexBasis: "100%", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 2 }}>
+          <span className="meta" style={{ fontSize: 12 }}>active filters:</span>
+          {projectFilter && (
+            <a href={make({ project: "" })} className="tag" style={{ textDecoration: "none" }}>
+              project: {projectFilter} ✕
+            </a>
+          )}
+          {discoveryFilter && (
+            <a href={make({ discovery: "" })} className="tag" style={{ textDecoration: "none" }}>
+              source: {discoveryFilter} ✕
+            </a>
+          )}
+          {approachFilter && (
+            <a href={make({ approach: "" })} className="tag" style={{ textDecoration: "none" }}>
+              approach: {approachFilter} ✕
+            </a>
+          )}
+        </div>
       )}
     </div>
   );

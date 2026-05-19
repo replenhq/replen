@@ -59,6 +59,12 @@ A repo that scores low on #1 but high on #2 is still valuable. "Doesn't integrat
 
 WRITE IN PLAIN PROSE. NO markdown headers (no #, ##). NO bold "Summary:" labels. Use natural paragraphs separated by BLANK LINES (\\n\\n in the JSON string).
 
+WRITING STYLE — these rules apply to writeup, summary, whyUseful, suggestedUse, and risks:
+- NO em dashes (—). NO en dashes (–). Use a hyphen (-), comma, or sentence break instead. Hyphens BETWEEN words (e.g. "drop-in", "cherry-pick", "20-day") are fine.
+- Vary paragraph lengths. Some sentences stand alone as a single-line paragraph. Others group 2-3 sentences. Avoid uniform 5-sentence walls of text.
+- Aim for visual rhythm: a punchy one-liner, then a longer paragraph, then another short one. Make the page scannable.
+- Start with the lede, not the setup. Don't open with "It is important to note that..." or "This repo provides...". Open with what the user actually needs to know.
+
 Structure your writeup:
 
 (paragraph 1) 1-2 sentences on what the repo actually is — what it does, the tech stack, license, any constraints.
@@ -290,5 +296,13 @@ export function scrubBannedVocab(s: string): string {
     .replace(/\boutcomes\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Needs" : "needs"))
     .replace(/\boutcome\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Need" : "need"))
     .replace(/\bgoals\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Needs" : "needs"))
-    .replace(/\bgoal\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Need" : "need"));
+    .replace(/\bgoal\b/gi, (m) => (m[0] === m[0].toUpperCase() ? "Need" : "need"))
+    // Em/en dash → hyphen. The model loves these for parenthetical clauses
+    // ("FooBar is a Python library — actively maintained — that does X").
+    // User prefers plain hyphens; downstream renderers don't always handle
+    // unicode dashes uniformly either. Convert " — " and " – " (with
+    // surrounding spaces) to " - "; also handle the no-space form just in
+    // case ("word—word" → "word-word").
+    .replace(/\s+[—–]\s+/g, " - ")
+    .replace(/[—–]/g, "-");
 }

@@ -100,7 +100,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/" style={{ background: "transparent", marginRight: 14, padding: 0 }}>
               <Wordmark />
             </a>
-            <NavLink href="/">feed</NavLink>
+            <NavLink href="/" style={{ marginRight: 14 }}>Feed</NavLink>
             <form className="search" action="/search" method="get" role="search">
               <Icon name="search" size={14} />
               <input name="q" placeholder="search…" aria-label="Search" />
