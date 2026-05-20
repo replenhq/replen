@@ -37,30 +37,18 @@ Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub s
 
 ## Quickstart
 
-**Two ways in. Both passwordless. Both finish with your first digest building itself in front of you.**
-
-### Hosted (recommended for most)
-
-Open <a href="https://app.replen.dev">app.replen.dev</a>, click **Continue with Google** or **Continue with GitHub**, paste two keys, watch it run.
-
-- GitHub PAT (direct create link on the signup page — pre-filled scopes)
-- AI provider key (DeepSeek recommended — ~$0.27/M tokens — direct link to each provider's key page)
-
-First match in 30 seconds, first digest done in 5-10 minutes.
-
-### Self-host via npm
-
 ```bash
 npx replen
 ```
 
-Single command does:
-1. Opens your browser to sign up / sign in (Google / GitHub OAuth, passwordless)
-2. Walks you through the same 2-key setup
-3. Captures auth back into the terminal (browser-callback OAuth, same pattern as `gh auth login`)
-4. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
+That single command:
+1. Opens your browser to sign up / sign in
+2. Captures auth back into the terminal (browser-callback OAuth, same pattern as `gh auth login`)
+3. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
 
-Point at your own deployment if you self-host the dashboard:
+Your first matches arrive within minutes; the daily digest lands at the UTC hour you set thereafter. No token-paste, no JSON-fiddling.
+
+For self-host targets:
 
 ```bash
 REPLEN_BASE=https://replen.your-domain.dev npx replen
@@ -70,12 +58,12 @@ Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen
 
 ## What it does
 
-1. **Reads your projects.** Builds a profile per project (purpose, needs, stack, dependencies) so it knows what you'd actually adopt — regardless of project type (library, CLI, app, infra, research code).
+1. **Reads your projects.** Builds a profile per project (purpose, outcome goals, stack, dependencies) so it knows what you'd actually adopt — regardless of project type (library, CLI, app, infra, research code).
 2. **Scouts and discovers.** Two passes feed the same triage funnel:
-   - **Scouted** — runs derive niche GitHub searches from each project's needs and scout for repos solving exactly that. Catches things trending feeds miss.
+   - **Scouted** — runs derive niche GitHub searches from each project's outcome goals and scout for repos solving exactly that. Catches things trending feeds miss.
    - **Discovered** — sweeps gh-trending tailored to your stack, plus TikTok / Threads / Reddit / HN. The "background hum" of the ecosystem.
 3. **Compares each repo against your code.** Bring your own LLM: any OpenAI-compatible endpoint for routine triage, plus an optional second slot (e.g. Anthropic, or a privately-hosted model) for high-sensitivity projects. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos. For high-stakes scouted candidates, an optional **source-verification** pass shallow-clones the repo and cross-checks the README's claims against the actual code via a BM25 index — catches the case where a sales-pitch README promises functionality the code doesn't support.
-4. **Re-checks what you starred.** Every run re-evaluates your bookmarked general-awareness matches against *other* projects' needs. If something you saved as "interesting for later" fits a different project's need today, it re-surfaces with a **re-checked** pill so you don't lose it to the backlog.
+4. **Re-checks what you starred.** Every run re-evaluates your bookmarked general-awareness matches against *other* projects' outcome goals. If something you saved as "interesting for later" fits a different project's need today, it re-surfaces with a **re-checked** pill so you don't lose it to the backlog.
 5. **Delivers** three ways:
    - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs. Each match wears a pill — `scouted`, `discovered`, or `re-checked` — so you know how it found you.
    - **HTML email** every morning at the UTC hour you set.
@@ -109,15 +97,15 @@ Engineering numbers we measure, not marketing claims we promise:
 - **<250 ms** per source-context query against a built index — fast enough that the source-verification pass adds ~30-70 s end-to-end per candidate including the one-time clone.
 - **~70 s** typical end-to-end for a per-user pipeline run with no source verification: fetch fan-out, triage, reason, write digest.
 
-Everything in this list is observable in the `digest_runs` table and the structured pipeline logs. We'll add user-outcome metrics (acceptance rate, hit-rate vs gh-trending baseline, time-to-integration) once we've shipped telemetry — until then we won't claim them.
+Everything in this list is observable in the `digest_runs` table and the structured pipeline logs. We'll add user-outcome metrics (acceptance rate, hit-rate vs gh-trending baseline, time-to-integration) once we've shipped telemetry.
 
 ## Workflow
 
 The morning email is just the entry point. The interesting bit is what happens after you find something worth keeping:
 
 ```
-1. Replen surfaces a match           → in email, dashboard, or via MCP tool
-2. You star it                       → click ★, or "use replen to handoff matchId 96"
+1. Replen surfaces a match           → dashboard, in email, or via MCP tool
+2. You star it and action a PR       → click ★, or "use replen to handoff matchId 96"
 3. Replen opens a PR in your repo    → a markdown briefing in .replen/handoffs/
 4. Your agent picks it up            → Claude Code / Codex reads the briefing,
                                        has full context, proposes the integration
@@ -137,7 +125,7 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
   Threads (via RSSHub sidecar)        │ │
   Reddit (curated + per-user subs)    │ ├─→  candidates  (sqlite)
   HN (Algolia)                        │ │
-  /api/ingest  (bookmarklet / POST)   ─┘
+  /api/ingest  (bookmarklet / POST)   -─┘
                                         ↓
 ─── ANALYSIS ─────────────────────────────────────────────────
   per-user pipeline (run-once.ts)

@@ -31,34 +31,47 @@ if (existsSync(absPath)) {
     console.warn(`[db] chmod 0600 on ${absPath} failed: ${(e as Error).message}`);
   }
 }
-// Absorb concurrent reader/writer locks (the dashboard reads while the pipeline writes).
-await client.execute("PRAGMA busy_timeout = 8000");
-await client.execute("PRAGMA journal_mode = WAL");
 export const db = drizzle(client, { schema });
 export { schema };
 
-// One-time orphan reaper on module load. If a previous process was killed
-// (deploy restart, OOM, etc.) any digest_runs row it created stays with
-// finished_at = NULL forever, blocking the "Run pipeline now" button. Mark
-// any leftover unfinished run from BEFORE this process started as crashed.
-// Safe because: (a) a real in-flight run from THIS process can't have been
-// inserted yet, and (b) we only update rows whose started_at is older than
-// 30 minutes - covers the legitimate-running-pipeline edge case.
-await client.execute({
-  sql: `UPDATE digest_runs
-        SET finished_at = strftime('%s','now'),
-            error_log = COALESCE(error_log, 'reaped on startup - previous process died before completion')
-        WHERE finished_at IS NULL
-          AND started_at < strftime('%s','now') - 1800`,
-  args: [],
-}).catch((e) => console.error("[db] orphan reaper failed:", e));
+// Skip all boot-time DB writes (PRAGMA setup, orphan reaper, v1→v2 rewrap)
+// during `next build`. Production page-data collection spawns ~7 workers
+// that each import every route module; each import would otherwise hit the
+// same sqlite file concurrently and deadlock on the journal-mode-switch
+// exclusive lock. These writes need to run at *runtime* (next start, or
+// this module loaded by a script), not at build time when the DB is
+// incidental and the workers only need the module to compile.
+const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
 
-// One-shot envelope upgrade: rewrap any v1-encrypted user_settings secrets
-// under the user's per-tenant DEK (enc:v2). Idempotent - rows already in v2
-// are detected by prefix and skipped. Needs ENCRYPTION_KEY available, so
-// silently no-ops in dev environments without it.
-if (process.env.ENCRYPTION_KEY) {
-  await rewrapV1Secrets().catch((e) => console.error("[db] v1→v2 rewrap failed:", (e as Error).message));
+if (!IS_BUILD) {
+  // Absorb concurrent reader/writer locks (the dashboard reads while the
+  // pipeline writes).
+  await client.execute("PRAGMA busy_timeout = 8000");
+  await client.execute("PRAGMA journal_mode = WAL");
+
+  // One-time orphan reaper on module load. If a previous process was killed
+  // (deploy restart, OOM, etc.) any digest_runs row it created stays with
+  // finished_at = NULL forever, blocking the "Run pipeline now" button. Mark
+  // any leftover unfinished run from BEFORE this process started as crashed.
+  // Safe because: (a) a real in-flight run from THIS process can't have been
+  // inserted yet, and (b) we only update rows whose started_at is older than
+  // 30 minutes - covers the legitimate-running-pipeline edge case.
+  await client.execute({
+    sql: `UPDATE digest_runs
+          SET finished_at = strftime('%s','now'),
+              error_log = COALESCE(error_log, 'reaped on startup - previous process died before completion')
+          WHERE finished_at IS NULL
+            AND started_at < strftime('%s','now') - 1800`,
+    args: [],
+  }).catch((e) => console.error("[db] orphan reaper failed:", e));
+
+  // One-shot envelope upgrade: rewrap any v1-encrypted user_settings secrets
+  // under the user's per-tenant DEK (enc:v2). Idempotent - rows already in v2
+  // are detected by prefix and skipped. Needs ENCRYPTION_KEY available, so
+  // silently no-ops in dev environments without it.
+  if (process.env.ENCRYPTION_KEY) {
+    await rewrapV1Secrets().catch((e) => console.error("[db] v1→v2 rewrap failed:", (e as Error).message));
+  }
 }
 
 async function rewrapV1Secrets(): Promise<void> {
