@@ -27,3 +27,7 @@ backups/
 # Operator-specific deploy wrappers (private hostnames/domains)
 scripts/*.local.sh
 scripts/*.local.plist
+
+# Local operator notes (deployment topology, credentials, runbooks).
+# Kept out of the public mirror.
+*.local.md

@@ -139,6 +139,12 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname === "/api/whoami") {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
+  // /api/healthz: public liveness/readiness probe for uptime monitors.
+  // Pings the sqlite; returns 200/503. No auth, no cookies, no body
+  // beyond a tiny JSON status.
+  if (request.nextUrl.pathname === "/api/healthz") {
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+  }
   // /api/ingest: per-user token auth from the route; bookmarklets POST here
   // from any origin (CORS preflight is OPTIONS).
   if (request.nextUrl.pathname.startsWith("/api/ingest")) {
