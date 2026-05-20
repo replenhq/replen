@@ -1,5 +1,5 @@
 import { db, schema } from "@/db/client";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/current-user";
 import { sendInviteEmail } from "@/email/invite";
@@ -9,6 +9,30 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage() {
   const admin = await requireAdmin();
   const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
+
+  // Signup tracker: rolling counts + daily cap state. The cap matters
+  // on launch days when /api/login starts refusing new accounts once
+  // hit. Computed against the same "verified email created in last
+  // 24h" window that current-user.ts:getCurrentUser uses.
+  const now = Date.now();
+  const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000);
+  const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const signupsToday = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(gte(schema.users.createdAt, oneDayAgo))
+    .get();
+  const signupsWeek = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(gte(schema.users.createdAt, oneWeekAgo))
+    .get();
+  const todayCount = Number(signupsToday?.c ?? 0);
+  const weekCount = Number(signupsWeek?.c ?? 0);
+  const totalCount = users.length;
+  const dailyCap = parseInt(process.env.REPLEN_DAILY_SIGNUP_CAP ?? "50", 10);
+  const capPct = Math.min(100, Math.round((todayCount / dailyCap) * 100));
+  const capState: "ok" | "warn" | "hit" = capPct >= 100 ? "hit" : capPct >= 80 ? "warn" : "ok";
 
   async function addUser(form: FormData) {
     "use server";
@@ -117,7 +141,39 @@ export default async function AdminPage() {
         <a href="/admin/proposals">Source proposals queue ({pendingCount.length} pending)</a>
         {" · "}
         <a href="/projects">Projects (sensitivity / model overrides)</a>
+        {" · "}
+        <a href="/admin/errors">Recent errors</a>
       </p>
+
+      <h2 style={{ marginTop: 24 }}>Signups</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, maxWidth: 720 }}>
+        <div style={{ padding: "10px 14px", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}>
+          <div className="meta" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>Today (24h)</div>
+          <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{todayCount}</div>
+          <div className="meta" style={{ fontSize: 11, marginTop: 4 }}>
+            <span style={{ color: capState === "hit" ? "#b91c1c" : capState === "warn" ? "#92400e" : "var(--faint, #888)" }}>
+              {capPct}% of cap ({dailyCap})
+            </span>
+          </div>
+        </div>
+        <div style={{ padding: "10px 14px", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}>
+          <div className="meta" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>This week</div>
+          <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{weekCount}</div>
+        </div>
+        <div style={{ padding: "10px 14px", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}>
+          <div className="meta" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>All time</div>
+          <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{totalCount}</div>
+        </div>
+        <div style={{ padding: "10px 14px", border: "1px solid var(--border, #ddd)", borderRadius: 6, background: capState === "hit" ? "rgba(239,68,68,0.08)" : capState === "warn" ? "rgba(217,119,6,0.08)" : "transparent" }}>
+          <div className="meta" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>Cap state</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4, color: capState === "hit" ? "#b91c1c" : capState === "warn" ? "#92400e" : "var(--fg)" }}>
+            {capState === "hit" ? "🚫 Hit — signups blocked" : capState === "warn" ? "⚠️ Near cap" : "✓ Healthy"}
+          </div>
+          <div className="meta" style={{ fontSize: 11, marginTop: 4 }}>
+            <code>REPLEN_DAILY_SIGNUP_CAP={dailyCap}</code>
+          </div>
+        </div>
+      </div>
 
       <h2 style={{ marginTop: 24 }}>Add user</h2>
       <p className="meta">
