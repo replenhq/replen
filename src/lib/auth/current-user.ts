@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getTokens } from "next-firebase-auth-edge/lib/next/tokens";
 import { authConfig } from "./config";
 import { db, schema } from "@/db/client";
-import { eq, isNull } from "drizzle-orm";
+import { eq, gte, isNull } from "drizzle-orm";
 
 export type CurrentUser = {
   id: number;
@@ -70,34 +70,58 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     //   (a) Bootstrap admin: the verified email matches BOOTSTRAP_ADMIN_EMAIL,
     //       so this is the operator's own first sign-in. Created as active
     //       admin and given the legacy NULL-userId backfill.
-    //   (b) Public sign-up: anyone else with a verified email. Created with
-    //       status='pending'. The scheduler / dashboard / API routes all
-    //       gate on status='active', so a pending user can authenticate but
-    //       can't run pipelines, consume any scheduler slot, or see anyone
-    //       else's data. They land on /pending until an admin approves them
-    //       from /admin.
+    //   (b) Public self-serve sign-up: anyone else with a verified email.
+    //       Created with status='active' so they land on /welcome and walk
+    //       the onboarding wizard themselves. Admin moderation moves from
+    //       gating-by-default to suspending-when-needed (via /admin).
     //
-    // Race: two parallel requests for a brand-new uid both miss the SELECT
-    // above and both attempt an INSERT. The second one would hit the
-    // uniq_user_firebase_uid / uniq_user_email constraint and surface a
-    // 500 to the user. onConflictDoNothing + re-select converts that
-    // collision into a benign no-op.
+    // Email must be verified for path (b). OAuth providers (Google /
+    // GitHub) auto-verify; email magic-link sign-in flips the bit on
+    // first successful click. Unverified emails are refused — defence
+    // against scripted signups against scratch addresses.
+    //
+    // Rate limit (defensive): cap new sign-ups per 24h via env
+    // REPLEN_DAILY_SIGNUP_CAP (default 50). Returning null surfaces a
+    // generic auth failure to the client; admin can raise the cap if
+    // a legit traffic burst hits it.
+    //
+    // Race: two parallel requests for a brand-new uid both miss the
+    // SELECT above and both attempt an INSERT. The second one would hit
+    // the uniq_user_firebase_uid / uniq_user_email constraint and
+    // surface a 500 to the user. onConflictDoNothing + re-select
+    // converts that collision into a benign no-op.
     const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "").replace(/\s+/g, "").toLowerCase();
     let matchesBootstrap = !!bootstrapEmail && email === bootstrapEmail && emailVerified;
-    // Audit L10: refuse bootstrap-admin if an admin already exists. The
-    // existing flow let a swapped BOOTSTRAP_ADMIN_EMAIL mid-deploy create
-    // a second admin on first sign-in, granting canUseSharedLlm + role
-    // bypass without any in-app step. With a real admin already present
-    // we degrade to normal pending-user; operator can promote via /admin.
     if (matchesBootstrap) {
+      // Audit L10: refuse bootstrap-admin if an admin already exists.
+      // The existing flow let a swapped BOOTSTRAP_ADMIN_EMAIL mid-deploy
+      // create a second admin on first sign-in, granting canUseSharedLlm
+      // + role bypass without any in-app step. With a real admin already
+      // present we degrade to a normal active user.
       const existingAdmin = await db
         .select({ id: schema.users.id })
         .from(schema.users)
         .where(eq(schema.users.role, "admin"))
         .get();
       if (existingAdmin) {
-        console.warn(`[auth] BOOTSTRAP_ADMIN_EMAIL matched ${email} but an admin already exists; creating as pending instead`);
+        console.warn(`[auth] BOOTSTRAP_ADMIN_EMAIL matched ${email} but an admin already exists; creating as normal active user`);
         matchesBootstrap = false;
+      }
+    }
+    if (!matchesBootstrap) {
+      if (!emailVerified) {
+        console.warn(`[auth] refusing self-serve signup for ${email}: email not yet verified`);
+        return null;
+      }
+      const cap = parseInt(process.env.REPLEN_DAILY_SIGNUP_CAP ?? "50", 10);
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recent = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(gte(schema.users.createdAt, oneDayAgo));
+      if (recent.length >= cap) {
+        console.warn(`[auth] daily signup cap (${cap}) hit; refusing ${email}`);
+        return null;
       }
     }
     await db
@@ -107,7 +131,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         email,
         displayName,
         role: matchesBootstrap ? "admin" : "user",
-        status: matchesBootstrap ? "active" : "pending",
+        status: "active",
         canUseSharedLlm: matchesBootstrap,
         createdAt: new Date(),
         lastLoginAt: new Date(),
@@ -134,15 +158,16 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       await db.update(schema.matches).set({ userId: row.id }).where(isNull(schema.matches.userId));
       await db.update(schema.digestRuns).set({ userId: row.id }).where(isNull(schema.digestRuns.userId));
     } else {
-      console.log(`[auth] new pending account created for ${email} (awaiting admin approval)`);
+      console.log(`[auth] new active account created for ${email} (self-serve signup)`);
     }
   } else {
     await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, row.id));
   }
 
-  // 'suspended' is a hard block: refuse to resolve. 'pending' is allowed
-  // through so we can render the /pending holding page, but the layout +
-  // page-level guards downstream restrict what they can actually see.
+  // 'suspended' is a hard block: refuse to resolve. 'pending' (legacy —
+  // no new sign-ups create pending rows since self-serve flipped on)
+  // still routes via /pending if any legacy rows exist. The layout +
+  // page-level guards downstream restrict what they can see.
   if (row.status === "suspended") return null;
   return {
     id: row.id,

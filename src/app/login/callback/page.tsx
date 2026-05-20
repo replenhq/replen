@@ -1,33 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { isSignInWithEmailLink, signInWithEmailLink, getIdToken } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 
-// Magic-link callback. The user arrives here after clicking the sign-in
-// link in their inbox. Firebase appends ?apiKey=...&oobCode=...&mode=signIn
-// to the URL we set as `actionCodeSettings.url` in the login page.
+// Sign-in callback. Three arrival paths:
 //
-// IMPORTANT: we deliberately DO NOT consume the oobCode on page load.
-// Email security scanners (Gmail's safety scan, Outlook SafeLinks, etc.)
-// pre-fetch links to check for malware before the user clicks. If we
-// called signInWithEmailLink on mount, the scanner's fetch would burn the
-// one-time code and the human's click would fail with auth/invalid-action-code.
-// Instead we render a "Click to finish signing in" button. Scanners GET the
-// page; they don't run JS event handlers or click buttons. Only a real
-// human click triggers the actual sign-in.
+//   1. OAuth popup closed       → ?from=oauth in the URL; Firebase has
+//                                  already stored the user via signInWithPopup.
+//                                  Just exchange the ID token for a session
+//                                  cookie and redirect.
+//
+//   2. Email magic link click   → URL has ?apiKey=...&oobCode=...&mode=signIn.
+//                                  We deliberately DO NOT consume the oobCode
+//                                  on page load: email security scanners
+//                                  (Gmail safety scan, Outlook SafeLinks)
+//                                  pre-fetch links and would burn the one-time
+//                                  code. Render a "Click to finish" button;
+//                                  scanners don't click buttons, humans do.
+//
+//   3. Magic link in different browser → no localStorage email; ask the user
+//                                          to re-type it for the signInWithEmailLink
+//                                          security re-confirm.
 
 const EMAIL_STORAGE_KEY = "replen:emailForSignIn";
 
 export default function CallbackPage() {
   const router = useRouter();
-  const [state, setState] = useState<"confirm" | "working" | "need-email" | "error">("confirm");
+  const searchParams = useSearchParams();
+  const [state, setState] = useState<"confirm" | "working" | "need-email" | "error" | "oauth-exchange">("confirm");
   const [err, setErr] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [validLink, setValidLink] = useState(false);
 
   useEffect(() => {
+    // Path 1: OAuth flow. Firebase user is already signed in; just
+    // exchange the ID token for our session cookie.
+    if (searchParams.get("from") === "oauth") {
+      setState("oauth-exchange");
+      void exchangeOAuth(router, setErr, setState);
+      return;
+    }
+    // Path 2/3: email magic link.
     if (!isSignInWithEmailLink(auth, window.location.href)) {
       setErr("This link isn't a valid sign-in link. It may have already been used, or it expired. Request a new one from the sign-in page.");
       setState("error");
@@ -43,7 +58,7 @@ export default function CallbackPage() {
       // requested it (or localStorage was cleared). Ask the user to re-type.
       setState("need-email");
     }
-  }, []);
+  }, [searchParams, router]);
 
   async function finish(emailToUse: string) {
     setState("working");
@@ -125,11 +140,62 @@ export default function CallbackPage() {
     );
   }
 
+  if (state === "oauth-exchange") {
+    return (
+      <div style={{ maxWidth: 420, margin: "80px auto", textAlign: "center" }}>
+        <p style={{ color: "#666" }}>Finishing sign-in…</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 420, margin: "80px auto", textAlign: "center" }}>
       <p style={{ color: "#666" }}>Signing you in…</p>
     </div>
   );
+}
+
+// OAuth: Firebase already has the user from signInWithPopup. Just grab
+// the ID token, post to /api/login to set the session cookie, then route.
+async function exchangeOAuth(
+  router: ReturnType<typeof useRouter>,
+  setErr: (s: string | null) => void,
+  setState: (s: "confirm" | "working" | "need-email" | "error" | "oauth-exchange") => void,
+) {
+  try {
+    // currentUser is populated synchronously after signInWithPopup resolves
+    // and Firebase persists to IndexedDB. Wait a tick if not ready yet.
+    const waited = await new Promise<typeof auth.currentUser>((resolve) => {
+      if (auth.currentUser) { resolve(auth.currentUser); return; }
+      const off = auth.onAuthStateChanged((user) => {
+        off();
+        resolve(user);
+      });
+    });
+    const u = waited;
+    if (!u) {
+      setErr("Sign-in didn't complete. Try again from the sign-in page.");
+      setState("error");
+      return;
+    }
+    const idToken = await getIdToken(u);
+    const res = await fetch("/api/login", { headers: { authorization: `Bearer ${idToken}` } });
+    if (!res.ok) {
+      let msg = `Server returned ${res.status}.`;
+      try {
+        const body = await res.json();
+        if (body?.error) msg = body.error;
+      } catch { /* non-JSON */ }
+      try { await auth.signOut(); } catch { /* ignore */ }
+      setErr(msg);
+      setState("error");
+      return;
+    }
+    router.push("/");
+  } catch (e) {
+    setErr(e instanceof Error ? e.message : "Sign-in failed.");
+    setState("error");
+  }
 }
 
 function prettyErr(e: unknown): string {
