@@ -31,7 +31,8 @@ export type CurrentUser = {
  * spoofed display name) could claim that account.
  */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
-  const tokens = await getTokens(await cookies(), authConfig);
+  const cookieStore = await cookies();
+  const tokens = await getTokens(cookieStore, authConfig);
   if (!tokens) return null;
 
   const uid = tokens.decodedToken.uid;

@@ -4,6 +4,7 @@ import { db, schema } from "@/db/client";
 import { and, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { readUserSecret } from "@/lib/user-secrets";
 import { errorMsg } from "@/lib/error-msg";
 import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
@@ -30,7 +31,7 @@ const MIN_RUN_GAP_MS = 60_000;
 // dashboard query controls the visual gate, so the user doesn't see a
 // confusing error.
 export async function runPipelineNow(): Promise<void> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const inFlight = await db
     .select({ id: schema.digestRuns.id })
     .from(schema.digestRuns)
@@ -59,7 +60,7 @@ export async function runPipelineNow(): Promise<void> {
 }
 
 export async function setMatchFeedback(matchId: number, value: string) {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!ALLOWED_FEEDBACK.has(value)) throw new Error(`invalid feedback: ${value}`);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
   await db
@@ -71,7 +72,7 @@ export async function setMatchFeedback(matchId: number, value: string) {
 }
 
 export async function setPersonalNote(matchId: number, note: string) {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
   const trimmed = (note ?? "").slice(0, 2000);
   await db
@@ -83,7 +84,7 @@ export async function setPersonalNote(matchId: number, note: string) {
 }
 
 export async function setMatchStatus(matchId: number, status: string) {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!ALLOWED_STATUSES.has(status)) throw new Error(`invalid status: ${status}`);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
   // Enforce intent split: 'starred' = action item (high/medium); 'bookmarked'
@@ -120,7 +121,7 @@ export async function setMatchStatus(matchId: number, status: string) {
 const ALLOWED_INSIGHT_STATUSES = new Set(["unread", "starred", "hidden"]);
 
 export async function setInsightStatus(insightId: number, status: string) {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!ALLOWED_INSIGHT_STATUSES.has(status)) throw new Error(`invalid insight status: ${status}`);
   if (!Number.isInteger(insightId) || insightId <= 0) throw new Error("invalid insightId");
   await db
@@ -131,7 +132,7 @@ export async function setInsightStatus(insightId: number, status: string) {
 }
 
 export async function createHandoff(matchId: number): Promise<{ ok: boolean; prUrl?: string; reason?: string }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(matchId) || matchId <= 0) throw new Error("invalid matchId");
 
   const match = await db
@@ -241,7 +242,7 @@ async function safeReadSecret(
 // hidden matches (which could otherwise be used to wipe a tenant's history
 // via a single misuse of the form).
 export async function archiveOldHidden(days: number = 90): Promise<{ ok: boolean; archived: number }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const safeDays = Math.max(Number.isFinite(days) ? Math.floor(days) : 90, 30);
   const cutoff = new Date(Date.now() - safeDays * 86400_000);
   const res = await db
@@ -261,7 +262,7 @@ export async function archiveOldHidden(days: number = 90): Promise<{ ok: boolean
 // Bulk unstar - accepts a list of match IDs and clears userStatus on all that
 // belong to the caller. Used by the "Unstar selected" button on /starred.
 export async function bulkUnstar(matchIds: number[]): Promise<{ ok: boolean; updated: number }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const ids = matchIds.filter((n) => Number.isInteger(n) && n > 0);
   if (ids.length === 0) return { ok: true, updated: 0 };
   let updated = 0;
@@ -281,7 +282,7 @@ export async function bulkUnstar(matchIds: number[]): Promise<{ ok: boolean; upd
 // doesn't already have one. Sequential because each call talks to GitHub and
 // we'd hit the secondary-rate-limit fanning out.
 export async function bulkCreateHandoffs(matchIds: number[]): Promise<{ ok: boolean; opened: number; skipped: number; failures: string[] }> {
-  await requireUser();
+  await requireWritableUser();
   const ids = matchIds.filter((n) => Number.isInteger(n) && n > 0);
   let opened = 0, skipped = 0;
   const failures: string[] = [];
@@ -304,7 +305,7 @@ export async function bulkCreateHandoffs(matchIds: number[]): Promise<{ ok: bool
 // Rate-limited by GitHub's per-token limit (5000/h on classic / fine-grained),
 // so we cap polling to PRs that have been checked > 30 minutes ago.
 export async function refreshHandoffStatuses(): Promise<{ ok: boolean; checked: number; merged: number; reason?: string }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
   const token = tokenStored ? await safeReadSecret(user.id, "githubToken", tokenStored, "create-handoff") : null;
@@ -340,7 +341,7 @@ export async function refreshHandoffStatuses(): Promise<{ ok: boolean; checked: 
 // the "Recompute" button on /projects/[slug]. Returns the resulting summary
 // (or null if the project has no docs at all).
 export async function recomputeProjectSummary(projectId: number): Promise<{ ok: boolean; reason?: string }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("invalid projectId");
   const project = await db
     .select()
@@ -388,7 +389,7 @@ export async function recomputeProjectSummary(projectId: number): Promise<{ ok: 
 // Thin wrapper over proposeDocsImprovement so the UI gets a server action
 // with the same shape as createHandoff.
 export async function openDocsImprovementPR(projectId: number): Promise<{ ok: boolean; prUrl?: string; reason?: string }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("invalid projectId");
   const result = await proposeDocsImprovement(user.id, projectId);
   if (result.ok) {

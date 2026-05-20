@@ -1,3 +1,5 @@
+import { db, schema } from "@/db/client";
+import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
 import { CliAuthForm } from "./CliAuthForm";
 
@@ -61,6 +63,44 @@ export default async function CliAuthPage({ searchParams }: Params) {
   // Hits auth gate. If not logged in, middleware bounces to /login and
   // brings the user back here after sign-in / sign-up.
   const user = await requireUser();
+
+  // New-user onboarding gate: if the user signed in but hasn't pasted
+  // a PAT + LLM key yet, send them through /welcome first. Returning
+  // to /cli-auth?... after onboarding completes means the CLI flow
+  // resumes from exactly where it paused.
+  const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
+  const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
+  const hasLlm = !!(settings?.llmPrimaryApiKey || settings?.deepseekApiKey || settings?.anthropicApiKey || settings?.llmSensitiveApiKey);
+  if (!hasGithub || !hasLlm) {
+    const here = `/cli-auth?port=${port}&state=${state}`;
+    return (
+      <main style={pageStyle}>
+        <meta name="referrer" content="no-referrer" />
+        <h1 style={h1Style}>One quick setup step</h1>
+        <p style={dimStyle}>
+          Before the CLI can read your matches, paste your GitHub PAT and an AI provider key. Takes about 30 seconds.
+        </p>
+        <a
+          href={`/welcome?returnTo=${encodeURIComponent(here)}`}
+          style={{
+            display: "inline-block",
+            padding: "10px 18px",
+            background: "#111",
+            color: "#fff",
+            textDecoration: "none",
+            borderRadius: 8,
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          Set up Replen →
+        </a>
+        <p style={{ fontSize: 12, color: "#888", marginTop: 24 }}>
+          We&rsquo;ll bring you back here as soon as you&rsquo;re done.
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main style={pageStyle}>

@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { authMiddleware, redirectToLogin } from "next-firebase-auth-edge";
 import { authConfig } from "@/lib/auth/config";
 
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout"];
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/signed-out", "/demo"];
 
 function isPublic(pathname: string) {
   if (pathname.startsWith("/_next/") || pathname.includes(".")) return true;
@@ -112,6 +112,10 @@ export async function middleware(request: NextRequest) {
   // can pick it up via headers().get("x-nonce").
   const forwardedHeaders = new Headers(request.headers);
   forwardedHeaders.set("x-nonce", nonce);
+
+  // /demo and /demo/* are real, public Next.js routes — no auth gate,
+  // no cookie, no rewrite. They render the seeded demo user's data
+  // directly. authMiddleware below treats them as public via PUBLIC_PATHS.
 
   // /api/sync still uses x-sync-token; keep public (the route checks its own auth).
   if (request.nextUrl.pathname.startsWith("/api/sync")) {

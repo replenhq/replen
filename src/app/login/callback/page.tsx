@@ -39,7 +39,9 @@ export default function CallbackPage() {
     // exchange the ID token for our session cookie.
     if (searchParams.get("from") === "oauth") {
       setState("oauth-exchange");
-      void exchangeOAuth(router, setErr, setState);
+      const r = searchParams.get("returnTo");
+      const safe = r && r.startsWith("/") && !r.startsWith("//") ? r : null;
+      void exchangeOAuth(router, setErr, setState, safe);
       return;
     }
     // Path 2/3: email magic link.
@@ -77,7 +79,9 @@ export default function CallbackPage() {
         try { await auth.signOut(); } catch { /* ignore */ }
         throw new Error(msg);
       }
-      router.push("/");
+      const r = searchParams.get("returnTo");
+      const safe = r && r.startsWith("/") && !r.startsWith("//") ? r : "/";
+      router.push(safe);
     } catch (e) {
       setErr(prettyErr(e));
       setState("error");
@@ -161,6 +165,7 @@ async function exchangeOAuth(
   router: ReturnType<typeof useRouter>,
   setErr: (s: string | null) => void,
   setState: (s: "confirm" | "working" | "need-email" | "error" | "oauth-exchange") => void,
+  returnTo: string | null,
 ) {
   try {
     // currentUser is populated synchronously after signInWithPopup resolves
@@ -191,7 +196,7 @@ async function exchangeOAuth(
       setState("error");
       return;
     }
-    router.push("/");
+    router.push(returnTo ?? "/");
   } catch (e) {
     setErr(e instanceof Error ? e.message : "Sign-in failed.");
     setState("error");

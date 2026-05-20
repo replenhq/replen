@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   GoogleAuthProvider,
   GithubAuthProvider,
   sendSignInLinkToEmail,
   signInWithPopup,
 } from "firebase/auth";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase/client";
 
 // Sign-in / sign-up landing. Three passwordless options:
@@ -25,10 +25,21 @@ const EMAIL_STORAGE_KEY = "replen:emailForSignIn";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<"oauth" | "email-form" | "email-sent">("oauth");
   const [busy, setBusy] = useState<"google" | "github" | "email" | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    // ?returnTo= survives the OAuth popup by being passed to the
+    // callback page on next-route push. For magic-link mode we
+    // embed it in the action code URL so it round-trips through
+    // the user's inbox + their click on the link.
+    const r = searchParams.get("returnTo") ?? searchParams.get("redirect") ?? null;
+    if (r && r.startsWith("/") && !r.startsWith("//")) setReturnTo(r);
+  }, [searchParams]);
 
   async function oauthSignIn(provider: "google" | "github") {
     setBusy(provider);
@@ -43,8 +54,11 @@ export default function LoginPage() {
       await signInWithPopup(auth, p);
       // After signInWithPopup resolves, Firebase has stored the user.
       // Navigate to the session-establish callback which posts the ID
-      // token to /api/login and then routes to /welcome or /.
-      router.push("/login/callback?from=oauth");
+      // token to /api/login and then routes to returnTo (or / by default).
+      const cbUrl = returnTo
+        ? `/login/callback?from=oauth&returnTo=${encodeURIComponent(returnTo)}`
+        : "/login/callback?from=oauth";
+      router.push(cbUrl);
     } catch (e) {
       setErr(prettyErr(e));
     } finally {
@@ -57,7 +71,10 @@ export default function LoginPage() {
     setBusy("email");
     setErr(null);
     try {
-      const url = `${window.location.origin}/login/callback`;
+      const cbBase = `${window.location.origin}/login/callback`;
+      const url = returnTo
+        ? `${cbBase}?returnTo=${encodeURIComponent(returnTo)}`
+        : cbBase;
       await sendSignInLinkToEmail(auth, email, { url, handleCodeInApp: true });
       window.localStorage.setItem(EMAIL_STORAGE_KEY, email);
       setMode("email-sent");

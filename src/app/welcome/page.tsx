@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { writeUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 import { startPipelineForUser } from "@/scheduler/run-once";
@@ -19,10 +20,15 @@ export const dynamic = "force-dynamic";
 // projects, daily cost cap, sources beyond GitHub) lives on /settings.
 // The goal here is "30 seconds to first run".
 
-export default async function Welcome({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
+export default async function Welcome({ searchParams }: { searchParams: Promise<{ err?: string; returnTo?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const err = sp.err;
+  // returnTo lets callers (cli-auth, marketing, integrations) ask
+  // /welcome to land the user back on a specific URL after first run
+  // kicks off. Validated to a same-origin path-only string so the open
+  // redirect surface is closed.
+  const returnTo = isSafeReturnTo(sp.returnTo ?? "") ? sp.returnTo! : null;
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
   const hasLlm = !!(settings?.llmPrimaryApiKey || settings?.deepseekApiKey || settings?.anthropicApiKey || settings?.llmSensitiveApiKey);
@@ -31,8 +37,9 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
     .from(schema.digestRuns)
     .where(eq(schema.digestRuns.userId, user.id))
     .get();
-  // Already set up: jump straight to the feed.
-  if (hasGithub && hasLlm && hasRun) redirect("/");
+  // Already set up: jump straight to returnTo (e.g. back to /cli-auth)
+  // or the feed if no returnTo was provided.
+  if (hasGithub && hasLlm && hasRun) redirect(returnTo ?? "/");
 
   return (
     <main style={{ maxWidth: 600, margin: "60px auto", padding: "0 20px" }}>
@@ -55,6 +62,7 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
       )}
 
       <form action={saveOnboarding}>
+        {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
         <Section
           number={1}
           title="Connect GitHub"
@@ -157,10 +165,12 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
 
 async function saveOnboarding(form: FormData) {
   "use server";
-  const u = await requireUser();
+  const u = await requireWritableUser();
   const githubToken = ((form.get("githubToken") as string) ?? "").trim();
   const llmApiKey = ((form.get("llmApiKey") as string) ?? "").trim();
   const provider = ((form.get("provider") as string) ?? "deepseek").toLowerCase();
+  const returnToRaw = ((form.get("returnTo") as string) ?? "").trim();
+  const returnTo = isSafeReturnTo(returnToRaw) ? returnToRaw : null;
 
   // Validate against the provider's own API. If either fails, surface
   // an error inline rather than saving a broken config. We do these in
@@ -244,7 +254,22 @@ async function saveOnboarding(form: FormData) {
   void startPipelineForUser(u.id).catch((e) => console.error("[welcome] first run failed", e));
 
   revalidatePath("/");
-  redirect("/");
+  redirect(returnTo ?? "/");
+}
+
+// Same-origin path-only check. Refuses any URL with a scheme, host,
+// protocol-relative double-slash, or anything that isn't a clean
+// relative path. Closes the open-redirect class of bugs that come
+// with a naive returnTo. Acceptable shapes: "/foo", "/foo?q=1",
+// "/foo?q=1#bar".
+function isSafeReturnTo(raw: string): boolean {
+  if (!raw) return false;
+  if (raw.length > 512) return false;
+  if (!raw.startsWith("/")) return false;
+  if (raw.startsWith("//")) return false;
+  // Allow chars typical of an internal URL path/query/hash.
+  if (!/^\/[A-Za-z0-9/\-._~%?=&#+:,()@!$;*'[\]]*$/.test(raw)) return false;
+  return true;
 }
 
 async function validateGithubToken(token: string): Promise<boolean> {

@@ -1,8 +1,8 @@
 import { db, schema } from "@/db/client";
 import { desc, eq, gte, and, ne, inArray, sql, isNull, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPersonalNote } from "./actions";
-import { requireUser } from "@/lib/auth/current-user";
+import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPersonalNote } from "@/app/actions";
+import { getDemoUser } from "@/lib/auth/demo-mode";
 import { sourceKind, sourceRank } from "@/lib/source-rank";
 import { LocalTime } from "@/components/LocalTime";
 import { Icon } from "@/components/Icons";
@@ -22,24 +22,9 @@ export const dynamic = "force-dynamic";
 const DEFAULT_RELEVANCES = ["high", "medium", "general-awareness"];
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ rel?: string; days?: string; project?: string; discovery?: string; approach?: string }> }) {
-  const user = await requireUser();
-  // Send users without basic config to onboarding. Bypassed if they've ever
-  // run a pipeline (returning visitor) - they might have just cleared their
-  // settings temporarily.
-  const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
-  const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
-  const hasLlm = !!(settings?.llmPrimaryApiKey || settings?.deepseekApiKey || settings?.anthropicApiKey || settings?.llmSensitiveApiKey);
-  const everRan = await db
-    .select({ id: schema.digestRuns.id })
-    .from(schema.digestRuns)
-    .where(eq(schema.digestRuns.userId, user.id))
-    .get();
-  // Onboarding gate: send to /welcome until the user has both keys + a
-  // pipeline run on file. Email is no longer required (digest is opt-in
-  // now; the dashboard is the primary surface).
-  if (!everRan && (!hasGithub || !hasLlm)) {
-    redirect("/welcome");
-  }
+  const user = await getDemoUser();
+  // Demo bypasses the onboarding gate that the live feed runs (no /welcome
+  // redirect on /demo) — the snapshot is pre-populated by scripts/seed-demo.ts.
 
   // Read last_viewed_at BEFORE updating it - anything newer is "new since
   // your last visit". Then stamp now-ish, so the next visit's banner only
@@ -365,7 +350,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           }}
         >
           <strong>{quotaSlot === "primary" ? "Primary" : "Sensitive"} LLM is out of credits.</strong>{" "}
-          Your last run stopped because the provider returned an insufficient-balance response. Top up the API key&apos;s balance with your provider, or rotate to a different provider on <a href="/settings">/settings</a>, then hit <b>Refresh</b>.
+          Your last run stopped because the provider returned an insufficient-balance response. Top up the API key&apos;s balance with your provider, or rotate to a different provider on <a href="/demo/settings">/settings</a>, then hit <b>Refresh</b>.
         </div>
       )}
       {newSinceVisit > 0 && (
@@ -415,7 +400,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           <>
             {!isGeneral && (
               <h2 style={{ borderBottom: "1px solid #ccc4", paddingBottom: 4, marginBottom: 4 }}>
-                <a href={`/?project=${slug}`} style={{ color: "inherit", textDecoration: "none" }}>{slug}</a>
+                <a href={`/demo/?project=${slug}`} style={{ color: "inherit", textDecoration: "none" }}>{slug}</a>
                 <span className="meta" style={{ marginLeft: 8, fontWeight: 400 }}>
                   {list.length} {list.length === 1 ? "match" : "matches"}
                   {project?.sensitivity === "high" && (
@@ -448,7 +433,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                         a tag (slug isn't meaningful). */}
                     {project && (
                       <a
-                        href={`/?project=${slug}`}
+                        href={`/demo/?project=${slug}`}
                         className="tag project-tag"
                         title={`Show only ${slug} matches`}
                       >
@@ -457,7 +442,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     )}
                     {project && activityActive && (
                       <a
-                        href={`/projects/${slug}`}
+                        href={`/demo/projects/${slug}`}
                         className="tag"
                         style={{ background: "var(--amber-soft)", color: "var(--amber)", borderColor: "var(--amber-line)", textDecoration: "none" }}
                         title="This project had live activity context (recent commits/PRs/TODOs) when the match was scored. The reasoner graded this repo against what you're currently building, not just the static README."
@@ -469,7 +454,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     <span className={`tag ${m.relevance}`}>{m.relevance} {m.relevanceScore ?? ""}</span>
                     {m.discoveryMode === "re-checked" && bookmarkDate && (
                       <a
-                        href="/?discovery=re-checked"
+                        href="/demo/?discovery=re-checked"
                         className="tag"
                         style={{ background: "#eef6ff", color: "#1d4ed8", textDecoration: "none" }}
                         title="Re-checked from your bookmarks. Click to show only re-checked matches."
@@ -479,7 +464,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     )}
                     {m.discoveryMode === "discovered" && (
                       <a
-                        href="/?discovery=discovered"
+                        href="/demo/?discovery=discovered"
                         className="tag"
                         style={{ background: "#fff7ed", color: "#9a3412", textDecoration: "none" }}
                         title="Found via a broad-net feed (GitHub trending, HN, Reddit, etc.). Click to show only discovered matches."
@@ -489,7 +474,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     )}
                     {m.discoveryMode === "scouted" && m.matchedOutcome && (
                       <a
-                        href="/?discovery=scouted"
+                        href="/demo/?discovery=scouted"
                         className="tag"
                         style={{ background: "#ecfdf5", color: "#065f46", textDecoration: "none" }}
                         title="Surfaced by a niche GitHub search Replen ran for this project. Click to show only scouted matches."
@@ -499,7 +484,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     )}
                     {m.discoveryMode === "prune" && (
                       <a
-                        href="/?discovery=prune"
+                        href="/demo/?discovery=prune"
                         className="tag"
                         style={{ background: "#fef2f2", color: "#991b1b", textDecoration: "none" }}
                         title="Flagged dependency: Replen detected this dep is stale, dead, or archived upstream. Click to show only prune suggestions."
@@ -525,7 +510,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                     {srcKind && srcKind !== "gh-targeted" && <span className="tag">via {srcKind}</span>}
                     {m.integrationApproach && m.integrationApproach !== "n/a" && (
                       <a
-                        href={`/?approach=${m.integrationApproach}`}
+                        href={`/demo/?approach=${m.integrationApproach}`}
                         className="tag"
                         style={{ ...integrationApproachStyle(m.integrationApproach), textDecoration: "none" }}
                         title={`${integrationApproachTitle(m.integrationApproach)} · Click to show only this approach.`}
@@ -786,7 +771,7 @@ function FilterBar({ relFilter, days, projectFilter, discoveryFilter, approachFi
       if (v === "" || (Array.isArray(v) && v.length === 0)) qs.delete(k);
       else qs.set(k, Array.isArray(v) ? v.join(",") : v);
     }
-    return `/?${qs.toString()}`;
+    return `/demo/?${qs.toString()}`;
   };
   const allRelsActive = allRels.every((r) => relFilter.includes(r));
   return (

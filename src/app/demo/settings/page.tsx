@@ -2,12 +2,12 @@ import { db, schema } from "@/db/client";
 import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth/current-user";
+import { getDemoUser } from "@/lib/auth/demo-mode";
 import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { hashIngestToken } from "@/lib/crypto";
 import { writeUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
-import { archiveOldHidden } from "../actions";
+import { archiveOldHidden } from "@/app/actions";
 import { randomBytes } from "crypto";
 import { validateWebhookUrl } from "@/lib/url-guard";
 
@@ -25,7 +25,7 @@ export default async function SettingsPage({ searchParams }: Params) {
   const justRotatedToken = typeof sp.newToken === "string" && /^ing_[A-Za-z0-9_-]{8,}$/.test(sp.newToken)
     ? sp.newToken
     : null;
-  const user = await requireUser();
+  const user = await getDemoUser();
   const rawSettings = await db
     .select()
     .from(schema.userSettings)
@@ -306,7 +306,7 @@ export default async function SettingsPage({ searchParams }: Params) {
     <>
       <h1>Settings</h1>
       <p className="meta">
-        Account: <strong>{user.email}</strong>. Repo-level overrides (sensitivity, model picker) live on <a href="/projects">/projects</a>.
+        Account: <strong>{user.email}</strong>. Repo-level overrides (sensitivity, model picker) live on <a href="/demo/projects">/projects</a>.
       </p>
 
       <form action={save} style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16, maxWidth: 640 }}>
@@ -409,7 +409,7 @@ export default async function SettingsPage({ searchParams }: Params) {
           </summary>
           <div style={{ padding: "12px 16px" }}>
             <p style={settingsHelp}>
-              Some projects you mark as &ldquo;high sensitivity&rdquo; on <a href="/projects">/projects</a> route through this separate slot &mdash; useful if you want a different provider, region, or self-hosted endpoint for that traffic. Any provider works; pick the wire format your endpoint speaks. Leave blank if no projects need it.
+              Some projects you mark as &ldquo;high sensitivity&rdquo; on <a href="/demo/projects">/projects</a> route through this separate slot &mdash; useful if you want a different provider, region, or self-hosted endpoint for that traffic. Any provider works; pick the wire format your endpoint speaks. Leave blank if no projects need it.
             </p>
             <Field label="API key" name="llmSensitiveApiKey" value={s?.llmSensitiveApiKey ?? ""} type="password" placeholder="sk-…" statusBadge={sensitiveStatus} />
             <Field label="Base URL" name="llmSensitiveBaseUrl" value={rawSettings?.llmSensitiveBaseUrl ?? ""} type="url" placeholder="https://api.your-provider.com" />

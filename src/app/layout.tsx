@@ -7,6 +7,7 @@ import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
 import { NavLink } from "@/components/NavLink";
 import { UserMenu } from "@/components/UserMenu";
+import { isDemoUser } from "@/lib/auth/demo-mode";
 
 export const metadata = { title: "Replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
@@ -91,22 +92,42 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     integratedCount = Number(intRow?.c ?? 0);
   }
 
+  const demoMode = !!user && isDemoUser(user);
+  // Prefix every nav href so in-demo links stay inside /demo/*. The non-demo
+  // paths are kept literal everywhere else.
+  const navPrefix = demoMode ? "/demo" : "";
+  const homeHref = demoMode ? "/demo" : "/";
+
   return (
     <html lang="en">
       <body>
         <IconSprite />
+        {demoMode && (
+          // Persistent demo banner. Sits above the app header so it's
+          // visible on every page (feed, projects, settings, etc.).
+          // Amber stripe; signup CTA on the right; copy makes the
+          // read-only nature clear without overstating it.
+          <div role="status" className="demo-banner">
+            <span>
+              <strong>Demo</strong> &middot; You&rsquo;re browsing a seeded read-only snapshot. Star / hide / refresh are visual-only.
+            </span>
+            <a href="/" className="demo-banner-cta">
+              &larr; Back to main site
+            </a>
+          </div>
+        )}
         {user && isActive && (
           <header>
-            <a href="/" style={{ background: "transparent", marginRight: 14, padding: 0 }}>
+            <a href={homeHref} style={{ background: "transparent", marginRight: 14, padding: 0 }}>
               <Wordmark />
             </a>
-            <NavLink href="/" style={{ marginRight: 14 }}>Feed</NavLink>
-            <form className="search" action="/search" method="get" role="search">
+            <NavLink href={homeHref} style={{ marginRight: 14 }}>Feed</NavLink>
+            <form className="search" action={`${navPrefix}/search`} method="get" role="search">
               <Icon name="search" size={14} />
               <input name="q" placeholder="search…" aria-label="Search" />
             </form>
             {starredCount > 0 && (
-              <a className="counter" href="/starred" title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
+              <a className="counter" href={`${navPrefix}/starred`} title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
                 <Icon name="star-fill" size={13} />
                 {starredCount}
                 {starredAwaitingHandoff > 0 && (
@@ -119,13 +140,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               </a>
             )}
             {integratedCount > 0 && (
-              <a className="counter" href="/integrated" title={`${integratedCount} integrated OSS packages`}>
+              <a className="counter" href={`${navPrefix}/integrated`} title={`${integratedCount} integrated OSS packages`}>
                 <Icon name="check" size={13} />
                 {integratedCount}
               </a>
             )}
             <div className="spacer" />
-            <UserMenu email={user.email} isAdmin={user.role === "admin"} />
+            <UserMenu email={user.email} isAdmin={user.role === "admin"} demoMode={isDemoUser(user)} />
           </header>
         )}
         {user && !isActive && (
@@ -134,7 +155,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Wordmark />
             </span>
             <div className="spacer" />
-            <UserMenu email={user.email} isAdmin={false} />
+            <UserMenu email={user.email} isAdmin={false} demoMode={isDemoUser(user)} />
           </header>
         )}
         <main>{children}</main>
