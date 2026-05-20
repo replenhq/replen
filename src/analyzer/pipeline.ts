@@ -16,6 +16,7 @@ import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "./run-context";
 import { recordEvent } from "../scheduler/events";
 import { LlmQuotaError } from "./llm";
+import { decideMatchFilter } from "./match-filters";
 
 const HOURS = 36;
 
@@ -384,6 +385,19 @@ async function runAnalysisInner(runId: number, userId: number) {
             ta,
             safety
           );
+          const drop = decideMatchFilter({
+            writeupMd: writeup,
+            summary: ta.summary,
+            whyUseful: ta.whyUseful,
+            suggestedUse: ta.suggestedUse,
+            risks: ta.risks,
+            integrationApproach: ta.integrationApproach,
+            projectId: attr.projectId,
+          });
+          if (drop.drop) {
+            void recordEvent(runId, userId, "score", `Dropped ${label} → ${project.slug}: ${drop.reason}`);
+            continue;
+          }
           await db.insert(schema.matches).values({
             userId,
             repoId: repoRow.id,
@@ -447,6 +461,20 @@ async function runAnalysisInner(runId: number, userId: number) {
           safety
         );
         const pid = project ? projectIdBySlug.get(project.slug) ?? null : null;
+        const drop = decideMatchFilter({
+          writeupMd: writeup,
+          summary: pa.summary,
+          whyUseful: pa.whyUseful,
+          suggestedUse: pa.suggestedUse,
+          risks: pa.risks,
+          integrationApproach: pa.integrationApproach,
+          projectId: pid,
+        });
+        if (drop.drop) {
+          const projSlug = project?.slug ?? "_general";
+          void recordEvent(runId, userId, "score", `Dropped ${label} → ${projSlug}: ${drop.reason}`);
+          continue;
+        }
         await db.insert(schema.matches).values({
           userId,
           repoId: repoRow.id,

@@ -121,6 +121,31 @@ function quickRejectByName(meta: { owner: string; name: string; description: str
     return { reason: "Free-wrapper around paid product — not an integrate-able component", category: "other" };
   }
 
+  // Description-detected agent platforms / frameworks. These are
+  // explicitly the AWS-effect targets the user flagged: viral,
+  // popular, and either a "build on top of us" framework (the user
+  // has to rewrite against the framework's abstractions) or a
+  // "unified interface for everything" SDK (composio-style). If the
+  // repo openly describes itself this way, skip without an LLM call.
+  // Keep the patterns precise so single-purpose libraries that
+  // mention "agents" or "framework" in passing don't trip.
+  const FRAMEWORK_DESC_PATTERNS = [
+    /unified (?:interface|api|sdk) (?:to|for) (?:\d+\+?\s+)?(?:tool|service|integration|agent)/,
+    /platform for (?:ai |building )?agents?/,
+    /cowork platform/,
+    /agent (?:hub|platform|orchestrator|coordination)/,
+    /sdk for (?:building |connecting )?(?:ai )?agents?/,
+    /framework for building (?:ai |autonomous )?agents?/,
+    /\d{2,}\+?\s+(?:tool|integration|toolkit)s?/,  // "1000+ toolkits"
+    /one-stop (?:shop|platform) for/,
+    /all-in-one (?:platform|framework|sdk)/,
+  ];
+  for (const re of FRAMEWORK_DESC_PATTERNS) {
+    if (re.test(desc)) {
+      return { reason: `Framework / platform repo — surfacing this is the AWS effect, not under-the-radar`, category: "framework" };
+    }
+  }
+
   // Marker for grep: ensures fullName is at least referenced; could be
   // used in future patterns. Currently no patterns key off fullName
   // directly so this stays unused.

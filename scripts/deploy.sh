@@ -19,6 +19,11 @@ REMOTE_USER="${DEPLOY_USER:-ubuntu}"
 SERVICE_PREFIX="${SERVICE_PREFIX:-replen}"
 NGINX_SITE="${DEPLOY_NGINX_SITE:-replen.conf}"
 NGINX_TEMPLATE="${DEPLOY_NGINX_TEMPLATE:-nginx-replen.conf}"
+# When set, the nginx template's $YOUR_DOMAIN placeholders get
+# substituted with this value before being copied into sites-available
+# on the remote. Leave empty if your template is already a literal
+# config (no placeholders).
+NGINX_DOMAIN="${DEPLOY_NGINX_DOMAIN:-}"
 LOG_DIR="${DEPLOY_LOG_DIR:-/var/log/replen}"
 
 WEB_SVC="${SERVICE_PREFIX}.service"
@@ -51,7 +56,16 @@ echo "[4/6] installing systemd units"
 ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$WEB_SVC /etc/systemd/system/$WEB_SVC && sudo cp $REMOTE_DIR/scripts/$CRON_SVC /etc/systemd/system/$CRON_SVC && sudo systemctl daemon-reload"
 
 echo "[5/6] installing nginx site"
-ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$NGINX_TEMPLATE /etc/nginx/sites-available/$NGINX_SITE && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+# Build the final nginx config: copy template, optionally substitute
+# $YOUR_DOMAIN placeholder if DEPLOY_NGINX_DOMAIN was set, then install
+# + reload. The placeholder syntax in the public template is just a
+# string; sed substitution leaves a literal hostname in the deployed
+# config so nginx never tries to interpret $YOUR_DOMAIN as a variable.
+if [ -n "$NGINX_DOMAIN" ]; then
+  ssh "$REMOTE" "sudo sed 's|\$YOUR_DOMAIN|$NGINX_DOMAIN|g' $REMOTE_DIR/scripts/$NGINX_TEMPLATE | sudo tee /etc/nginx/sites-available/$NGINX_SITE > /dev/null && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+else
+  ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$NGINX_TEMPLATE /etc/nginx/sites-available/$NGINX_SITE && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+fi
 
 echo "[6/6] enabling + restarting services"
 ssh "$REMOTE" "sudo systemctl enable $WEB_SVC $CRON_SVC && sudo systemctl restart $WEB_SVC $CRON_SVC"

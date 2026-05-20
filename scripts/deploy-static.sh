@@ -8,15 +8,15 @@
 #   bash scripts/deploy-static.sh marketing   # just the marketing site
 #   bash scripts/deploy-static.sh docs        # just the docs site
 #
-# Configure via env (defaults assume the prod-server install):
-#   DEPLOY_HOST       SSH alias (default: prod-server)
+# Configure via env (set DEPLOY_HOST to your SSH alias, e.g. in ~/.ssh/config):
+#   DEPLOY_HOST       SSH alias (default: replen-host)
 #   MARKETING_SRC     local dir for marketing site (default: ~/github/replen.dev)
 #   DOCS_SRC          local dir for docs site (default: ~/github/replen-docs)
 #   MARKETING_DEST    remote dir (default: /var/www/replen.dev)
 #   DOCS_DEST         remote dir (default: /var/www/docs.replen.dev)
 set -euo pipefail
 
-REMOTE="${DEPLOY_HOST:-prod-server}"
+REMOTE="${DEPLOY_HOST:-replen-host}"
 MARKETING_SRC="${MARKETING_SRC:-$HOME/github/replen.dev}"
 DOCS_SRC="${DOCS_SRC:-$HOME/github/replen-docs}"
 MARKETING_DEST="${MARKETING_DEST:-/var/www/replen.dev}"
