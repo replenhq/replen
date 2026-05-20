@@ -44,6 +44,13 @@ function takeBucketToken(ip: string): boolean {
 }
 
 function callerIp(req: Request): string {
+  // Prefer nginx's X-Real-IP (set by our upstream config) over the first
+  // X-Forwarded-For value — XFF is appendable by the client and would let
+  // an attacker rotate IPs per request to sidestep the per-IP rate bucket.
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
   return "unknown";

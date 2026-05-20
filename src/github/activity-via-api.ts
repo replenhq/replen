@@ -1,13 +1,7 @@
-// GitHub-API version of the activity probe. Produces the SAME
-// ProjectActivity shape as src/projects/activity.ts so downstream
-// consumers (summariseActivity, reasonAboutRepo, the activity-pill UI)
-// don't need to change.
-//
-// Why a parallel module instead of an in-place rewrite of activity.ts:
-// the rebuild lands incrementally. Keeping the filesystem version
-// callable until commit (6/6) means we can flip the orchestrator
-// over without a big-bang. Once the orchestrator stops calling the
-// filesystem path, activity.ts gets deleted.
+// GitHub-API activity probe. Produces a ProjectActivity that the
+// downstream consumers (summariseActivity, reasonAboutRepo, the
+// activity-pill UI) all read from. src/projects/activity.ts still
+// owns the ProjectActivity type definition.
 //
 // Data sources per field:
 //   commits           — /repos/{o}/{n}/commits?author=<viewer>&since=<30d>

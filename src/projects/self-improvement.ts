@@ -161,48 +161,6 @@ Close this PR to dismiss — Replen won't auto-open another for this project whi
   return { ok: true, prUrl: result.prUrl, status: "opened" };
 }
 
-// Idempotency check: has this project already had a docs PR opened recently
-// that's still in flight? Reused by the pipeline hook so we don't spam PRs.
-export async function hasOpenDocsPr(
-  userId: number,
-  projectId: number,
-): Promise<{ exists: boolean; prUrl?: string }> {
-  const project = await db
-    .select()
-    .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.id, projectId), eq(schema.projectProfiles.userId, userId)))
-    .get();
-  if (!project?.githubFullName) return { exists: false };
-
-  // We don't store docs-PR URLs on project_profiles (yet) — for now, check
-  // open branches via the GitHub API by listing PRs filtered to our branch
-  // naming convention. This is one GET per project per refresh, bounded.
-  // TODO: persist the PR URL on a new column when we wire the auto-trigger.
-  // For Stage-1 manual flow, callers can pass through and the duplicate-
-  // detection in github-pr.ts catches "file_exists" + "branch_exists" cases.
-  return { exists: false };
-}
-
-// Convenience used by the pipeline pre-fetch step. Returns the list of
-// project IDs that should get a docs-improvement PR proposed automatically.
-// Stage-1 implementation: returns only manually-confirmed candidates; auto-
-// trigger is a follow-up once we've validated the PR content reads well.
-export async function findSparseProjectsForUser(userId: number): Promise<
-  Array<{ id: number; slug: string; reasons: string[] }>
-> {
-  const projects = await db
-    .select()
-    .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
-  const out: Array<{ id: number; slug: string; reasons: string[] }> = [];
-  for (const p of projects) {
-    if (!p.githubFullName) continue;
-    const a = assessDocSparsity(p);
-    if (a.sparse) out.push({ id: p.id, slug: p.slug, reasons: a.reasons });
-  }
-  return out;
-}
-
 // Re-export the fetchPrState signature for callers who want to refresh
 // status of an open docs PR (same shape as match handoffs).
 export { fetchPrState };

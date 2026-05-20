@@ -7,7 +7,7 @@
     "dev": "next dev -p 3030",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3030",
-    "lint": "eslint",
+    "lint": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "pipeline:run": "tsx src/scheduler/run-once.ts",

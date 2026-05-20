@@ -41,7 +41,7 @@ export default async function Sources() {
     const value = ((form.get("value") as string) ?? "").trim().replace(/^@/, "");
     const note = ((form.get("note") as string) ?? "").trim() || null;
     if (!value) return;
-    if (!KINDS.includes(kind as any)) return;
+    if (!KINDS.includes(kind as typeof KINDS[number])) return;
     await db.insert(schema.proposedSources).values({
       userId: u.id,
       kind,
@@ -59,7 +59,7 @@ export default async function Sources() {
     const kind = (form.get("kind") as string) ?? "threads";
     const value = ((form.get("value") as string) ?? "").trim().replace(/^@/, "");
     const label = ((form.get("label") as string) ?? "").trim() || null;
-    if (!value || !KINDS.includes(kind as any)) return;
+    if (!value || !KINDS.includes(kind as typeof KINDS[number])) return;
     if (value.length > 200) return;
     await db
       .insert(schema.curatedSources)
@@ -155,7 +155,7 @@ async function AdminCreatorAliases() {
     const kind = (form.get("kind") as string) ?? "";
     const value = ((form.get("value") as string) ?? "").trim().replace(/^@/, "");
     const creatorKey = ((form.get("creatorKey") as string) ?? "").trim().toLowerCase();
-    if (!value || !creatorKey || !KINDS.includes(kind as any)) return;
+    if (!value || !creatorKey || !KINDS.includes(kind as typeof KINDS[number])) return;
     if (!/^[a-z0-9_-]{1,80}$/.test(creatorKey)) return;
     if (value.length > 200) return;
     await db

@@ -19,7 +19,12 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const sinceParam = searchParams.get("since");
-  const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  // Default: last 7 days. Cap the floor at 90 days so a leaked token can't
+  // request the entire history in one shot.
+  const MAX_SINCE_MS = 90 * 24 * 3600 * 1000;
+  const floor = new Date(Date.now() - MAX_SINCE_MS);
+  const requested = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  const since = requested < floor ? floor : requested;
 
   const matches = await db
     .select()

@@ -261,22 +261,3 @@ function sigFor(kind: string, matchIds: number[]): string {
   return `${kind}:${[...matchIds].sort((a, b) => a - b).join(",")}`;
 }
 
-// Helper for the migration/backfill case where someone wants to re-run
-// synthesis for an existing run. Not used by the live pipeline.
-export async function deleteSynthesisForRun(runId: number, userId: number): Promise<number> {
-  const existing = await db
-    .select({ id: schema.matchInsights.id })
-    .from(schema.matchInsights)
-    .where(and(
-      eq(schema.matchInsights.userId, userId),
-      eq(schema.matchInsights.runId, runId),
-    ));
-  if (existing.length === 0) return 0;
-  await db
-    .delete(schema.matchInsights)
-    .where(and(
-      eq(schema.matchInsights.userId, userId),
-      inArray(schema.matchInsights.id, existing.map((r) => r.id)),
-    ));
-  return existing.length;
-}

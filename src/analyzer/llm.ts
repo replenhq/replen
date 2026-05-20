@@ -82,14 +82,6 @@ export function reasoningModelHigh(): string {
   );
 }
 
-// Module-load constants kept as a deprecated fallback for code paths that
-// run outside withRunConfig and want a stable string at import time
-// (e.g. a logging line that includes the model). New call sites should
-// invoke the resolver functions above so per-user routing takes effect.
-export const TRIAGE_MODEL = process.env.TRIAGE_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
-export const REASONING_MODEL = process.env.REASONING_MODEL ?? process.env.LLM_PRIMARY_MODEL ?? "deepseek-v4-flash";
-export const REASONING_MODEL_HIGH = process.env.REASONING_MODEL_HIGH ?? process.env.LLM_SENSITIVE_MODEL ?? "claude-opus-4-7";
-
 export type Provider = "deepseek" | "anthropic";
 
 // Scrub a provider error body before it lands in an Error message (audit

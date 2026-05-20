@@ -8,10 +8,12 @@ export const dynamic = "force-dynamic";
 export default async function RepoView({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
+  const matchId = parseInt(id, 10);
+  if (!Number.isInteger(matchId) || matchId <= 0) return notFound();
   const match = await db
     .select()
     .from(schema.matches)
-    .where(and(eq(schema.matches.id, Number(id)), eq(schema.matches.userId, user.id)))
+    .where(and(eq(schema.matches.id, matchId), eq(schema.matches.userId, user.id)))
     .get();
   if (!match) return notFound();
   const repo = await db.select().from(schema.repos).where(eq(schema.repos.id, match.repoId)).get();

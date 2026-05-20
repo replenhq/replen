@@ -12,7 +12,14 @@ const BLOCKED_HOSTS = new Set([
   "localhost",
   "ip6-localhost",
   "ip6-loopback",
+  // Cloud metadata service shorthands. The numeric IP-literal
+  // 169.254.169.254 is already caught by the isIP / private-range
+  // check below; these are the case-collapse-friendly hostnames
+  // that resolve to it on AWS, GCP, Azure, and cloud-init.
+  "metadata",
   "metadata.google.internal",
+  "instance-data",
+  "instance-data.ec2.internal",
 ]);
 
 export type UrlGuardResult =

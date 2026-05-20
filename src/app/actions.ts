@@ -3,7 +3,6 @@
 import { db, schema } from "@/db/client";
 import { and, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth/current-user";
 import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { readUserSecret } from "@/lib/user-secrets";
 import { errorMsg } from "@/lib/error-msg";

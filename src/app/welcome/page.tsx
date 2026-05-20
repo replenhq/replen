@@ -267,8 +267,15 @@ function isSafeReturnTo(raw: string): boolean {
   if (raw.length > 512) return false;
   if (!raw.startsWith("/")) return false;
   if (raw.startsWith("//")) return false;
-  // Allow chars typical of an internal URL path/query/hash.
-  if (!/^\/[A-Za-z0-9/\-._~%?=&#+:,()@!$;*'[\]]*$/.test(raw)) return false;
+  // Allow chars typical of an internal URL path/query/hash. Explicitly excluded:
+  //   - `:` and `@` outside query/hash — these can form a userinfo segment in
+  //     a path-only URL (`/foo:bar@baz`) that some parsers interpret as a host.
+  //     Allow them only after `?` or `#`.
+  const split = raw.search(/[?#]/);
+  const path = split === -1 ? raw : raw.slice(0, split);
+  const rest = split === -1 ? "" : raw.slice(split);
+  if (!/^\/[A-Za-z0-9/\-._~%+,()!$;*'[\]]*$/.test(path)) return false;
+  if (rest && !/^[?#][A-Za-z0-9/\-._~%?=&#+:,()@!$;*'[\]]*$/.test(rest)) return false;
   return true;
 }
 

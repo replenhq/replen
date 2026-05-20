@@ -8,7 +8,7 @@
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import type { CurrentUser } from "./current-user";
+import { requireUser, type CurrentUser } from "./current-user";
 
 export const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL ?? "demo@replen.dev").toLowerCase();
 
@@ -42,8 +42,6 @@ export async function getDemoUser(): Promise<CurrentUser> {
 // context. Defence-in-depth: /demo pages render visual-only components,
 // so this guard shouldn't normally fire, but it catches any path that
 // would otherwise let a demo render trigger a real write.
-import { requireUser } from "./current-user";
-
 export async function requireWritableUser() {
   const user = await requireUser();
   if (isDemoUser(user)) {

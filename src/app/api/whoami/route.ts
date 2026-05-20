@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 
 // Public diagnostic. Only return what the dashboard UI actually needs;
-// withholding firebaseUid + local users.id closes the IDOR-probe vector
-// where an attacker via XSS or a curious user could fingerprint the
-// numeric tenant id or Firebase identity.
+// withholding firebaseUid + local users.id + role closes the IDOR-probe
+// vector where someone holding any session cookie could fingerprint
+// who is admin / who is suspended.
 export async function GET() {
   try {
     const user = await getCurrentUser();
@@ -13,7 +13,6 @@ export async function GET() {
       user: {
         email: user.email,
         displayName: user.displayName,
-        role: user.role,
         status: user.status,
       },
     });

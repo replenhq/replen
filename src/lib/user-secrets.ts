@@ -143,13 +143,3 @@ export async function writeUserSecret(userId: number, plaintext: string | null |
   return encryptForUserWithDek(userId, dek, plaintext);
 }
 
-// Best-effort, sync-shaped wrapper for legacy code paths that don't have an
-// async context (some server actions historically returned raw decrypts).
-// Logs a warning to flag the audit gap.
-export function decryptSecretSync(stored: string | null | undefined): string | null {
-  if (!stored) return null;
-  if (stored.startsWith("enc:v2:")) {
-    throw new Error("decryptSecretSync cannot read v2 ciphertext - use readUserSecret(userId, ...)");
-  }
-  return decryptSecret(stored);
-}

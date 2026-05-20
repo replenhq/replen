@@ -18,7 +18,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { walkRepo, type WalkOpts } from "./walker";
 import { chunkFile, detectLanguage } from "./chunker";
 import { tokenize } from "./tokens";
-import { buildTermIndex, loadTermIndex, scoreBM25, type TermIndex } from "./bm25";
+import { loadTermIndex, scoreBM25, type TermIndex } from "./bm25";
 
 // Bump when the chunking algorithm or token rules change. Any saved index
 // at a different version is treated as stale and rebuilt on next use.
