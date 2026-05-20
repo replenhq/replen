@@ -354,3 +354,12 @@ The FSL terms apply to all commits from `1361647` onward (2026-05-17). The publi
 
 If you want to use Replen in a way that might cross the "competing use" line, get in touch via [replen.dev](https://replen.dev) and we'll sort out a commercial licence.
 
+## Credits
+
+Replen was built by [@nsokin](https://github.com/nsokin) and the community.
+
+- [replen.dev](https://replen.dev) — site
+- [docs.replen.dev](https://docs.replen.dev) — docs
+- [app.replen.dev](https://app.replen.dev) — hosted dashboard
+- [@replenhq](https://github.com/replenhq) — GitHub org
+

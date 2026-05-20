@@ -181,9 +181,9 @@ export default function LoginPage() {
 
       <p style={{ marginTop: 32, fontSize: 12, color: "var(--faint, #888)", textAlign: "center", lineHeight: 1.5 }}>
         By signing in you agree to our{" "}
-        <a href="https://docs.replen.dev/terms" target="_blank" rel="noreferrer">Terms</a>
+        <a href="https://replen.dev/terms" target="_blank" rel="noreferrer">Terms</a>
         {" "}and{" "}
-        <a href="https://docs.replen.dev/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
+        <a href="https://replen.dev/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
       </p>
     </div>
   );
