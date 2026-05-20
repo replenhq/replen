@@ -112,10 +112,24 @@ export async function middleware(request: NextRequest) {
   // can pick it up via headers().get("x-nonce").
   const forwardedHeaders = new Headers(request.headers);
   forwardedHeaders.set("x-nonce", nonce);
+  // Always strip the incoming x-replen-on-demo header before we conditionally
+  // re-set it. Without this, a client could send x-replen-on-demo: 1 on a
+  // non-demo URL and the root layout would render the demo banner + chrome
+  // over their real account (phishing / UI-spoof).
+  forwardedHeaders.delete("x-replen-on-demo");
 
   // /demo and /demo/* are real, public Next.js routes — no auth gate,
   // no cookie, no rewrite. They render the seeded demo user's data
   // directly. authMiddleware below treats them as public via PUBLIC_PATHS.
+  //
+  // Tag /demo/* requests with x-replen-on-demo so the root layout knows
+  // to render the demo header chrome + banner regardless of whether a
+  // real user is also logged in. handleValidToken / handleInvalidToken
+  // below forward this header through to RSC.
+  const isDemoPath = request.nextUrl.pathname === "/demo" || request.nextUrl.pathname.startsWith("/demo/");
+  if (isDemoPath) {
+    forwardedHeaders.set("x-replen-on-demo", "1");
+  }
 
   // /api/sync still uses x-sync-token; keep public (the route checks its own auth).
   if (request.nextUrl.pathname.startsWith("/api/sync")) {
@@ -148,6 +162,10 @@ export async function middleware(request: NextRequest) {
     handleValidToken: async (_tokens, headers) => {
       const merged = new Headers(headers);
       merged.set("x-nonce", nonce);
+      // Strip client-supplied x-replen-on-demo before conditionally setting it,
+      // same as the forwardedHeaders path above.
+      merged.delete("x-replen-on-demo");
+      if (isDemoPath) merged.set("x-replen-on-demo", "1");
       return applySecurityHeaders(NextResponse.next({ request: { headers: merged } }), nonce);
     },
     handleInvalidToken: async () => {

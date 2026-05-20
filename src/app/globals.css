@@ -592,6 +592,11 @@ td.path {
   border-radius: 999px;
   margin-right: 6px;
 }
+.demo-banner-ctas {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .demo-banner-cta {
   background: #1a1a1a;
   color: var(--amber);

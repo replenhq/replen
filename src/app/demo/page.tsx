@@ -26,12 +26,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   // Demo bypasses the onboarding gate that the live feed runs (no /welcome
   // redirect on /demo) — the snapshot is pre-populated by scripts/seed-demo.ts.
 
-  // Read last_viewed_at BEFORE updating it - anything newer is "new since
-  // your last visit". Then stamp now-ish, so the next visit's banner only
-  // covers what came in after this load.
-  const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
-  const lastViewedAt = userRow?.lastViewedAt ?? null;
-  await db.update(schema.users).set({ lastViewedAt: new Date() }).where(eq(schema.users.id, user.id));
+  // Demo never updates last_viewed_at — every anon visit would hammer the
+  // users row for a write that has no meaning here. Use a fixed point in
+  // time so the "new since your last visit" banner doesn't fire for the
+  // pre-seeded matches (they're all the same age every visit).
+  const lastViewedAt: Date | null = null;
 
   const sp = await searchParams;
   const relFilter = (sp.rel?.split(",").filter(Boolean) ?? DEFAULT_RELEVANCES) as string[];

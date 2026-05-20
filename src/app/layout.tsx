@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { db, schema } from "@/db/client";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -7,7 +8,7 @@ import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
 import { NavLink } from "@/components/NavLink";
 import { UserMenu } from "@/components/UserMenu";
-import { isDemoUser } from "@/lib/auth/demo-mode";
+import { getDemoUser, isDemoUser } from "@/lib/auth/demo-mode";
 
 export const metadata = { title: "Replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
@@ -61,7 +62,15 @@ function Wordmark() {
 }
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const user = await getCurrentUser().catch(() => null);
+  // /demo/* routes get tagged with x-replen-on-demo by middleware. When set,
+  // we render the demo user's chrome regardless of who's logged in — a real
+  // signed-in user visiting /demo should still see the demo header + banner,
+  // not their own account.
+  const hdrs = await headers();
+  const onDemo = hdrs.get("x-replen-on-demo") === "1";
+  const user = onDemo
+    ? await getDemoUser().catch(() => null)
+    : await getCurrentUser().catch(() => null);
   const isActive = user?.status === "active";
 
   // Per-user header counters: starred matches in the DB, plus how many
@@ -92,11 +101,15 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     integratedCount = Number(intRow?.c ?? 0);
   }
 
-  const demoMode = !!user && isDemoUser(user);
+  // demoMode tracks the URL (via the middleware header), not the resolved
+  // user identity — that way logged-in real users on /demo still get the
+  // demo experience.
+  const demoMode = onDemo;
   // Prefix every nav href so in-demo links stay inside /demo/*. The non-demo
   // paths are kept literal everywhere else.
   const navPrefix = demoMode ? "/demo" : "";
   const homeHref = demoMode ? "/demo" : "/";
+  void isDemoUser; // kept exported for action guards even though layout no longer reads it
 
   return (
     <html lang="en">
@@ -111,9 +124,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <span>
               <strong>Demo</strong> &middot; You&rsquo;re browsing a seeded read-only snapshot. Star / hide / refresh are visual-only.
             </span>
-            <a href="/" className="demo-banner-cta">
-              &larr; Back to main site
-            </a>
+            <span className="demo-banner-ctas">
+              <a href="/" className="demo-banner-cta">
+                &larr; Back to main site
+              </a>
+              <a href="/login" className="demo-banner-cta">
+                Sign up to use on your repos &rarr;
+              </a>
+            </span>
           </div>
         )}
         {user && isActive && (

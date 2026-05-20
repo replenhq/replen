@@ -1,7 +1,7 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDemoUser } from "@/lib/auth/demo-mode";
+import { getDemoUser, requireWritableUser } from "@/lib/auth/demo-mode";
 import { reprocessForUser } from "@/scheduler/reprocess-matches";
 import { readUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
@@ -196,7 +196,7 @@ function renderDocsCell(p: typeof schema.projectProfiles.$inferSelect) {
 
 async function toggleIncluded(id: number, value: boolean) {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   await db
     .update(schema.projectProfiles)
     .set({ included: value })
@@ -207,7 +207,7 @@ async function toggleIncluded(id: number, value: boolean) {
 
 async function toggleSensitivity(id: number, value: "low" | "high") {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   await db
     .update(schema.projectProfiles)
     .set({ sensitivity: value })
@@ -223,7 +223,7 @@ const REANALYZE_COOLDOWN_MS = 30_000;
 
 async function reanalyzeProject(slug: string) {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   if (typeof slug !== "string" || !/^[a-z0-9_-]{1,80}$/.test(slug)) {
     throw new Error("invalid slug");
   }
@@ -242,7 +242,7 @@ async function reanalyzeProject(slug: string) {
 
 async function cycleLlmProvider(id: number, current: string) {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   const next = current === "auto" ? "deepseek" : current === "deepseek" ? "anthropic" : "auto";
   await db
     .update(schema.projectProfiles)
@@ -253,7 +253,7 @@ async function cycleLlmProvider(id: number, current: string) {
 
 async function autoDetectGithubRepos() {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const tokenStored = settings?.githubToken ?? settings?.githubWriteToken ?? null;
   if (!tokenStored) throw new Error("add a GitHub PAT on /settings first");
@@ -266,7 +266,7 @@ async function autoDetectGithubRepos() {
 
 async function setGithubFullName(id: number, value: string) {
   "use server";
-  const user = await getDemoUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(id) || id <= 0) throw new Error("invalid project id");
   const trimmed = value.trim();
   // Allow blank (clear it) or strict owner/name format.

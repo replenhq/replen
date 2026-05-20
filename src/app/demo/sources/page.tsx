@@ -1,7 +1,7 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDemoUser } from "@/lib/auth/demo-mode";
+import { getDemoUser, requireWritableUser } from "@/lib/auth/demo-mode";
 import { requireAdmin } from "@/lib/auth/current-user";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +37,7 @@ export default async function Sources() {
 
   async function submit(form: FormData) {
     "use server";
-    const u = await getDemoUser();
+    const u = await requireWritableUser();
     const kind = (form.get("kind") as string) ?? "threads";
     const value = ((form.get("value") as string) ?? "").trim().replace(/^@/, "");
     const note = ((form.get("note") as string) ?? "").trim() || null;
