@@ -25,13 +25,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   // settings temporarily.
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
-  const hasEmail = !!settings?.emailToAddress;
+  const hasLlm = !!(settings?.llmPrimaryApiKey || settings?.deepseekApiKey || settings?.anthropicApiKey || settings?.llmSensitiveApiKey);
   const everRan = await db
     .select({ id: schema.digestRuns.id })
     .from(schema.digestRuns)
     .where(eq(schema.digestRuns.userId, user.id))
     .get();
-  if (!everRan && (!hasGithub || !hasEmail)) {
+  // Onboarding gate: send to /welcome until the user has both keys + a
+  // pipeline run on file. Email is no longer required (digest is opt-in
+  // now; the dashboard is the primary surface).
+  if (!everRan && (!hasGithub || !hasLlm)) {
     redirect("/welcome");
   }
 

@@ -1,10 +1,10 @@
 import { db, schema } from "@/db/client";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { hashIngestToken } from "@/lib/crypto";
-import { readUserSecret, writeUserSecret } from "@/lib/user-secrets";
+import { writeUserSecret } from "@/lib/user-secrets";
 import { autoDetectAndStoreRepos } from "@/lib/github-repo-detect";
 import { archiveOldHidden } from "../actions";
 import { randomBytes } from "crypto";
@@ -52,6 +52,47 @@ export default async function SettingsPage({ searchParams }: Params) {
   const userRow = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
   const sharedAllowed = !!userRow?.canUseSharedLlm;
 
+  // Running cost summary: sum the cost of finished runs in the last 7
+  // days + the most recent single run's cost so the user can see both
+  // their weekly burn and what one run costs them today. The cost cap
+  // gates 24h spend; the 7-day view gives them a wider operational
+  // picture without a separate /costs page.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const weekCostRow = await db
+    .select({ total: sql<number>`coalesce(sum(${schema.digestRuns.costUsd}), 0)` })
+    .from(schema.digestRuns)
+    .where(and(
+      eq(schema.digestRuns.userId, user.id),
+      gte(schema.digestRuns.startedAt, sevenDaysAgo),
+      isNotNull(schema.digestRuns.finishedAt),
+    ))
+    .get();
+  const weekCostUsd = Number(weekCostRow?.total ?? 0);
+  const lastRunCost = await db
+    .select({ cost: schema.digestRuns.costUsd, finishedAt: schema.digestRuns.finishedAt })
+    .from(schema.digestRuns)
+    .where(and(
+      eq(schema.digestRuns.userId, user.id),
+      isNotNull(schema.digestRuns.finishedAt),
+    ))
+    .orderBy(sql`${schema.digestRuns.id} desc`)
+    .limit(1)
+    .get();
+
+  // Which provider the user is currently using (best-effort guess from
+  // base URL or legacy column). Used to pre-select the radio in the
+  // AI Provider section.
+  const currentProvider: "deepseek" | "openai" | "anthropic" | "custom" | null = (() => {
+    const base = (rawSettings?.llmPrimaryBaseUrl ?? "").toLowerCase();
+    if (base.includes("deepseek")) return "deepseek";
+    if (base.includes("openai.com")) return "openai";
+    if (rawSettings?.deepseekApiKey) return "deepseek";
+    if (rawSettings?.llmSensitiveBaseUrl?.includes("anthropic")) return "anthropic";
+    if (rawSettings?.anthropicApiKey) return "anthropic";
+    if (rawSettings?.llmPrimaryApiKey || rawSettings?.llmSensitiveApiKey) return "custom";
+    return null;
+  })();
+
   // When the user hasn't set their own LLM key but they're allowed to use the
   // shared one, surface "(using shared)" so they don't think the field is broken.
   const envHasPrimary = !!(process.env.LLM_PRIMARY_API_KEY ?? process.env.DEEPSEEK_API_KEY);
@@ -72,13 +113,29 @@ export default async function SettingsPage({ searchParams }: Params) {
     const u = await requireUser();
     const existingPrev = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
     const newToken = (form.get("githubToken") as string || "").trim();
+    const provider = ((form.get("provider") as string) || "").toLowerCase();
     const newPrimaryKey = (form.get("llmPrimaryApiKey") as string || "").trim();
-    const newPrimaryBaseUrlRaw = (form.get("llmPrimaryBaseUrl") as string || "").trim();
-    const newPrimaryModel = (form.get("llmPrimaryModel") as string || "").trim();
+    let newPrimaryBaseUrlRaw = (form.get("llmPrimaryBaseUrl") as string || "").trim();
+    let newPrimaryModel = (form.get("llmPrimaryModel") as string || "").trim();
     const newSensitiveKey = (form.get("llmSensitiveApiKey") as string || "").trim();
     const newSensitiveBaseUrlRaw = (form.get("llmSensitiveBaseUrl") as string || "").trim();
     const newSensitiveModel = (form.get("llmSensitiveModel") as string || "").trim();
     const newSensitiveWire = (form.get("llmSensitiveWireFormat") as string || "").trim() || null;
+    // If the user picked a known provider in the radio and didn't
+    // override the base URL / model in the advanced section, fill in
+    // the canonical defaults so they don't have to think about it.
+    // "custom" preserves whatever's already stored.
+    if (provider === "deepseek") {
+      if (!newPrimaryBaseUrlRaw) newPrimaryBaseUrlRaw = "https://api.deepseek.com";
+      if (!newPrimaryModel) newPrimaryModel = "deepseek-chat";
+    } else if (provider === "openai") {
+      if (!newPrimaryBaseUrlRaw) newPrimaryBaseUrlRaw = "https://api.openai.com/v1";
+      if (!newPrimaryModel) newPrimaryModel = "gpt-4o-mini";
+    }
+    // If the user picked "anthropic" in the primary-slot radio, route
+    // the entered key into the sensitive slot instead — that's where
+    // Anthropic's wire format actually works.
+    const anthropicAsPrimaryKey = provider === "anthropic" ? newPrimaryKey : "";
     // Validate LLM base URLs the same way webhooks are validated: https-only,
     // no IP literals, no internal-zone suffixes. Rejected URLs preserve the
     // prior stored value rather than throwing — keeps the save UX forgiving.
@@ -101,25 +158,41 @@ export default async function SettingsPage({ searchParams }: Params) {
     const encGithubToken = newToken
       ? await writeUserSecret(u.id, newToken)
       : existingPrev?.githubToken ?? existingPrev?.githubWriteToken ?? null;
+    // For Anthropic-as-primary, the key goes into the sensitive slot
+    // with Anthropic wire format. Also set legacy anthropicApiKey for
+    // the fallback chain in resolveUserConfig.
+    const anthropicSensitiveKey = anthropicAsPrimaryKey
+      ? await writeUserSecret(u.id, anthropicAsPrimaryKey)
+      : (newSensitiveKey ? await writeUserSecret(u.id, newSensitiveKey) : existingPrev?.llmSensitiveApiKey ?? null);
+
     const values = {
       userId: u.id,
       githubToken: encGithubToken,
       githubWriteToken: encGithubToken,
       // Generic LLM slot writes; legacy columns are nulled out only on
       // explicit re-entry of a key so the back-compat fallback in
-      // resolveUserConfig keeps working for users who haven't touched the
-      // form since the migration.
-      llmPrimaryApiKey: newPrimaryKey
-        ? await writeUserSecret(u.id, newPrimaryKey)
-        : existingPrev?.llmPrimaryApiKey ?? null,
+      // resolveUserConfig keeps working for users who haven't touched
+      // the form since the migration. When the radio selects
+      // "anthropic", the primary-slot key field actually routes to
+      // the sensitive slot (Anthropic-only wire format) — handled
+      // above via anthropicAsPrimaryKey.
+      llmPrimaryApiKey: provider === "anthropic"
+        ? existingPrev?.llmPrimaryApiKey ?? null  // don't put Anthropic in primary
+        : newPrimaryKey
+          ? await writeUserSecret(u.id, newPrimaryKey)
+          : existingPrev?.llmPrimaryApiKey ?? null,
       llmPrimaryBaseUrl: newPrimaryBaseUrl,
       llmPrimaryModel: newPrimaryModel || existingPrev?.llmPrimaryModel || null,
-      llmSensitiveApiKey: newSensitiveKey
-        ? await writeUserSecret(u.id, newSensitiveKey)
-        : existingPrev?.llmSensitiveApiKey ?? null,
-      llmSensitiveBaseUrl: newSensitiveBaseUrl,
-      llmSensitiveModel: newSensitiveModel || existingPrev?.llmSensitiveModel || null,
-      llmSensitiveWireFormat: newSensitiveWire || existingPrev?.llmSensitiveWireFormat || null,
+      llmSensitiveApiKey: anthropicSensitiveKey,
+      llmSensitiveBaseUrl: provider === "anthropic" && !newSensitiveBaseUrl
+        ? "https://api.anthropic.com"
+        : newSensitiveBaseUrl,
+      llmSensitiveModel: provider === "anthropic" && !newSensitiveModel
+        ? "claude-sonnet-4-6"
+        : (newSensitiveModel || existingPrev?.llmSensitiveModel || null),
+      llmSensitiveWireFormat: provider === "anthropic"
+        ? "anthropic"
+        : (newSensitiveWire || existingPrev?.llmSensitiveWireFormat || null),
       // Extra doc paths (globs). Normalise: trim, drop empties, and refuse
       // any character that could escape the per-project root at glob-walk
       // time. The loader does its own path.resolve check, but defence in
@@ -193,25 +266,6 @@ export default async function SettingsPage({ searchParams }: Params) {
     revalidatePath("/projects");
   }
 
-  async function redetectLanguages() {
-    "use server";
-    const u = await requireUser();
-    const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
-    const tokenStored = settings?.githubToken ?? null;
-    let token: string | null = null;
-    if (tokenStored) {
-      try { token = await readUserSecret(u.id, "githubToken", tokenStored, "redetect-languages"); } catch { token = null; }
-    }
-    if (!token) return;
-    try {
-      const r = await autoDetectAndStoreRepos(u.id, token);
-      console.log(`[settings] re-detect languages: ${r.languages.join(",")}`);
-    } catch (e) {
-      console.error("[settings] re-detect languages failed", e);
-    }
-    revalidatePath("/settings");
-  }
-
   async function rotateIngestToken() {
     "use server";
     const u = await requireUser();
@@ -251,166 +305,225 @@ export default async function SettingsPage({ searchParams }: Params) {
     <>
       <h1>Settings</h1>
       <p className="meta">
-        Manage your sources on <a href="/sources">/sources</a>. Project sensitivity / model overrides on <a href="/projects">/projects</a>.
+        Account: <strong>{user.email}</strong>. Repo-level overrides (sensitivity, model picker) live on <a href="/projects">/projects</a>.
       </p>
 
-      <form action={save} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16, maxWidth: 640 }}>
-        <Section title="Credentials (your own, never shared)">
-          <Field label="GitHub PAT" name="githubToken" value={s?.githubToken ?? s?.githubWriteToken ?? ""} type="password" placeholder="github_pat_…" />
-          <div style={{ background: "#0001", border: "1px solid #ccc4", borderRadius: 6, padding: 12, fontSize: 13, lineHeight: 1.55 }}>
-            <p style={{ margin: 0, fontWeight: 600 }}>One fine-grained PAT covers everything.</p>
-            <p style={{ margin: "6px 0 10px", color: "#888" }}>
-              Used for pipeline repo lookups (read) and the handoff-PR action (write).
-              Click the button below. You'll need to set these on the GitHub page:
-            </p>
-            <table style={{ width: "auto", margin: 0, fontSize: 12 }}>
-              <tbody>
-                <tr>
-                  <td style={{ padding: "2px 12px 2px 0", whiteSpace: "nowrap", color: "#888" }}>Repository access</td>
-                  <td style={{ padding: 2 }}><b>All repositories</b> <span className="meta">(so auto-detect sees every project repo)</span></td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "2px 12px 2px 0", whiteSpace: "nowrap", color: "#888" }}>Metadata</td>
-                  <td style={{ padding: 2 }}><code>Read-only</code> <span className="meta">(set automatically)</span></td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "2px 12px 2px 0", whiteSpace: "nowrap", color: "#888" }}>Contents</td>
-                  <td style={{ padding: 2 }}><code>Read and write</code></td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "2px 12px 2px 0", whiteSpace: "nowrap", color: "#888" }}>Pull requests</td>
-                  <td style={{ padding: 2 }}><code>Read and write</code></td>
-                </tr>
-              </tbody>
-            </table>
-            <a
-              href="https://github.com/settings/personal-access-tokens/new?name=replen&description=replen+pipeline+%2B+handoff+PRs"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                marginTop: 12,
-                padding: "6px 12px",
-                background: "#24292f",
-                color: "#fff",
-                textDecoration: "none",
-                borderRadius: 6,
-                fontSize: 13,
-                fontWeight: 500,
-                lineHeight: 1,
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-              </svg>
-              Create a PAT on GitHub
-            </a>
+      <form action={save} style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16, maxWidth: 640 }}>
+
+        {/* ── Section 1: AI provider ───────────────────────────────── */}
+        <Section title="AI provider">
+          <p style={settingsHelp}>
+            Replen makes around 50 small AI calls per run. You pay the provider directly with your own key. DeepSeek is the cheapest by far and works just as well for most projects.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <ProviderOption
+              value="deepseek"
+              currentProvider={currentProvider}
+              hasKey={!!rawSettings?.llmPrimaryApiKey || !!rawSettings?.deepseekApiKey}
+              label="DeepSeek"
+              tag="Recommended"
+              cost="~$0.27 / million tokens"
+              keyLink="https://platform.deepseek.com/api_keys"
+              keyLinkLabel="Get a DeepSeek API key →"
+            />
+            <ProviderOption
+              value="openai"
+              currentProvider={currentProvider}
+              hasKey={false}
+              label="OpenAI"
+              cost="~$5+ / million tokens"
+              keyLink="https://platform.openai.com/api-keys"
+              keyLinkLabel="Get an OpenAI API key →"
+            />
+            <ProviderOption
+              value="anthropic"
+              currentProvider={currentProvider}
+              hasKey={!!rawSettings?.llmSensitiveApiKey || !!rawSettings?.anthropicApiKey}
+              label="Anthropic Claude"
+              tag="For sensitive projects"
+              cost="~$3-15 / million tokens"
+              keyLink="https://console.anthropic.com/settings/keys"
+              keyLinkLabel="Get an Anthropic API key →"
+            />
+            <ProviderOption
+              value="custom"
+              currentProvider={currentProvider}
+              hasKey={false}
+              label="Custom / self-hosted"
+              cost="Any OpenAI-compatible endpoint"
+              keyLink=""
+              keyLinkLabel=""
+            />
           </div>
-        </Section>
-
-        <Section title="LLM provider — primary slot (triage + most reasoning)">
-          <p className="meta" style={{ margin: 0 }}>
-            Any OpenAI-compatible endpoint. Set base URL + model to point at the provider of your choice (DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter, a local llama.cpp / ollama server, etc.). Empty fields fall back to defaults.
-          </p>
-          <Field label="API key" name="llmPrimaryApiKey" value={s?.llmPrimaryApiKey ?? ""} type="password" placeholder="sk-…" statusBadge={primaryStatus} />
-          <Field label="Base URL" name="llmPrimaryBaseUrl" value={rawSettings?.llmPrimaryBaseUrl ?? ""} type="url" placeholder="https://api.deepseek.com  (or  https://api.openai.com/v1  · https://api.groq.com/openai/v1  · https://openrouter.ai/api/v1)" />
-          <Field label="Model name" name="llmPrimaryModel" value={rawSettings?.llmPrimaryModel ?? ""} placeholder="deepseek-v4-flash  (or  gpt-4o-mini  ·  llama-3.3-70b-versatile  ·  qwen2.5-coder:7b  …)" />
-        </Section>
-
-        <Section title="LLM provider — sensitive slot (only for high-sensitivity projects)">
-          <p className="meta" style={{ margin: 0 }}>
-            Used only on project_profiles flagged <code>high</code>. Leave blank if you don't have high-sensitivity projects.
-          </p>
-          <Field label="API key" name="llmSensitiveApiKey" value={s?.llmSensitiveApiKey ?? ""} type="password" placeholder="sk-ant-…" statusBadge={sensitiveStatus} />
-          <Field label="Base URL" name="llmSensitiveBaseUrl" value={rawSettings?.llmSensitiveBaseUrl ?? ""} type="url" placeholder="https://api.anthropic.com" />
-          <Field label="Model name" name="llmSensitiveModel" value={rawSettings?.llmSensitiveModel ?? ""} placeholder="claude-opus-4-7" />
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 13 }}>Wire format</span>
-            <select name="llmSensitiveWireFormat" defaultValue={rawSettings?.llmSensitiveWireFormat ?? "anthropic"} style={{ padding: 6, maxWidth: 360 }}>
-              <option value="anthropic">Anthropic /v1/messages (default)</option>
-              <option value="openai-compatible">OpenAI-compatible /chat/completions</option>
-            </select>
-            <span className="meta">Pick OpenAI-compatible if your provider exposes that shape (e.g. a self-hosted model).</span>
-          </label>
-          <p className="meta" style={{ marginTop: 4 }}>
-            {sharedAllowed
-              ? "Admin has granted you fallback to shared LLM keys; leaving these blank still works. GitHub token is always BYO (any usage shows up under your GitHub account)."
-              : "Provide your own keys (primary is required; sensitive only if you have projects flagged high-sensitivity). Ask admin to grant shared LLM access if you'd rather not pay."}
-          </p>
-        </Section>
-
-        <Section title="Extra doc paths (optional)">
-          <p className="meta" style={{ margin: 0 }}>
-            Replen always reads each project's <code>README.md</code>, <code>CLAUDE.md</code>, and a manifest. Add globs here for extra files you want included (e.g. <code>SPEC.md</code>, <code>docs/architecture/*.md</code>). Patterns are relative to each project root. Capped at 5 matches per pattern, 20K chars per file.
-          </p>
-          <textarea
-            name="extraDocPaths"
-            defaultValue={(rawSettings?.extraDocPaths ?? "").split(",").join("\n")}
-            placeholder={"e.g.\nSPEC.md\ndocs/architecture/*.md\ndocs/internal/**/*.md"}
-            rows={4}
-            style={{ padding: 6, fontFamily: "ui-monospace, monospace", fontSize: 13, width: "100%" }}
+          <Field
+            label="API key (leave blank to keep the current one)"
+            name="llmPrimaryApiKey"
+            value={s?.llmPrimaryApiKey ?? ""}
+            type="password"
+            placeholder="sk-…"
+            statusBadge={primaryStatus}
           />
-          <p className="meta">
-            One pattern per line (or comma-separated). See <a href="https://docs.replen.dev/project-docs.html" target="_blank" rel="noreferrer">the project-docs guide</a> for what makes a project's docs work well with replen, including a copy-pasteable <code>CLAUDE.md</code> template.
-          </p>
+          <details style={{ marginTop: 4 }}>
+            <summary style={settingsAdvancedSummary}>Advanced: custom base URL / model name</summary>
+            <Field label="Base URL" name="llmPrimaryBaseUrl" value={rawSettings?.llmPrimaryBaseUrl ?? ""} type="url" placeholder="https://api.deepseek.com  (or any OpenAI-compatible endpoint)" />
+            <Field label="Model" name="llmPrimaryModel" value={rawSettings?.llmPrimaryModel ?? ""} placeholder="deepseek-chat  ·  gpt-4o-mini  ·  llama-3.3-70b-versatile" />
+          </details>
         </Section>
 
-        <Section title="Detected stack (drives gh-trending slices)">
-          <p className="meta" style={{ margin: 0 }}>
-            We scan your own GitHub repos when you save a PAT and pick the top languages by repo size.
-            The gh-trending fetcher pulls language-specific trending pages for these; most TikTok/Threads
-            creators are just repackaging gh-trending, so this is the highest-signal source.
+        {/* ── Section 2: GitHub access ─────────────────────────────── */}
+        <Section title="GitHub access">
+          <p style={settingsHelp}>
+            Replen reads your project README + CLAUDE.md + recent commits via your GitHub PAT. Same token opens docs-improvement PRs into your repos when needed.
           </p>
-          {rawSettings?.detectedLanguages ? (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {rawSettings.detectedLanguages.split(",").map((l) => (
-                <span key={l} className="tag" style={{ background: "#eef", color: "#225" }}>{l}</span>
-              ))}
-            </div>
-          ) : (
-            <p className="meta" style={{ margin: 0 }}>None detected yet. Save a PAT above, then click re-detect.</p>
-          )}
-          <form action={redetectLanguages} style={{ marginTop: 4 }}>
-            <button type="submit">Re-detect stack from GitHub</button>
-          </form>
+          {s?.githubToken
+            ? <StatusLine ok label="Token saved" />
+            : <StatusLine ok={false} label="No token yet — paste one below" />}
+          <a
+            href="https://github.com/settings/personal-access-tokens/new?name=replen&description=Replen+pipeline+%2B+docs+PRs"
+            target="_blank"
+            rel="noreferrer"
+            style={settingsExternalBtn}
+          >
+            <GithubIconSmall /> Create a PAT on GitHub →
+          </a>
+          <p style={{ ...settingsHelp, fontSize: 12, marginTop: 6 }}>
+            On the GitHub page set <b>Repository access: All repositories</b> and these permissions:{" "}
+            <code>Contents: Read &amp; write</code>, <code>Pull requests: Read &amp; write</code>,{" "}
+            <code>Metadata: Read</code>.
+          </p>
+          <Field
+            label="Paste new token (leave blank to keep the current one)"
+            name="githubToken"
+            value={s?.githubToken ?? s?.githubWriteToken ?? ""}
+            type="password"
+            placeholder="github_pat_…"
+          />
         </Section>
 
-        <Section title="Delivery">
-          <Field label="Email destination for your digest" name="emailToAddress" value={s?.emailToAddress ?? ""} type="email" placeholder="you@example.com" />
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input type="checkbox" name="enabled" defaultChecked={s?.enabled !== false} /> nightly run enabled
+        {/* ── Section 3: Sensitive projects (collapsed) ────────────── */}
+        <details style={settingsAdvancedDetails}>
+          <summary style={settingsSectionSummary}>
+            Sensitive projects (Anthropic-only slot)
+            {sensitiveKeySet && <span style={settingsBadge}>configured</span>}
+          </summary>
+          <div style={{ padding: "12px 16px" }}>
+            <p style={settingsHelp}>
+              Some projects you mark as &ldquo;high sensitivity&rdquo; on <a href="/projects">/projects</a> route through this separate slot. Leave blank if no projects need it. Anthropic by default.
+            </p>
+            <Field label="API key" name="llmSensitiveApiKey" value={s?.llmSensitiveApiKey ?? ""} type="password" placeholder="sk-ant-…" statusBadge={sensitiveStatus} />
+            <Field label="Base URL" name="llmSensitiveBaseUrl" value={rawSettings?.llmSensitiveBaseUrl ?? ""} type="url" placeholder="https://api.anthropic.com" />
+            <Field label="Model" name="llmSensitiveModel" value={rawSettings?.llmSensitiveModel ?? ""} placeholder="claude-sonnet-4-6" />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+              <span style={{ fontSize: 13 }}>Wire format</span>
+              <select name="llmSensitiveWireFormat" defaultValue={rawSettings?.llmSensitiveWireFormat ?? "anthropic"} style={{ padding: 6, maxWidth: 360 }}>
+                <option value="anthropic">Anthropic /v1/messages (default)</option>
+                <option value="openai-compatible">OpenAI-compatible /chat/completions</option>
+              </select>
+            </label>
+            {sharedAllowed && (
+              <p style={settingsHelp}>
+                You have admin-granted fallback to shared LLM keys; leaving these blank works.
+              </p>
+            )}
+          </div>
+        </details>
+
+        {/* ── Section 4: Email digest ──────────────────────────────── */}
+        <Section title="Email digest (optional)">
+          <p style={settingsHelp}>
+            Send the daily summary to your inbox. The dashboard is the primary surface; email is a useful nudge but not required.
+          </p>
+          <Field label="Email destination" name="emailToAddress" value={s?.emailToAddress ?? ""} type="email" placeholder="you@example.com" />
+          <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+            <input type="checkbox" name="enabled" defaultChecked={s?.enabled !== false} /> Automatic daily run
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            Run at hour (UTC):
+            Run at (24h, UTC):
             <input type="number" name="cronHourUtc" min={0} max={23} defaultValue={s?.cronHourUtc ?? 6} style={{ width: 60, padding: 4 }} />
+            <span style={settingsHint}>e.g. 06 = 6am UTC daily</span>
           </label>
+        </Section>
+
+        {/* ── Section 5: Costs ─────────────────────────────────────── */}
+        <Section title="Costs">
+          <div style={{ display: "flex", gap: 24, marginBottom: 12, flexWrap: "wrap" }}>
+            <CostStat label="Last 7 days" value={`$${weekCostUsd.toFixed(2)}`} />
+            <CostStat
+              label="Last run"
+              value={lastRunCost?.cost ? `$${Number(lastRunCost.cost).toFixed(2)}` : "—"}
+            />
+          </div>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            Daily cost cap (USD):
+            Daily cost cap:
+            <span style={{ fontSize: 13 }}>$</span>
             <input type="number" name="dailyCostCapUsd" min={0} step={0.5} defaultValue={rawSettings?.dailyCostCapUsd ?? 5} style={{ width: 80, padding: 4 }} />
-            <span className="meta">runs pause when 24h spend hits this · 0 disables</span>
+            <span style={settingsHint}>Run pauses when 24h spend hits this. 0 = no cap.</span>
           </label>
         </Section>
 
-        <Section title="Real-time webhook (optional)">
-          <Field label="Webhook URL" name="webhookUrl" value={s?.webhookUrl ?? ""} type="text" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 13 }}>Format</span>
-            <select name="webhookKind" defaultValue={rawSettings?.webhookKind ?? "generic"} style={{ padding: 6, maxWidth: 240 }}>
-              <option value="slack">Slack (blocks)</option>
-              <option value="discord">Discord (embeds)</option>
-              <option value="generic">Generic JSON</option>
-            </select>
-          </label>
-          <p className="meta">Fires after each run when there's at least one <code>relevance=high</code> match. Email still goes out separately.</p>
-        </Section>
+        {/* ── Section 6: Advanced (collapsed) ──────────────────────── */}
+        <details style={settingsAdvancedDetails}>
+          <summary style={settingsSectionSummary}>Advanced</summary>
+          <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
 
-        <button type="submit" style={{ padding: "8px 16px", marginTop: 8, alignSelf: "flex-start" }}>Save settings</button>
+            <div>
+              <h3 style={settingsSubHeader}>Extra doc paths</h3>
+              <p style={settingsHelp}>
+                Replen always reads each project&rsquo;s <code>README.md</code>, <code>CLAUDE.md</code>, and <code>.specify/</code>. Add globs here for extra files (e.g. <code>SPEC.md</code>, <code>docs/architecture/*.md</code>). Capped at 5 matches per pattern, 20K chars per file.
+              </p>
+              <textarea
+                name="extraDocPaths"
+                defaultValue={(rawSettings?.extraDocPaths ?? "").split(",").join("\n")}
+                placeholder={"e.g.\nSPEC.md\ndocs/architecture/*.md\ndocs/internal/**/*.md"}
+                rows={4}
+                style={{ padding: 6, fontFamily: "ui-monospace, monospace", fontSize: 13, width: "100%" }}
+              />
+            </div>
+
+            <div>
+              <h3 style={settingsSubHeader}>Detected languages</h3>
+              <p style={settingsHelp}>
+                Drives the gh-trending fetcher&rsquo;s per-language slices. Updates when you save a new PAT.
+              </p>
+              {rawSettings?.detectedLanguages ? (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                  {rawSettings.detectedLanguages.split(",").map((l) => (
+                    <span key={l} className="tag" style={{ background: "var(--surface-2)", color: "var(--fg)" }}>{l}</span>
+                  ))}
+                </div>
+              ) : (
+                <p style={settingsHelp}>None detected yet.</p>
+              )}
+            </div>
+
+            <div>
+              <h3 style={settingsSubHeader}>Real-time webhook</h3>
+              <p style={settingsHelp}>
+                Slack / Discord / generic JSON. Fires after each run when at least one <code>high</code>-relevance match is found.
+              </p>
+              <Field label="Webhook URL" name="webhookUrl" value={s?.webhookUrl ?? ""} type="text" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                <span style={{ fontSize: 13 }}>Format</span>
+                <select name="webhookKind" defaultValue={rawSettings?.webhookKind ?? "generic"} style={{ padding: 6, maxWidth: 240 }}>
+                  <option value="slack">Slack (blocks)</option>
+                  <option value="discord">Discord (embeds)</option>
+                  <option value="generic">Generic JSON</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <button type="submit" className="primary" style={{ padding: "10px 18px", marginTop: 8, alignSelf: "flex-start" }}>Save settings</button>
       </form>
 
-      <Section title="Ingest endpoint (for bookmarklets / browser extensions)">
-        <p id="ingest" className="meta" style={{ margin: 0 }}>
+      <details style={{ ...settingsAdvancedDetails, maxWidth: 640, marginTop: 8 }}>
+        <summary style={settingsSectionSummary}>
+          Bookmarklet / MCP token
+          {rawSettings?.ingestTokenHash && <span style={settingsBadge}>configured</span>}
+        </summary>
+        <div style={{ padding: "12px 16px" }}>
+        <p id="ingest" style={settingsHelp}>
           POST a URL to <code>/api/ingest</code> with header <code>x-ingest-token: &lt;your token&gt;</code> and body <code>{`{"url":"…"}`}</code>. Lands as a high-score candidate for the next run.
         </p>
         {justRotatedToken ? (
@@ -477,20 +590,33 @@ export default async function SettingsPage({ searchParams }: Params) {
           <button type="submit">{rawSettings?.ingestTokenHash ? "Rotate token" : "Generate token"}</button>
           {rawSettings?.ingestTokenHash && <span className="meta" style={{ marginLeft: 8 }}>old token stops working immediately</span>}
         </form>
-      </Section>
+        </div>
+      </details>
 
-      <Section title="Maintenance">
-        <p className="meta" style={{ margin: 0 }}>
-          Archive hidden matches older than 90 days. They stay in the DB (recoverable) but won't load on the dashboard.
+      <details style={{ ...settingsAdvancedDetails, maxWidth: 640, marginTop: 8 }}>
+        <summary style={settingsSectionSummary}>Maintenance</summary>
+        <div style={{ padding: "12px 16px" }}>
+          <p style={settingsHelp}>
+            Archive hidden matches older than 90 days. They stay in the DB (recoverable) but won&rsquo;t load on the dashboard. Everything else (fetched candidates, all writeups including hidden ones) is kept permanently — Replen never deletes your data unless you ask.
+          </p>
+          <form action={async () => { "use server"; await archiveOldHidden(90); }} style={{ marginTop: 6 }}>
+            <button type="submit">Archive hidden &gt; 90d</button>
+          </form>
+        </div>
+      </details>
+
+      {/* ── Danger zone ──────────────────────────────────────────── */}
+      <section style={{ maxWidth: 640, marginTop: 32, padding: "16px 18px", border: "1px solid rgba(255, 99, 99, 0.35)", borderRadius: 12, background: "rgba(255, 99, 99, 0.04)" }}>
+        <h2 style={{ fontSize: 15, color: "#ff8a8a", margin: "0 0 8px" }}>Danger zone</h2>
+        <p style={{ ...settingsHelp, color: "var(--dim)", marginBottom: 12 }}>
+          To delete your account and all data (project profiles, matches, insights, runs, secrets) permanently, email{" "}
+          <a href="mailto:support@replen.dev?subject=Delete%20my%20Replen%20account">support@replen.dev</a>{" "}
+          from the address registered to this account. We&rsquo;ll delete within 7 days and confirm by email.
         </p>
-        <form action={async () => { "use server"; await archiveOldHidden(90); }} style={{ marginTop: 6 }}>
-          <button type="submit">Archive hidden &gt; 90d</button>
-        </form>
-      </Section>
-
-      <p className="meta" style={{ marginTop: 32 }}>
-        Everything is kept: every fetched post lives in the <code>candidates</code> table; every writeup lives in <code>matches.writeup_md</code> permanently. Hidden matches stay in the DB, just filtered out of the dashboard.
-      </p>
+        <p style={{ ...settingsHelp, color: "var(--faint)", fontSize: 11, marginBottom: 0 }}>
+          A self-serve delete button is on the roadmap. We&rsquo;re routing it through email-confirm for now so the action is auditable.
+        </p>
+      </section>
     </>
   );
 }
@@ -521,12 +647,163 @@ function mcpSetupCommand(token: string): string {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <fieldset style={{ border: "1px solid #ccc4", padding: 12 }}>
-      <legend style={{ padding: "0 6px", fontSize: 13, fontWeight: 600 }}>{title}</legend>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>
-    </fieldset>
+    <section style={{
+      padding: "18px 20px",
+      border: "1px solid var(--line, #ccc4)",
+      borderRadius: 12,
+      background: "var(--surface-1, transparent)",
+    }}>
+      <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 12px", color: "var(--fg)" }}>{title}</h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{children}</div>
+    </section>
   );
 }
+
+function StatusLine({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "4px 10px", borderRadius: 999,
+      fontSize: 12, fontWeight: 500,
+      background: ok ? "var(--green-soft, rgba(111,206,130,0.13))" : "var(--surface-2, rgba(255,255,255,0.07))",
+      color: ok ? "var(--green, #6fce82)" : "var(--dim, #9d9a93)",
+      border: `1px solid ${ok ? "var(--green-line, rgba(111,206,130,0.28))" : "var(--line)"}`,
+      width: "fit-content",
+    }}>
+      {ok ? "✓" : "○"} {label}
+    </div>
+  );
+}
+
+function CostStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--faint, #66645e)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: "var(--fg)" }}>{value}</div>
+    </div>
+  );
+}
+
+function ProviderOption({
+  value, currentProvider, hasKey, label, tag, cost, keyLink, keyLinkLabel,
+}: {
+  value: "deepseek" | "openai" | "anthropic" | "custom";
+  currentProvider: "deepseek" | "openai" | "anthropic" | "custom" | null;
+  hasKey: boolean;
+  label: string;
+  tag?: string;
+  cost: string;
+  keyLink: string;
+  keyLinkLabel: string;
+}) {
+  const isCurrent = currentProvider === value;
+  return (
+    <label style={{
+      display: "flex", flexDirection: "column", gap: 4,
+      padding: "10px 12px",
+      border: `1px solid ${isCurrent ? "var(--amber-line, rgba(255,200,87,0.4))" : "var(--line, #ccc4)"}`,
+      borderRadius: 8,
+      cursor: "pointer",
+      background: isCurrent ? "var(--amber-soft, rgba(255,200,87,0.08))" : "var(--surface-1, transparent)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input type="radio" name="provider" value={value} defaultChecked={isCurrent || (currentProvider === null && value === "deepseek")} />
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        {tag && (
+          <span style={settingsBadge}>{tag}</span>
+        )}
+        {hasKey && (
+          <span style={{ ...settingsBadge, background: "var(--green-soft)", color: "var(--green)", borderColor: "var(--green-line)" }}>
+            ✓ key saved
+          </span>
+        )}
+        <span className="meta" style={{ marginLeft: "auto", fontSize: 12 }}>{cost}</span>
+      </div>
+      {keyLink && (
+        <a href={keyLink} target="_blank" rel="noreferrer" style={{
+          fontSize: 12, color: "var(--amber, #ffc857)", textDecoration: "none", marginLeft: 24,
+        }}>
+          {keyLinkLabel}
+        </a>
+      )}
+    </label>
+  );
+}
+
+function GithubIconSmall() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor" style={{ marginRight: 6 }}>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+    </svg>
+  );
+}
+
+const settingsHelp: React.CSSProperties = {
+  color: "var(--dim, #666)",
+  fontSize: 13,
+  lineHeight: 1.55,
+  margin: "0 0 8px",
+};
+
+const settingsHint: React.CSSProperties = {
+  color: "var(--faint, #888)",
+  fontSize: 12,
+};
+
+const settingsSubHeader: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  margin: "0 0 6px",
+  color: "var(--fg)",
+};
+
+const settingsExternalBtn: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "6px 12px",
+  background: "#24292f",
+  color: "#fff",
+  textDecoration: "none",
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 500,
+  alignSelf: "flex-start",
+};
+
+const settingsAdvancedDetails: React.CSSProperties = {
+  border: "1px solid var(--line, #ccc4)",
+  borderRadius: 12,
+  background: "var(--surface-1, transparent)",
+};
+
+const settingsSectionSummary: React.CSSProperties = {
+  cursor: "pointer",
+  padding: "14px 18px",
+  fontSize: 15,
+  fontWeight: 600,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  userSelect: "none",
+};
+
+const settingsAdvancedSummary: React.CSSProperties = {
+  cursor: "pointer",
+  fontSize: 12,
+  color: "var(--dim, #888)",
+  marginBottom: 6,
+};
+
+const settingsBadge: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  background: "var(--amber-soft, rgba(255,200,87,0.13))",
+  color: "var(--amber, #ffc857)",
+  border: "1px solid var(--amber-line, rgba(255,200,87,0.38))",
+  borderRadius: 999,
+  padding: "1px 8px",
+  letterSpacing: "0.02em",
+};
 
 function Field({ label, name, value, type = "text", placeholder, statusBadge }: {
   label: string; name: string; value: string; type?: string; placeholder?: string; statusBadge?: string | null;
