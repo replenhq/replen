@@ -1,7 +1,7 @@
 <div align="center">
   <img src="logo.svg" width="120" alt="Replen">
   <h1>Replen</h1>
-  <p><strong>Smart AI Development workflows</strong></p>
+  <p><strong>Smarter AI Development workflows</strong></p>
   <p>The AI that asks: <em>"can we do this better?"</em></p>
 
   <p>

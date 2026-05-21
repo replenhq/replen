@@ -1,9 +1,9 @@
 import { db, schema } from "@/db/client";
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
 import { runPipelineNow } from "@/app/actions";
-import { LocalTime } from "@/components/LocalTime";
 import { sourceKind } from "@/lib/source-rank";
+import { RunRow } from "@/components/RunRow";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +51,31 @@ export default async function Runs() {
   const totalCost = runs.reduce((acc, r) => acc + Number(r.costUsd ?? 0), 0);
 
   const inFlight = runs.find((r) => !r.finishedAt);
+
+  // Pull persisted events for the visible runs so each row can expand
+  // into its full event log inline. Capped per-run server-side (last
+  // 200 events) — runs longer than that very rarely happen for normal
+  // users, and the in-flight streamer ring-buffers at the same cap.
+  const runIds = runs.map((r) => r.id);
+  const allEvents = runIds.length === 0 ? [] : await db
+    .select({
+      id: schema.pipelineEvents.id,
+      runId: schema.pipelineEvents.runId,
+      kind: schema.pipelineEvents.kind,
+      message: schema.pipelineEvents.message,
+      createdAt: schema.pipelineEvents.createdAt,
+    })
+    .from(schema.pipelineEvents)
+    .where(inArray(schema.pipelineEvents.runId, runIds))
+    .orderBy(schema.pipelineEvents.id);
+  const eventsByRun = new Map<number, Array<{ id: number; kind: string; message: string; createdAt: string }>>();
+  for (const e of allEvents) {
+    if (e.runId == null) continue;
+    const item = { id: e.id, kind: e.kind, message: e.message, createdAt: e.createdAt.toISOString() };
+    const list = eventsByRun.get(e.runId);
+    if (list) list.push(item);
+    else eventsByRun.set(e.runId, [item]);
+  }
 
   // Rolling windows over what was fetched (capped at 50 rows). Adequate for
   // typical daily-cron usage where 50 runs ≈ 2 months; we'd widen the limit
@@ -173,28 +198,27 @@ export default async function Runs() {
             <th style={{ textAlign: "right" }}>AN in / out</th>
             <th style={{ textAlign: "right" }}>cost</th>
             <th>error</th>
+            <th style={{ textAlign: "right" }}>audit</th>
           </tr>
         </thead>
         <tbody>
           {runs.map((r) => (
-            <tr key={r.id}>
-              <td className="meta" style={{ whiteSpace: "nowrap" }}>
-                <LocalTime iso={r.startedAt.toISOString()} />
-              </td>
-              <td className="meta">{fmtDuration(r.startedAt, r.finishedAt)}</td>
-              <td style={{ textAlign: "right" }}>{r.candidatesFound ?? 0}</td>
-              <td style={{ textAlign: "right" }}>{r.reposAnalyzed ?? 0}</td>
-              <td style={{ textAlign: "right" }}>{r.matchesCreated ?? 0}</td>
-              <td style={{ textAlign: "center" }}>{r.emailSent ? "✓" : "-"}</td>
-              <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-                {fmtTokens(r.deepseekInputTokens)} / {fmtTokens(r.deepseekOutputTokens)}
-              </td>
-              <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-                {fmtTokens(r.anthropicInputTokens)} / {fmtTokens(r.anthropicOutputTokens)}
-              </td>
-              <td style={{ textAlign: "right" }}>{fmtCost(r.costUsd)}</td>
-              <td className="meta">{r.errorLog ? "yes" : "-"}</td>
-            </tr>
+            <RunRow
+              key={r.id}
+              startedISO={r.startedAt.toISOString()}
+              duration={fmtDuration(r.startedAt, r.finishedAt)}
+              candidates={Number(r.candidatesFound ?? 0)}
+              analyzed={Number(r.reposAnalyzed ?? 0)}
+              matches={Number(r.matchesCreated ?? 0)}
+              emailSent={!!r.emailSent}
+              dsIn={fmtTokens(r.deepseekInputTokens)}
+              dsOut={fmtTokens(r.deepseekOutputTokens)}
+              anIn={fmtTokens(r.anthropicInputTokens)}
+              anOut={fmtTokens(r.anthropicOutputTokens)}
+              cost={fmtCost(r.costUsd)}
+              hasError={!!r.errorLog}
+              events={eventsByRun.get(r.id) ?? []}
+            />
           ))}
         </tbody>
       </table>

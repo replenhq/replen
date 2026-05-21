@@ -9,7 +9,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { InsightsStrip } from "@/components/InsightsStrip";
 import { isDemoUser } from "@/lib/auth/demo-mode";
 import { DemoMatchActions } from "@/components/DemoMatchActions";
-import { DemoStreamerProvider, DemoStreamerButton, DemoStreamerLog } from "@/components/DemoStreamer";
+import { DemoStreamerProvider, DemoStreamerButton, DemoStreamerLog, DemoStreamerMinimized, DemoMatchListGate, DemoRevealAt, DemoPreRunEmptyState } from "@/components/DemoStreamer";
 import { SparseDocsCards, buildSparseProject, type SparseProject } from "@/components/SparseDocsCards";
 import { assessDocSparsity } from "@/projects/self-improvement";
 import { formatTimestampToMinute } from "@/lib/format-date";
@@ -293,6 +293,22 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
 
   const demoMode = isDemoUser(user);
 
+  // Precompute the global reveal index for each match + the first
+  // global index landing in each project section. The demo streamer
+  // uses these to progressively reveal cards as it announces matches,
+  // so the feed populates in real time during the simulated run
+  // rather than showing everything pre-baked. No effect outside demo
+  // mode — the gating components are no-ops without the provider.
+  const matchGlobalIndex = new Map<number, number>();
+  const sectionFirstIndex = new Map<string, number>();
+  {
+    let g = 0;
+    for (const [slug, list] of orderedGroups) {
+      if (list.length > 0) sectionFirstIndex.set(slug, g);
+      for (const mm of list) matchGlobalIndex.set(mm.id, g++);
+    }
+  }
+
   const feedBody = (
     <>
       <div className="feed-header">
@@ -311,6 +327,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
             {lastRunAt
               ? `Last run: ${formatTimestampToMinute(lastRunAt)}`
               : "No runs yet"}
+            {demoMode && <DemoStreamerMinimized />}
           </div>
         </div>
       </div>
@@ -359,6 +376,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
           {newSinceVisit} new {newSinceVisit === 1 ? "match" : "matches"} since your last visit
         </div>
       )}
+      {demoMode && <DemoPreRunEmptyState />}
+      <DemoMatchListGate>
       <SparseDocsCards projects={sparseProjects} />
       <InsightsStrip insights={insights} />
       <FilterBar
@@ -421,7 +440,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
               const isSaved = isStarred || isBookmarked;
               const canHandoff = isStarred && !m.handoffPrUrl && !!project;
               const bookmarkDate = m.resurfacedFromMatchId ? bookmarkDateById.get(m.resurfacedFromMatchId) : null;
+              const gIdx = matchGlobalIndex.get(m.id) ?? 0;
               return (
+                <DemoRevealAt key={m.id} index={gIdx}>
                 <div className="match" key={m.id}>
                   <div className="match-head">
                     {/* Project tag FIRST so the user immediately sees which
@@ -583,11 +604,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                   </div>
                   )}
                 </div>
+                </DemoRevealAt>
               );
             })}
           </>
         );
+        const firstIdx = sectionFirstIndex.get(slug) ?? 0;
         return (
+          <DemoRevealAt key={slug} index={firstIdx}>
           <section key={slug} style={{ marginTop: 32 }}>
             {isGeneral ? (
               <details>
@@ -601,8 +625,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
               </details>
             ) : inner}
           </section>
+          </DemoRevealAt>
         );
       })}
+      </DemoMatchListGate>
     </>
   );
 

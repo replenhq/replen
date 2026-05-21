@@ -1,7 +1,7 @@
 {
   "name": "@replen/mcp",
   "version": "0.2.1",
-  "description": "MCP server for replen - Smart AI Development workflows. Brings replen's proactive 'can we do this better?' research into Claude Code / Codex / any MCP host, so your AI coding workflow can act on the day's matches without ever leaving the chat.",
+  "description": "MCP server for replen - Smarter AI Development workflows. Brings replen's proactive 'can we do this better?' research into Claude Code / Codex / any MCP host, so your AI coding workflow can act on the day's matches without ever leaving the chat.",
   "type": "module",
   "bin": {
     "replen-mcp": "dist/cli.js"

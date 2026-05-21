@@ -51,9 +51,25 @@ type Ctx = {
   running: boolean;
   done: boolean;
   startedAt: number | null;
+  finishedAt: number | null;
   now: number;
+  /** How many real match cards have been "revealed" on the feed below.
+   *  Driven by the SCRIPT's `match` events firing — each one increments
+   *  this by REVEALS_PER_MATCH_EVENT, so the feed populates progressively
+   *  as the streamer announces matches. On run completion, set to a
+   *  sentinel large value so any remaining match cards become visible. */
+  revealedMatchCount: number;
+  /** After the run completes the visitor can collapse the log to an
+   *  ℹ icon next to the Refresh button and re-open it to audit what
+   *  ran. Toggle via setExpanded. While the run is in flight the log
+   *  is always visible regardless of this flag. */
+  expanded: boolean;
+  setExpanded: (v: boolean) => void;
   start: () => void;
 };
+
+const REVEALS_PER_MATCH_EVENT = 2;
+const REVEAL_ALL = 9999;
 
 const StreamerContext = createContext<Ctx | null>(null);
 
@@ -65,6 +81,9 @@ export function DemoStreamerProvider({ children }: { children: ReactNode }) {
   const [done, setDone] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [revealedMatchCount, setRevealedMatchCount] = useState(0);
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const tick = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,21 +103,39 @@ export function DemoStreamerProvider({ children }: { children: ReactNode }) {
     setEvents([]);
     setCandidates(0);
     setMatches(0);
+    setRevealedMatchCount(0);
     let nextId = 1;
     SCRIPT.forEach((step) => {
       const t = setTimeout(() => {
         setEvents((prev) => [...prev, { id: nextId++, kind: step.kind, message: step.message }]);
         if (step.candDelta) setCandidates((c) => c + step.candDelta!);
-        if (step.matchDelta) setMatches((m) => m + step.matchDelta!);
+        if (step.matchDelta) {
+          setMatches((m) => m + step.matchDelta!);
+          // Tie reveal of the actual persisted match cards below to the
+          // streamer's announcement cadence — gives the impression of a
+          // live pipeline populating the feed in real time.
+          setRevealedMatchCount((r) => r + REVEALS_PER_MATCH_EVENT);
+        }
       }, step.delayMs);
       timers.current.push(t);
     });
-    const final = setTimeout(() => { setRunning(false); setDone(true); }, TOTAL_MS);
+    const final = setTimeout(() => {
+      setRunning(false);
+      setDone(true);
+      setFinishedAt(Date.now());
+      // Backstop in case the SCRIPT's match events didn't add up to
+      // every persisted match card.
+      setRevealedMatchCount(REVEAL_ALL);
+      // Default to collapsed once the run completes — the streamer
+      // shifts to a compact ℹ icon next to the Refresh button, which
+      // the visitor can click to re-open for auditing.
+      setExpanded(false);
+    }, TOTAL_MS);
     timers.current.push(final);
   }
 
   return (
-    <StreamerContext.Provider value={{ events, candidates, matches, running, done, startedAt, now, start }}>
+    <StreamerContext.Provider value={{ events, candidates, matches, running, done, startedAt, finishedAt, now, revealedMatchCount, expanded, setExpanded, start }}>
       {children}
     </StreamerContext.Provider>
   );
@@ -122,7 +159,9 @@ export function DemoStreamerButton() {
 }
 
 // Full-width log strip. Renders nothing until the visitor clicks
-// Refresh; after that, mirrors LivePipelineStatus 1:1.
+// Refresh; visible while the pipeline is running, and also after
+// completion when the visitor has expanded the minimized chip in
+// the header (so the run log stays auditable rather than vanishing).
 export function DemoStreamerLog() {
   const ctx = useContext(StreamerContext);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -132,10 +171,16 @@ export function DemoStreamerLog() {
   }, [ctx?.events.length]);
 
   if (!ctx) return null;
-  const { events, candidates, matches, running, done, startedAt, now } = ctx;
-  if (!running && !done) return null;
+  const { events, candidates, matches, running, done, startedAt, finishedAt, now, expanded, setExpanded } = ctx;
+  // Visible while the pipeline is in flight; afterward only when the
+  // visitor explicitly re-opens via the minimized chip in the header.
+  if (!running && !(done && expanded)) return null;
+  // While running, drive the timer from the live clock; once done,
+  // freeze the duration so the audit view shows the actual runtime.
+  const endTs = running ? now : (finishedAt ?? now);
+  const elapsedMs = Math.max(0, (startedAt ? endTs - startedAt : 0));
 
-  const elapsed = Math.max(0, Math.floor(((startedAt ? now - startedAt : 0)) / 1000));
+  const elapsed = Math.floor(elapsedMs / 1000);
   const mm = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const ss = (elapsed % 60).toString().padStart(2, "0");
 
@@ -151,6 +196,16 @@ export function DemoStreamerLog() {
         <span className="pipeline-log-counts">
           {candidates} candidates · {matches} matches · {mm}:{ss}
         </span>
+        {done && expanded && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            style={{ marginLeft: 8, fontSize: 12, padding: "2px 8px" }}
+            title="Collapse to minimized chip in the header"
+          >
+            Hide
+          </button>
+        )}
       </div>
       <div className="pipeline-log-body" ref={scrollRef}>
         {events.map((e) => (
@@ -174,4 +229,100 @@ function markerFor(kind: EventKind): string {
     case "scan":
     default:             return "›";
   }
+}
+
+// Hides its children until the visitor has clicked Refresh at least once
+// — used to gate the entire match-list block (filter pills, count line,
+// project sections) so the page is empty on first arrival and populates
+// as the streamer runs. After the run, children stay visible.
+export function DemoMatchListGate({ children }: { children: ReactNode }) {
+  const ctx = useContext(StreamerContext);
+  // No provider → not in demo mode, render unchanged. The component is
+  // safe to import + use from a server-rendered demo page that wraps
+  // matches in this gate unconditionally.
+  if (!ctx) return <>{children}</>;
+  if (!ctx.running && !ctx.done) return null;
+  return <>{children}</>;
+}
+
+// Reveals its children once the streamer's revealed-match counter has
+// passed the given `index`. Use for individual match cards (with their
+// global flat index) and project section wrappers (with the first
+// global index of any match in that section). Pre-refresh, children
+// are hidden; during the run they fade in as the streamer announces
+// matches; after `done` everything is visible.
+export function DemoRevealAt({ children, index }: { children: ReactNode; index: number }) {
+  const ctx = useContext(StreamerContext);
+  if (!ctx) return <>{children}</>;
+  if (!ctx.running && !ctx.done) return null;
+  if (index >= ctx.revealedMatchCount) return null;
+  return <>{children}</>;
+}
+
+// Minimized "ⓘ" affordance shown after a run completes — the
+// glyph itself is a unicode circled-i, so colouring it amber gives
+// the "yellow circle with yellow i" look without any pill / button
+// chrome around it. Inline-positioned so it can sit adjacent to the
+// "Last run: <date>" meta line. Click to re-open the full streamer
+// log for auditing.
+export function DemoStreamerMinimized() {
+  const ctx = useContext(StreamerContext);
+  if (!ctx) return null;
+  const { done, running, expanded, setExpanded, matches, candidates } = ctx;
+  if (!done) return null;
+  if (running) return null;
+  if (expanded) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(true)}
+      title={`View last run · ${matches} matches · ${candidates} candidates scanned`}
+      aria-label="View last run details"
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        marginLeft: 6,
+        fontSize: 14,
+        lineHeight: 1,
+        color: "var(--amber, #ffc857)",
+        cursor: "pointer",
+        verticalAlign: "middle",
+      }}
+    >
+      ⓘ
+    </button>
+  );
+}
+
+// Empty-state callout shown only before the visitor clicks Refresh —
+// gives the page something to anchor on instead of looking blank.
+// Disappears the moment the streamer starts.
+export function DemoPreRunEmptyState() {
+  const ctx = useContext(StreamerContext);
+  if (!ctx) return null;
+  if (ctx.running || ctx.done) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        margin: "32px 0",
+        padding: "28px 24px",
+        border: "1px dashed var(--line, #ccc4)",
+        borderRadius: 12,
+        background: "var(--surface-1, transparent)",
+        textAlign: "center",
+        color: "var(--dim, #888)",
+        fontSize: 15,
+        lineHeight: 1.55,
+      }}
+    >
+      <p style={{ margin: 0, color: "var(--fg)" }}>
+        <strong>Click <em>Refresh</em> above to run the pipeline.</strong>
+      </p>
+      <p style={{ margin: "6px 0 0", fontSize: 14 }}>
+        Watch matches appear as Replen scans the day's candidates, scores them against the demo projects, and writes up the best fits.
+      </p>
+    </div>
+  );
 }

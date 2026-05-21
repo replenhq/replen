@@ -5,7 +5,7 @@ import { readConfig, configPath } from "./config.js";
 import { runProjectInit } from "./project-init.js";
 import { runFeed, runHandoff, runProgress, runRun, runSearch, runStarred } from "./commands.js";
 
-const HELP = `replen: Smart AI Development workflows
+const HELP = `replen: Smarter AI Development workflows
 
 Usage:
   npx replen                 Sign up / sign in + wire MCP into Claude Code

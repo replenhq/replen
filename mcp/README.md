@@ -1,6 +1,6 @@
 # @replen/mcp
 
-**Smart AI Development workflows.** MCP server that brings [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase - inside Claude Code / Codex / any MCP host.
+**Smarter AI Development workflows.** MCP server that brings [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase - inside Claude Code / Codex / any MCP host.
 
 While your AI coding tool waits for prompts, replen reads your code against the ecosystem every morning. This MCP lets the agent act on the results without leaving chat:
 

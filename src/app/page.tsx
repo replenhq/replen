@@ -5,7 +5,7 @@ import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPer
 import { requireUser } from "@/lib/auth/current-user";
 import { sourceKind, sourceRank } from "@/lib/source-rank";
 import { Icon } from "@/components/Icons";
-import { LivePipelineStatus } from "@/components/LivePipelineStatus";
+import { LivePipelineProvider, LivePipelineChip, LivePipelineLog } from "@/components/LivePipelineStatus";
 import { RefreshButton } from "@/components/RefreshButton";
 import { InsightsStrip } from "@/components/InsightsStrip";
 import { isDemoUser } from "@/lib/auth/demo-mode";
@@ -177,13 +177,42 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   // timestamp shown beside the Refresh button so the user can tell how fresh
   // the feed is without checking /runs.
   const latestRun = await db
-    .select({ id: schema.digestRuns.id, pausedReason: schema.digestRuns.pausedReason, finishedAt: schema.digestRuns.finishedAt })
+    .select({
+      id: schema.digestRuns.id,
+      pausedReason: schema.digestRuns.pausedReason,
+      startedAt: schema.digestRuns.startedAt,
+      finishedAt: schema.digestRuns.finishedAt,
+      candidatesFound: schema.digestRuns.candidatesFound,
+      matchesCreated: schema.digestRuns.matchesCreated,
+    })
     .from(schema.digestRuns)
     .where(and(eq(schema.digestRuns.userId, user.id), isNotNull(schema.digestRuns.finishedAt)))
     .orderBy(desc(schema.digestRuns.id))
     .get();
   const quotaSlot = parseQuotaReason(latestRun?.pausedReason ?? null);
   const lastRunAt = latestRun?.finishedAt ?? null;
+
+  // Audit chip seed: most recent run (in-flight wins over completed)
+  // events so the chip surfaces on a fresh page load without waiting
+  // for the first poll. Capped to the last 80 events — the streamer
+  // ring-buffers in-memory anyway, this just hydrates a sensible
+  // history window for the audit popup.
+  const auditRun = inFlightRun
+    ? { id: inFlightRun.id, startedAt: inFlightRun.startedAt, finishedAt: null as Date | null, candidatesFound: null as number | null, matchesCreated: null as number | null }
+    : latestRun;
+  const auditEvents = auditRun
+    ? (await db
+        .select({
+          id: schema.pipelineEvents.id,
+          kind: schema.pipelineEvents.kind,
+          message: schema.pipelineEvents.message,
+          createdAt: schema.pipelineEvents.createdAt,
+        })
+        .from(schema.pipelineEvents)
+        .where(eq(schema.pipelineEvents.runId, auditRun.id))
+        .orderBy(desc(schema.pipelineEvents.id))
+        .limit(80)).reverse()
+    : [];
 
   // Initiative #3: load synthesised insights for the same window as the
   // feed (last `days` days). Starred sort first, then newest unread. The
@@ -328,28 +357,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
             {lastRunAt
               ? `Last run: ${formatTimestampToMinute(lastRunAt)}`
               : "No runs yet"}
+            {!demoMode && <LivePipelineChip />}
           </div>
         </div>
       </div>
       {demoMode && <DemoStreamerLog />}
-      {!demoMode && (
-        <LivePipelineStatus
-          // Key on the run id so React remounts the component (resetting its
-          // useState) when a new run starts. Without this, clicking Refresh
-          // re-renders the page server-side with inFlight=true but the client
-          // component's state is stuck on the previous useState init value —
-          // user has to hard-reload the browser to see "Pipeline running…".
-          key={inFlightRun?.id ?? "idle"}
-          initial={{
-            inFlight: !!inFlightRun,
-            runId: inFlightRun?.id,
-            startedAt: inFlightRun?.startedAt?.toISOString(),
-            candidates: 0,
-            matches: 0,
-            events: [],
-          }}
-        />
-      )}
+      {!demoMode && <LivePipelineLog />}
       {quotaSlot && !inFlightRun && (
         <div
           role="alert"
@@ -624,11 +637,36 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   );
 
   // In demo mode wrap with the streamer provider so the header button
-  // and the log strip below share the same start/state. Otherwise just
-  // render the inner block.
-  return demoMode
-    ? <DemoStreamerProvider>{feedBody}</DemoStreamerProvider>
-    : feedBody;
+  // and the log strip below share the same start/state. For the real
+  // app wrap with LivePipelineProvider so the inline ⓘ chip in the
+  // header and the audit log share polling + expand state.
+  if (demoMode) {
+    return <DemoStreamerProvider>{feedBody}</DemoStreamerProvider>;
+  }
+  return (
+    <LivePipelineProvider
+      // Key on the run id so React remounts (resets useState) when a
+      // new run starts. The auditRun is in-flight if one exists, else
+      // the most recent finished — the chip needs both shapes seeded.
+      key={(inFlightRun?.id ?? latestRun?.id) ?? "idle"}
+      initial={{
+        inFlight: !!inFlightRun,
+        runId: auditRun?.id,
+        startedAt: auditRun?.startedAt?.toISOString(),
+        finishedAt: auditRun?.finishedAt?.toISOString(),
+        candidates: Number(auditRun?.candidatesFound ?? 0),
+        matches: Number(auditRun?.matchesCreated ?? 0),
+        events: auditEvents.map((e) => ({
+          id: e.id,
+          kind: e.kind as "fetch_start" | "fetch_done" | "scan" | "skip" | "triage_skip" | "reason" | "match" | "error",
+          message: e.message,
+          createdAt: e.createdAt.toISOString(),
+        })),
+      }}
+    >
+      {feedBody}
+    </LivePipelineProvider>
+  );
 }
 
 // pausedReason values used for quota failures look like `llm-quota:primary` or

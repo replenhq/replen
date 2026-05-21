@@ -1,6 +1,6 @@
 # replen
 
-**Smart AI Development workflows.** One-command setup for [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase, every morning.
+**Smarter AI Development workflows.** One-command setup for [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase, every morning.
 
 ```bash
 npx replen
