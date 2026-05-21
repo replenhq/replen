@@ -6,6 +6,7 @@ import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import { errorMsg } from "../lib/error-msg";
 import { scrubBannedVocab, renderActivityBlock } from "./score-targeted";
 import { applyScoreCap, computeRepoFlags } from "./score-cap";
+import { ensureParagraphs } from "../lib/writeup-format";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -288,7 +289,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     const o = JSON.parse(m[0]);
     const rel = (o.relevance as string) ?? "general-awareness";
     if (rel !== "high" && rel !== "medium" && rel !== "general-awareness") return null;
-    const writeup = scrubWriteup(String(o.writeup ?? "").trim());
+    const writeup = ensureParagraphs(scrubWriteup(String(o.writeup ?? "").trim()));
     const summary = sanitizeMarkdown(scrubBannedVocab(String(o.summary ?? "").trim()));
     const risks = sanitizeMarkdown(scrubBannedVocab(String(o.risks ?? "").trim()));
     // Drop the result entirely if the output looks like the model fell for an

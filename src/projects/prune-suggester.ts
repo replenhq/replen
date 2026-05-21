@@ -14,6 +14,7 @@ import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import type { UpstreamHealth } from "./dep-health";
 import type { ProjectActivitySummary } from "./activity-summary";
 import { scrubBannedVocab } from "../analyzer/score-targeted";
+import { ensureParagraphs } from "../lib/writeup-format";
 
 export type PruneVerdict = {
   // Action the LLM recommends. "keep" means "this dep is stale but you
@@ -80,7 +81,7 @@ Output JSON only:
   "whyUseful": "1 sentence: the single reason this matters to act on",
   "suggestedUse": "1 sentence: the concrete first command/action",
   "risks": "1 sentence: licence / behavioural-difference / migration cost",
-  "writeup": "150-400 word writeup explaining the why and the how. Reference the project's actual current work where relevant (themes / files). If recommending a replacement, give 1-2 sentences on what changes during the migration.",
+  "writeup": "200-400 word writeup explaining the why and the how, across 2-3 paragraphs SEPARATED BY BLANK LINES (\\\\n\\\\n in the JSON string). One block of dense prose is a formatting violation. Structure: paragraph 1 — what the dep is + the health signal that triggered this (archived / N days stale / no license). Paragraph 2 — what it does for THIS project's current work (cite files/themes) and what concretely changes if removed or replaced. Paragraph 3 (optional, only when 'replace') — the migration shape: install + import swap + any API delta. Reference the project's actual current work where relevant. If recommending a replacement, give 1-2 sentences on what changes during the migration.",
   "score": 0-100
 }`;
 
@@ -186,7 +187,7 @@ function coerce(raw: string, input: PruneInput): PruneVerdict | null {
   return {
     action,
     replacementName,
-    writeup: scrubBannedVocab(String(parsed.writeup ?? "").trim()),
+    writeup: ensureParagraphs(scrubBannedVocab(String(parsed.writeup ?? "").trim())),
     summary: scrubBannedVocab(sanitizeMarkdown(String(parsed.summary ?? "").trim())),
     whyUseful: scrubBannedVocab(sanitizeMarkdown(String(parsed.whyUseful ?? "").trim())),
     suggestedUse: scrubBannedVocab(sanitizeMarkdown(String(parsed.suggestedUse ?? "").trim())),

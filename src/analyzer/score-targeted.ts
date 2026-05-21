@@ -28,6 +28,7 @@ import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import type { ProjectAssessment } from "./reason";
 import { renderSourceBlock, type FormattedExcerpt } from "./source-context";
 import { applyScoreCap, computeRepoFlags } from "./score-cap";
+import { ensureParagraphs } from "../lib/writeup-format";
 
 export type TargetedAssessment = ProjectAssessment & {
   matchedOutcome: string;
@@ -50,11 +51,13 @@ const TARGETED_SYSTEM = `You're checking whether a newly-discovered OSS repo hel
 
 A repo with strong rebuild value is medium-tier, not general-awareness. "Doesn't integrate" is not the same as "no value to surface."
 
-SCORE BANDS (also drives writeup length):
-  80-100  clear high-impact fit. 250-600 words. Lead with the extraction path, name file paths from the project docs, give a time estimate.
-  50-79   solid medium value. Same length and structure.
-  25-49   loose conceptual link. 60-150 words. Name one specific thing worth knowing or studying. If you can't, score below 25.
+SCORE BANDS (also drives writeup length AND structure):
+  80-100  clear high-impact fit. 250-600 words across 3-5 paragraphs separated by blank lines (\\n\\n in the JSON string). Lead with the extraction path, name file paths from the project docs, give a time estimate.
+  50-79   solid medium value. 250-600 words across 3-5 paragraphs, same structure as 80-100. Do NOT collapse a medium-tier writeup into a single dense block — split into paragraphs covering: what it is, where it plugs in, the trade-off / risk, the first concrete step.
+  25-49   loose conceptual link. 60-150 words in 1-2 paragraphs. Name one specific thing worth knowing or studying. If you can't, score below 25.
   0-24    pure keyword overlap. ONE sentence. The pipeline drops these - no paragraphs, no "smallest viable first slice."
+
+PARAGRAPH STRUCTURE IS NON-NEGOTIABLE for score 50+. The writeup field must contain at least two "\\n\\n" sequences (i.e. three or more paragraphs). A single-block writeup at score 50+ is treated as a formatting violation and will read poorly to the user.
 
 WRITING STYLE (writeup, summary, whyUseful, suggestedUse, risks):
   - No em dashes (—) or en dashes (–). Use commas or sentence breaks. Hyphens between words (drop-in, co-operative) are fine.
@@ -191,7 +194,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       return null;
     }
 
-    const writeup = scrubWriteup(String(o.writeup ?? "").trim());
+    const writeup = ensureParagraphs(scrubWriteup(String(o.writeup ?? "").trim()));
     const summary = sanitizeMarkdown(scrubBannedVocab(String(o.summary ?? "").trim()));
     const risks = sanitizeMarkdown(scrubBannedVocab(String(o.risks ?? "").trim()));
     const whyUseful = sanitizeMarkdown(scrubBannedVocab(String(o.whyUseful ?? "").trim()));
