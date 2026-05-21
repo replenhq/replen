@@ -171,7 +171,13 @@ export async function middleware(request: NextRequest) {
   return authMiddleware(request, {
     ...authConfig,
     loginPath: "/api/login",
-    logoutPath: "/api/logout",
+    // Point logoutPath at a path that's never routed to. The library
+    // requires the option to be set, but its built-in handler just
+    // returns `{success: true}` JSON — we want the user to land on
+    // a proper /signed-out page instead. Our own /api/logout/route.ts
+    // clears the cookies AND redirects, and runs unimpeded because
+    // the lib never sees a request to this sentinel path.
+    logoutPath: "/__lib_logout_unused",
     handleValidToken: async (_tokens, headers) => {
       const merged = new Headers(headers);
       merged.set("x-nonce", nonce);

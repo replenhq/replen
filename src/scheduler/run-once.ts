@@ -345,7 +345,18 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
   const projects = await db
     .select()
     .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      // Respect the /projects "include" toggle on pre-analysis stages too —
+      // not just downstream matching. Excluded projects shouldn't burn
+      // LLM calls on stage-1 summaries, stage-2 vectors, or activity
+      // probes, and shouldn't clutter the streamer with sparse-docs
+      // hints either. The downstream score-targeted + analyzer +
+      // reason layers already enforce included; this widens the gate
+      // to the early pipeline as well.
+      eq(schema.projectProfiles.included, true),
+    ));
   if (projects.length === 0) return;
 
   const SUMMARY_CONCURRENCY = 3;
@@ -412,7 +423,18 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
   const projects = await db
     .select()
     .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      // Respect the /projects "include" toggle on pre-analysis stages too —
+      // not just downstream matching. Excluded projects shouldn't burn
+      // LLM calls on stage-1 summaries, stage-2 vectors, or activity
+      // probes, and shouldn't clutter the streamer with sparse-docs
+      // hints either. The downstream score-targeted + analyzer +
+      // reason layers already enforce included; this widens the gate
+      // to the early pipeline as well.
+      eq(schema.projectProfiles.included, true),
+    ));
   if (projects.length === 0) return;
 
   let regenerated = 0;
@@ -484,7 +506,18 @@ async function refreshStaleActivity(runId: number, userId: number, cfg: UserConf
   const projects = await db
     .select()
     .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      // Respect the /projects "include" toggle on pre-analysis stages too —
+      // not just downstream matching. Excluded projects shouldn't burn
+      // LLM calls on stage-1 summaries, stage-2 vectors, or activity
+      // probes, and shouldn't clutter the streamer with sparse-docs
+      // hints either. The downstream score-targeted + analyzer +
+      // reason layers already enforce included; this widens the gate
+      // to the early pipeline as well.
+      eq(schema.projectProfiles.included, true),
+    ));
   if (projects.length === 0) return;
   const token = cfg.githubToken;
 

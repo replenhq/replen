@@ -1,5 +1,5 @@
 import { db, schema } from "@/db/client";
-import { desc, eq, gte, and, ne, inArray, sql, isNull, isNotNull } from "drizzle-orm";
+import { desc, eq, gte, and, ne, inArray, notInArray, or, sql, isNull, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { createHandoff, runPipelineNow, setMatchFeedback, setMatchStatus, setPersonalNote } from "./actions";
 import { requireUser } from "@/lib/auth/current-user";
@@ -57,6 +57,26 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   const approachFilter = sp.approach;
 
   const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+
+  // Pre-fetch project ids the user has toggled off (excluded or
+  // marked inactive) so we can hide any existing matches that point
+  // at them. The pipeline already skips excluded projects from the
+  // next run; this gates the feed view of HISTORICAL matches so
+  // toggling a project off retroactively cleans up the dashboard.
+  // _general / _unknown matches (project_id IS NULL) are not gated —
+  // they aren't tied to any specific project.
+  const hiddenProjects = await db
+    .select({ id: schema.projectProfiles.id })
+    .from(schema.projectProfiles)
+    .where(and(
+      eq(schema.projectProfiles.userId, user.id),
+      or(
+        eq(schema.projectProfiles.included, false),
+        eq(schema.projectProfiles.active, false),
+      ),
+    ));
+  const hiddenProjectIds = hiddenProjects.map((p) => p.id);
+
   const conds = [
     eq(schema.matches.userId, user.id),
     gte(schema.matches.createdAt, since),
@@ -64,6 +84,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     isNull(schema.matches.archivedAt),
     inArray(schema.matches.relevance, relFilter),
   ];
+  if (hiddenProjectIds.length > 0) {
+    // Allow match through if its project is in the kept set OR if it has
+    // no project (general-awareness / unmatched).
+    conds.push(or(
+      isNull(schema.matches.projectId),
+      notInArray(schema.matches.projectId, hiddenProjectIds),
+    )!);
+  }
   if (projectFilter) {
     const p = await db
       .select()
