@@ -451,6 +451,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
         const displaySlug = slug === "_general" ? "Future awareness · keep on the radar"
           : slug === "_unknown" ? "Unmatched"
           : slug;
+        // Pipeline v2 / Sprint 3 diversity — cap each project section to
+        // the top N matches by score so a project with 11 hits doesn't
+        // dominate the feed visually. The rest stay accessible via the
+        // existing per-project filter URL. _general / _unknown are
+        // already collapsed; skip the cap there. Real user test on n@demo-app
+        // showed tech-news-site with 11 matches making the feed feel like
+        // an undifferentiated stack.
+        const VISIBLE_CAP = isGeneral || projectFilter === slug ? list.length : 6;
+        const visibleList = list.slice(0, VISIBLE_CAP);
+        const hiddenCount = list.length - visibleList.length;
         const inner = (
           <>
             {!isGeneral && (
@@ -464,7 +474,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                 </span>
               </h2>
             )}
-            {list.map((m) => {
+            {visibleList.map((m) => {
               const repo = repoMap.get(m.repoId);
               if (!repo) return null;
               const writeup = (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
@@ -643,6 +653,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                 </div>
               );
             })}
+            {hiddenCount > 0 && (
+              <div style={{ marginTop: 12, padding: "10px 14px", border: "1px dashed var(--line, #ccc4)", borderRadius: 8, fontSize: 13, color: "var(--dim, #888)" }}>
+                <a href={`/?project=${slug}`} style={{ color: "var(--amber, #ffc857)", textDecoration: "none" }}>
+                  See {hiddenCount} more {hiddenCount === 1 ? "match" : "matches"} for <strong>{slug}</strong> →
+                </a>
+              </div>
+            )}
           </>
         );
         return (

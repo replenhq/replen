@@ -389,13 +389,20 @@ async function runAnalysisInner(runId: number, userId: number) {
           // produced the baseline=high false-positive case it's designed to
           // catch — keep it dark until we see that shape live.
           const verifyWithSource = process.env.STAGE4_VERIFY_WITH_SOURCE === "1";
+          // Pipeline v2 / Sprint 3 — propagate the Stage 2 forceApproach
+          // hint into the scoring call. Today the only forced value is
+          // "cleanroom-rebuild" (language mismatch); scoreTargetedCandidate
+          // both prompts the LLM with the constraint AND mechanically
+          // overrides the output if the LLM ignores it.
+          const forceApproach = forceApproachByKey.get(t.key);
           let ta;
           try {
             ta = verifyWithSource
               ? await scoreWithSourceVerification(safety, project, attribution, {
                   token: readRunOrEnv("githubToken", "GITHUB_TOKEN") ?? null,
+                  forceApproach,
                 })
-              : await scoreTargetedCandidate(safety, project, attribution);
+              : await scoreTargetedCandidate(safety, project, attribution, { forceApproach });
           } catch (e) {
             if (e instanceof LlmQuotaError) throw e;
             console.warn(`[score-targeted] ${label} → ${project.slug} failed`, e);

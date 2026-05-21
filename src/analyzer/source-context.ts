@@ -187,9 +187,9 @@ export async function scoreWithSourceVerification(
   safety: SafetyReport,
   project: LocalProject,
   attribution: TargetedAttribution,
-  opts: { token?: string | null; force?: boolean } = {},
+  opts: { token?: string | null; force?: boolean; forceApproach?: "cleanroom-rebuild" } = {},
 ): Promise<TargetedAssessment | null> {
-  const baseline = await scoreTargetedCandidate(safety, project, attribution);
+  const baseline = await scoreTargetedCandidate(safety, project, attribution, { forceApproach: opts.forceApproach });
   if (!baseline) return null;
 
   // Gate: skip verification on clear rejections unless the caller forces it.
@@ -223,6 +223,7 @@ export async function scoreWithSourceVerification(
     if (excerpts.length === 0) return baseline;
     const verified = await scoreTargetedCandidate(safety, project, attribution, {
       sourceExcerpts: excerpts,
+      forceApproach: opts.forceApproach,
     });
     return verified ?? baseline;
   } catch (err) {

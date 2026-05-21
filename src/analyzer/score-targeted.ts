@@ -103,7 +103,7 @@ export async function scoreTargetedCandidate(
   safety: SafetyReport,
   project: LocalProject,
   attribution: TargetedAttribution,
-  opts: { sourceExcerpts?: FormattedExcerpt[] } = {},
+  opts: { sourceExcerpts?: FormattedExcerpt[]; forceApproach?: "cleanroom-rebuild" } = {},
 ): Promise<TargetedAssessment | null> {
   // High-sensitivity gate — fail-closed.
   const override = project.llmProvider ?? "auto";
@@ -166,6 +166,24 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
   userParts.push(outcomeBlock, repoBlock);
   if (sourceBlock) userParts.push(sourceBlock);
 
+  // Pipeline v2 / Sprint 3 — forceApproach hint from Stage 2 (Eligibility).
+  // When the eligibility filter has flagged a language mismatch (e.g.
+  // Python lib for a TS-stack project), the only honest approach for
+  // this match is "cleanroom-rebuild" — lift the IDEA, not the code.
+  // Pass that as a system-level constraint so the LLM doesn't talk
+  // itself into "cherry-pick this Python file into your Node project"
+  // anyway. A post-process override below enforces it mechanically if
+  // the LLM ignores the prompt.
+  if (opts.forceApproach === "cleanroom-rebuild") {
+    userParts.push(
+      `## ELIGIBILITY CONSTRAINT (non-negotiable)\n` +
+      `This candidate has been flagged as language-mismatched against the project's stack by the upstream eligibility filter. ` +
+      `Its code cannot be cherry-picked, vendored, or used as a depend-on-it library — the runtime/build is incompatible. ` +
+      `Your integrationApproach field MUST be "cleanroom-rebuild". Reasoning, scoring, and writeup all proceed as normal, ` +
+      `but the integration framing is "study the idea and rebuild it in our stack," not "import and use."`
+    );
+  }
+
   const res = await chatCompletion(
     {
       provider,
@@ -214,7 +232,16 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
 
     // Mechanical score caps — see score-cap.ts. Backstop for cases where the
     // LLM scored confidently despite a risk signal that should have demoted.
-    const approach = (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a";
+    // Mechanical enforcement of the Sprint 2 forceApproach hint. If the
+    // eligibility filter said "this must be cleanroom-rebuild" and the
+    // LLM still chose something else, override here — the eligibility
+    // rule is structural (different runtime, can't share code) and the
+    // LLM doesn't get a veto over physics.
+    let approach = (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a";
+    if (opts.forceApproach === "cleanroom-rebuild" && approach !== "cleanroom-rebuild") {
+      console.log(`[score-targeted:force-approach] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: ${approach} → cleanroom-rebuild (eligibility-forced)`);
+      approach = "cleanroom-rebuild";
+    }
     const flags = computeRepoFlags(safety, writeup);
     const capped = applyScoreCap({
       rawScore: Number(o.relevanceScore ?? 0),
