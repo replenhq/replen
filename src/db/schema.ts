@@ -168,6 +168,12 @@ export const candidates = sqliteTable(
     postedAt: integer("posted_at", { mode: "timestamp" }),
     fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
     rawJson: text("raw_json"),
+    // Pipeline v2 / Sprint 1: inventory-level metadata so Stage 2 can
+    // run cheap eligibility filters (language family, repo shape) before
+    // the expensive scoring stage. See docs/pipeline-v2.md.
+    primaryLanguage: text("primary_language"),
+    topics: text("topics"),       // JSON array of strings
+    repoShape: text("repo_shape"), // library | framework | app | template | tutorial | aggregator | unknown
   },
   (t) => ({
     uniqSourceItem: uniqueIndex("uniq_source_item_user").on(t.userId, t.source, t.sourceItemId),

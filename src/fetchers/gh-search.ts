@@ -1,4 +1,5 @@
 import type { Fetcher, FetchedCandidate, FetcherContext } from "./types";
+import { inferRepoShape } from "./repo-shape";
 import { db, schema } from "../db/client";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { deriveSearchKeywords } from "../analyzer/keywords";
@@ -118,6 +119,11 @@ export const ghSearchFetcher: Fetcher = {
         if (verdict.skip) continue;
         const description = String(item.description ?? "").trim();
         const pushedAt = item.pushed_at ? new Date(String(item.pushed_at)) : null;
+        // GitHub search /repositories endpoint includes language + topics
+        // per item. Cheap to capture once + reuse across the eligibility
+        // + scoring stages.
+        const language = typeof item.language === "string" ? item.language : null;
+        const topicsRaw = Array.isArray(item.topics) ? (item.topics as unknown[]).filter((t) => typeof t === "string") as string[] : [];
         out.push({
           source: `gh-search:${project.slug}`,
           sourceItemId: fullName,
@@ -127,7 +133,10 @@ export const ghSearchFetcher: Fetcher = {
           author: owner,
           score: stars,
           postedAt: pushedAt,
-          raw: { owner, name, description, stars, query: q, projectSlug: project.slug },
+          raw: { owner, name, description, stars, query: q, projectSlug: project.slug, language, topics: topicsRaw },
+          primaryLanguage: language,
+          topics: topicsRaw,
+          repoShape: inferRepoShape({ name, description, topics: topicsRaw }),
         });
         kept++;
       }

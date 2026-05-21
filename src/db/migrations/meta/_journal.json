@@ -232,6 +232,13 @@
       "when": 1779638400000,
       "tag": "0032_match_insights",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1779724800000,
+      "tag": "0033_candidate_inventory_fields",
+      "breakpoints": true
     }
   ]
 }

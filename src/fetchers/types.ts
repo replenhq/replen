@@ -8,6 +8,13 @@ export type FetchedCandidate = {
   score: number | null;
   postedAt: Date | null;
   raw: unknown;
+  // Pipeline v2 / Sprint 1 — inventory-level metadata. Optional because
+  // not every fetcher can populate it cheaply (HN/Reddit/Threads/TikTok
+  // pre-resolve don't know the language of the linked repo). Stage 2
+  // eligibility treats null as "unknown, defer to LLM tier."
+  primaryLanguage?: string | null;
+  topics?: string[] | null;
+  repoShape?: import("./repo-shape").RepoShape | null;
 };
 
 export type FetcherContext = {

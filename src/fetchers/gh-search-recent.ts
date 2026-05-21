@@ -1,4 +1,5 @@
 import type { Fetcher, FetchedCandidate, FetcherContext } from "./types";
+import { inferRepoShape } from "./repo-shape";
 import { shouldSkip } from "./big-co";
 import { readRunOrEnv } from "../analyzer/run-context";
 
@@ -104,6 +105,7 @@ export const ghSearchRecentFetcher: Fetcher = {
             ? String((item.license as { spdx_id?: unknown }).spdx_id ?? "")
             : null;
 
+        const topicsRaw = Array.isArray(item.topics) ? (item.topics as unknown[]).filter((t) => typeof t === "string") as string[] : [];
         out.push({
           source: lang ? `gh-search-recent:${lang}` : "gh-search-recent:all",
           sourceItemId: fullName,
@@ -126,7 +128,11 @@ export const ghSearchRecentFetcher: Fetcher = {
             pushedAt: pushedAt?.toISOString() ?? null,
             lang,
             sinceDate: SINCE_DATE,
+            topics: topicsRaw,
           },
+          primaryLanguage: language,
+          topics: topicsRaw,
+          repoShape: inferRepoShape({ name, description, topics: topicsRaw }),
         });
         kept++;
       }

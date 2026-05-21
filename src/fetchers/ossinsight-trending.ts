@@ -1,5 +1,6 @@
 import type { Fetcher, FetchedCandidate, FetcherContext } from "./types";
 import { shouldSkip } from "./big-co";
+import { inferRepoShape } from "./repo-shape";
 
 // OSSInsight (run by PingCAP) exposes a public trending API that goes back
 // further than github.com/trending. github.com's `?since=monthly` is the
@@ -163,6 +164,13 @@ export const ossinsightTrendingFetcher: Fetcher = {
             periods: [...entry.periods].sort(),
             membershipScore: score,
           },
+          // Pipeline v2 / Sprint 1 inventory tagging. OSSInsight gives
+          // us the canonical primary language ("TypeScript", "Python")
+          // directly. Topics aren't in this endpoint — enrichment pass
+          // later fills them. Shape inferred from name + description.
+          primaryLanguage: entry.primaryLang || lang || null,
+          topics: null,
+          repoShape: inferRepoShape({ name: entry.name, description: entry.desc }),
         });
       }
       console.log(

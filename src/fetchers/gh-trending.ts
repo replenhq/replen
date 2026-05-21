@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Fetcher, FetchedCandidate, FetcherContext } from "./types";
 import { shouldSkip } from "./big-co";
+import { inferRepoShape } from "./repo-shape";
 
 // gh-trending URL paths use lowercase, hyphenated slugs. Special-case the
 // ones GitHub doesn't auto-derive from a `.toLowerCase()`.
@@ -151,6 +152,14 @@ export const ghTrendingFetcher: Fetcher = {
             windows: [...entry.windows].sort(),
             membershipScore: score,
           },
+          // Pipeline v2 / Sprint 1 — tag the language we already know
+          // from the URL slug + infer the repo shape from name +
+          // description. gh-trending scrape doesn't expose GitHub
+          // topics in the HTML; topics stay null until a separate
+          // enrichment pass (later sprint) fills them.
+          primaryLanguage: lang || null,
+          topics: null,
+          repoShape: inferRepoShape({ name: entry.name, description: entry.desc }),
         });
       }
       console.log(

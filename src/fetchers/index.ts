@@ -70,6 +70,12 @@ async function runFetchersInner(userId: number, cfg: UserConfig): Promise<{ inse
     postedAt: it.postedAt,
     fetchedAt: now,
     rawJson: JSON.stringify(it.raw),
+    // Pipeline v2 / Sprint 1 inventory fields. Null is fine — Stage 2
+    // treats unknowns as deferring to the LLM tier rather than as a
+    // hard block.
+    primaryLanguage: it.primaryLanguage ?? null,
+    topics: it.topics ? JSON.stringify(it.topics) : null,
+    repoShape: it.repoShape ?? null,
   }));
   let inserted = 0;
   try {
