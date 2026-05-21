@@ -37,8 +37,15 @@ function buildCsp(nonce: string): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com",
-    "frame-src 'self' https://www.threads.com https://www.tiktok.com",
+    // Firebase Auth XHRs go through identitytoolkit + securetoken + the
+    // hosted auth handler on *.firebaseapp.com. The OAuth popup also relays
+    // state back to the parent via that same origin.
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.firebaseapp.com",
+    // *.firebaseapp.com is the hosted Firebase Auth iframe used to sync
+    // popup state with the parent page during signInWithPopup. Without it,
+    // GitHub / Google / magic-link sign-ins all fail silently with
+    // "popup-closed-by-user" because the iframe load is blocked by CSP.
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.threads.com https://www.tiktok.com",
     "frame-ancestors 'none'",
     "form-action 'self'",
     "base-uri 'self'",

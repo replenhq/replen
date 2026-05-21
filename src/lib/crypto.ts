@@ -44,6 +44,19 @@ function getMasterKey(): Buffer {
   if (buf.length !== 32) {
     throw new Error(`ENCRYPTION_KEY must decode to 32 bytes, got ${buf.length}`);
   }
+  // Refuse any obviously-weak key in production. Specifically the all-zero
+  // CI build dummy ("AAAA…AAA=" in .github/workflows/ci.yml) — if an
+  // operator pastes that into a real .env we want a loud failure, not
+  // every user's PAT silently encrypted under the public key.
+  if (process.env.NODE_ENV === "production") {
+    let allZero = true;
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] !== 0) { allZero = false; break; }
+    }
+    if (allZero) {
+      throw new Error("ENCRYPTION_KEY is the all-zero CI dummy. Generate a real key with `node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"` before running in production.");
+    }
+  }
   return buf;
 }
 

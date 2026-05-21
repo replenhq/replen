@@ -18,10 +18,28 @@ import path from "node:path";
 
 export const dynamic = "force-dynamic";
 
-const LOG_FILE = process.env.REPLEN_LOG_FILE ?? "/var/log/replen/web.log";
+const LOG_FILE_RAW = process.env.REPLEN_LOG_FILE ?? "/var/log/replen/web.log";
+// Resolve + containment-check in production. The env var is operator-set, not
+// user-set, so this is defence-in-depth — but cheap insurance against a future
+// path-traversal slip if the env ever gets pulled from somewhere less trusted.
+const LOG_FILE_RESOLVED = path.resolve(LOG_FILE_RAW);
+const LOG_FILE_ALLOWED =
+  process.env.NODE_ENV !== "production" ||
+  LOG_FILE_RESOLVED.startsWith("/var/log/") ||
+  LOG_FILE_RESOLVED.startsWith("/tmp/");
+const LOG_FILE = LOG_FILE_ALLOWED ? LOG_FILE_RESOLVED : null;
 const TAIL_BYTES = 256 * 1024; // 256 KB
 const MAX_LINES = 200;
 const KEEP = /\[(error|warn)\]|\bError:|\bRangeError\b|\bTypeError\b|console\.error|console\.warn|^.{0,40}(error|warn)/i;
+
+// Strip C0 control characters except \t. Defence-in-depth: even though React
+// auto-escapes JSX text children (so a log line with HTML can't inject XSS),
+// embedded \r / \x1b sequences can visually overwrite or recolour a row.
+// Replace each control char with a centred-dot so the alignment of nearby
+// rows stays predictable.
+function sanitiseLine(s: string): string {
+  return s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "·");
+}
 
 async function readTail(file: string): Promise<string | { error: string }> {
   let stat;
@@ -60,7 +78,7 @@ function parseLines(text: string): Entry[] {
       : lower.includes("[warn]") || lower.includes("warn")
         ? "warn"
         : "info";
-    out.push({ ts: tsMatch?.[1] ?? "", level, line: line.slice(0, 800) });
+    out.push({ ts: tsMatch?.[1] ?? "", level, line: sanitiseLine(line.slice(0, 800)) });
   }
   // Newest first; cap.
   return out.reverse().slice(0, MAX_LINES);
@@ -68,6 +86,14 @@ function parseLines(text: string): Entry[] {
 
 export default async function AdminErrorsPage() {
   await requireAdmin();
+  if (!LOG_FILE) {
+    return (
+      <main style={{ maxWidth: 960, margin: "32px auto", padding: "0 16px" }}>
+        <h1>Recent errors</h1>
+        <p className="meta">Refusing to read <code>{LOG_FILE_RAW}</code>: outside the allow-list (<code>/var/log/</code> or <code>/tmp/</code>) in production. Set <code>REPLEN_LOG_FILE</code> to a path under those prefixes.</p>
+      </main>
+    );
+  }
   const tail = await readTail(LOG_FILE);
   if (typeof tail !== "string") {
     return (
@@ -109,7 +135,7 @@ export default async function AdminErrorsPage() {
         </table>
       )}
       <p className="meta" style={{ marginTop: 16 }}>
-        For a full live tail: <code>ssh prod-server &apos;sudo tail -f {LOG_FILE}&apos;</code>. For an alerted external view, point an uptime monitor at <code>/api/healthz</code> and a log shipper (e.g. BetterStack Logs) at the same file.
+        For a full live tail: <code>ssh &lt;your-vps&gt; &apos;sudo tail -f {LOG_FILE}&apos;</code>. For an alerted external view, point an uptime monitor at <code>/api/healthz</code> and a log shipper (e.g. BetterStack Logs) at the same file.
       </p>
     </main>
   );

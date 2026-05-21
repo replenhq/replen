@@ -16,12 +16,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const startedAt = Date.now();
   try {
-    // Cheap query; the row count is incidental, what matters is that
-    // the db responds.
-    const row = await db.select({ c: sql<number>`count(*)` }).from(schema.users).get();
+    // Cheap query; the result is discarded — what matters is that the
+    // db responds. We deliberately don't surface the user count or any
+    // other table contents in the response: a public probe shouldn't
+    // double as a way for outsiders to track signup growth.
+    await db.select({ c: sql<number>`count(*)` }).from(schema.users).get();
     const dbMs = Date.now() - startedAt;
     return NextResponse.json(
-      { ok: true, db: "ok", users: Number(row?.c ?? 0), dbMs, at: new Date().toISOString() },
+      { ok: true, db: "ok", dbMs, at: new Date().toISOString() },
       { status: 200, headers: { "cache-control": "no-store" } },
     );
   } catch (e) {
