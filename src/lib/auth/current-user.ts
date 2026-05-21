@@ -42,7 +42,33 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   // claim an invite for alice@example.com would miss and land as a fresh
   // pending row.
   const email = ((tokens.decodedToken.email as string) ?? "").trim().toLowerCase();
-  const emailVerified = Boolean((tokens.decodedToken as { email_verified?: boolean }).email_verified);
+  // GitHub OAuth doesn't set Firebase's email_verified claim, even though
+  // GitHub itself only exposes verified primary emails via OAuth. Treat
+  // any GitHub- or Google-sourced sign-in as email-verified — equivalent
+  // trust to what Google's OAuth claims us.
+  //
+  // The next-firebase-auth-edge session cookie sets `sign_in_provider` to
+  // "custom" because it re-issues the token as a session. But it preserves
+  // the original provider in `source_sign_in_provider` AND keeps the
+  // `firebase.identities` map intact. Check both for robustness.
+  // Email-magic-link continues to flip email_verified=true on first
+  // successful click, so that path is already covered by the raw claim.
+  const dt = tokens.decodedToken as {
+    email_verified?: boolean;
+    source_sign_in_provider?: string;
+    firebase?: { sign_in_provider?: string; identities?: Record<string, unknown> };
+  };
+  const identities = dt.firebase?.identities ?? {};
+  const sourceProvider = dt.source_sign_in_provider ?? "";
+  const provider = dt.firebase?.sign_in_provider ?? "";
+  const isOAuthVerified =
+    "github.com" in identities ||
+    "google.com" in identities ||
+    sourceProvider === "github.com" ||
+    sourceProvider === "google.com" ||
+    provider === "github.com" ||
+    provider === "google.com";
+  const emailVerified = Boolean(dt.email_verified) || isOAuthVerified;
   const displayName = (tokens.decodedToken.name as string) ?? null;
 
   let row = await db
