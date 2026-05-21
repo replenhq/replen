@@ -82,11 +82,23 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
           >
             <GithubIcon /> Create a PAT on GitHub →
           </a>
-          <p style={{ fontSize: 12, color: "var(--dim, #888)", margin: "6px 0 10px", lineHeight: 1.5 }}>
-            When the GitHub page opens, set <b>Repository access: All repositories</b> and these permissions:{" "}
-            <code>Contents: Read &amp; write</code>, <code>Pull requests: Read &amp; write</code>,{" "}
-            <code>Metadata: Read</code>. Then click <b>Generate token</b> and paste it below.
-          </p>
+          <div style={{
+            fontSize: 13,
+            color: "var(--fg, #1a1a1a)",
+            margin: "10px 0 12px",
+            lineHeight: 1.55,
+            padding: "10px 14px",
+            background: "rgba(217, 119, 6, 0.08)",
+            border: "1px solid rgba(217, 119, 6, 0.35)",
+            borderRadius: 6,
+          }}>
+            <p style={{ margin: "0 0 6px", fontWeight: 600 }}>On the GitHub page, you must set:</p>
+            <ul style={{ margin: "0 0 0 4px", padding: 0, listStyle: "none" }}>
+              <li style={{ margin: "3px 0" }}>· <b>Repository access:</b> <code>All repositories</code> (or pick the specific repos Replen should track)</li>
+              <li style={{ margin: "3px 0" }}>· <b>Permissions:</b> <code>Contents: Read &amp; write</code>, <code>Pull requests: Read &amp; write</code>, <code>Metadata: Read</code></li>
+            </ul>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--dim, #555)" }}>Then click <b>Generate token</b> and paste it below. Without these exact scopes the pipeline can't read your project docs or open handoff PRs.</p>
+          </div>
           <input
             name="githubToken"
             type="password"
@@ -243,10 +255,21 @@ async function saveOnboarding(form: FormData) {
     });
   }
 
-  // Fire-and-forget repo detection. The pipeline runs after this and
-  // will iterate whatever project_profiles rows exist by then.
+  // AWAIT repo detection before starting the pipeline. Auto-detect both
+  // creates new project rows for the user's GitHub repos AND fills in
+  // github_full_name on any pre-existing rows. The pipeline iterates
+  // project_profiles to decide what to match against, so if we don't
+  // wait, the first run sees an empty list → 0 matches across every
+  // source (which is what landed before this gate was added).
+  // ~2-3s wall time for a typical account, acceptable on first onboard.
   if (wantGithubSave) {
-    void autoDetectAndStoreRepos(u.id, githubToken).catch((e) => console.error("[welcome] auto-detect", e));
+    try {
+      await autoDetectAndStoreRepos(u.id, githubToken);
+    } catch (e) {
+      // Don't fail the form on detect errors — surface in logs and let
+      // the user retry from /projects with the "Re-detect" button.
+      console.error("[welcome] auto-detect failed", e);
+    }
   }
   // Kick off the first pipeline run. startPipelineForUser is fire-and-
   // forget and returns once the digest_runs row exists, so the live

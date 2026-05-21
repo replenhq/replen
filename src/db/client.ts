@@ -48,6 +48,14 @@ if (!IS_BUILD) {
   // pipeline writes).
   await client.execute("PRAGMA busy_timeout = 8000");
   await client.execute("PRAGMA journal_mode = WAL");
+  // SQLite ships with foreign-key enforcement OFF by default per
+  // connection. Without this PRAGMA, the onDelete: "cascade" relations
+  // declared in db/schema.ts are advisory — a DELETE FROM users only
+  // removes the user row, leaving orphan project_profiles / matches /
+  // candidates / digest_runs / user_settings rows behind. Turning it on
+  // here makes the cascade actually fire so account-deletion (admin
+  // wipe, GDPR request, demo re-seed) does a clean reap.
+  await client.execute("PRAGMA foreign_keys = ON");
 
   // One-time orphan reaper on module load. If a previous process was killed
   // (deploy restart, OOM, etc.) any digest_runs row it created stays with
