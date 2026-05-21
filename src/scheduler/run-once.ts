@@ -22,6 +22,8 @@ import { runSynthesis } from "../projects/run-synthesis";
 import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 import { readUserSecret } from "../lib/user-secrets";
+import { detectPruneConflicts, type PruneVerdict } from "../analyzer/eligibility";
+import { inArray } from "drizzle-orm";
 
 // Translate internal "regen needed" reason codes into friendlier labels for
 // the streamer. New-user signals like "no-summary" / "no-vectors" / "no-
@@ -187,6 +189,21 @@ async function executePipeline(
     } catch (e) {
       if (e instanceof LlmQuotaError) throw e;
       console.warn(`[pipeline] user=${userId} prune suggestions failed:`, e);
+    }
+    // Pipeline v2 / Sprint 2 — cross-match consistency. Detect the
+    // "drop X / replace Y with X" contradiction we saw on
+    // tech-news-site (fluent-ffmpeg flagged as dead in one match while
+    // @ffmpeg-installer was being replaced WITH fluent-ffmpeg in the
+    // next). Runs after both regular + prune matches have landed so the
+    // full set is visible.
+    try {
+      const dropped = await reconcilePruneContradictions(runId, userId);
+      if (dropped > 0) {
+        matchesCreated -= dropped;
+        void recordEvent(runId, userId, "skip", `Cross-match consistency: hid ${dropped} contradicting prune match${dropped === 1 ? "" : "es"}`);
+      }
+    } catch (e) {
+      console.warn(`[pipeline] user=${userId} cross-match consistency failed:`, e);
     }
     // Initiative #3: synthesise meta-insights across this run's matches.
     // Runs after prune so prune matches are also eligible as evidence.
@@ -601,6 +618,61 @@ async function refreshStaleActivity(runId: number, userId: number, cfg: UserConf
   if (regenerated > 0) {
     void recordEvent(runId, userId, "scan", `Activity refreshed for ${regenerated} project(s)`);
   }
+}
+
+// Pipeline v2 / Sprint 2 — cross-match consistency. Scans the prune
+// matches produced in this run and detects contradictions: e.g. one
+// match recommends dropping fluent-ffmpeg as dead, while another
+// recommends replacing @ffmpeg-installer/ffmpeg WITH fluent-ffmpeg.
+// Both can't be true. We keep the higher-scored side and mark the
+// loser as hidden (soft delete — reversible via /admin and doesn't
+// drop the writeup in case the user wants to inspect what happened).
+//
+// Returns the count of hidden matches so the caller can adjust its
+// matches-created accounting + emit a streamer event.
+async function reconcilePruneContradictions(runId: number, userId: number): Promise<number> {
+  const prunes = await db
+    .select({
+      id: schema.matches.id,
+      action: schema.matches.prunedDepAction,
+      depName: schema.matches.prunedDepName,
+      replacement: schema.matches.prunedDepReplacement,
+      score: schema.matches.relevanceScore,
+    })
+    .from(schema.matches)
+    .where(and(
+      eq(schema.matches.userId, userId),
+      eq(schema.matches.runId, runId),
+      eq(schema.matches.discoveryMode, "prune"),
+    ));
+
+  const verdicts: PruneVerdict[] = prunes
+    .filter((p) => p.action === "drop" || p.action === "replace")
+    .map((p) => ({
+      matchId: p.id,
+      action: p.action as "drop" | "replace",
+      prunedDepName: p.depName ?? "",
+      replacementName: p.replacement ?? null,
+      relevanceScore: p.score ?? 0,
+    }));
+
+  const conflicts = detectPruneConflicts(verdicts);
+  if (conflicts.length === 0) return 0;
+
+  // Soft-hide the losers. Logging the reason on each so /admin can
+  // diagnose what got auto-reconciled.
+  const loserIds = conflicts.map((c) => c.loserMatchId);
+  await db
+    .update(schema.matches)
+    .set({ userStatus: "hidden" })
+    .where(and(
+      eq(schema.matches.userId, userId),
+      inArray(schema.matches.id, loserIds),
+    ));
+  for (const c of conflicts) {
+    console.log(`[reconcile] match #${c.loserMatchId} hidden: ${c.reason}`);
+  }
+  return conflicts.length;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -239,6 +239,13 @@
       "when": 1779724800000,
       "tag": "0033_candidate_inventory_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1779728400000,
+      "tag": "0034_match_pruned_dep_replacement",
+      "breakpoints": true
     }
   ]
 }

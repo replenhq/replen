@@ -17,6 +17,8 @@ import { withRunConfig } from "./run-context";
 import { recordEvent } from "../scheduler/events";
 import { LlmQuotaError } from "./llm";
 import { decideMatchFilter } from "./match-filters";
+import { checkEligibility, summariseDrops, type EligibilityVerdict } from "./eligibility";
+import type { RepoShape } from "../fetchers/repo-shape";
 
 const HOURS = 36;
 
@@ -82,11 +84,52 @@ async function runAnalysisInner(runId: number, userId: number) {
   const projectIdBySlug = new Map(dbProjects.map((p) => [p.slug, p.id]));
 
   const since = new Date(Date.now() - HOURS * 3600 * 1000);
-  const cands = await db
+  const candsRaw = await db
     .select()
     .from(schema.candidates)
     .where(and(eq(schema.candidates.userId, userId), gte(schema.candidates.fetchedAt, since), isNotNull(schema.candidates.githubUrl)))
     .orderBy(desc(schema.candidates.score));
+
+  // Stage 2: eligibility filter. Cheap structural checks against the
+  // inventory metadata Sprint 1 populated (primary_language, repo_shape,
+  // posted_at, score). Drops aggregators/tutorials/templates/too-fresh
+  // before they reach the LLM. Per-candidate verdicts are also used
+  // downstream — `cleanroom-rebuild` forced-approach hints are stored in
+  // a sidecar map so score-targeted.ts can respect them.
+  const userSettings = await db
+    .select({ detectedLanguages: schema.userSettings.detectedLanguages })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, userId))
+    .get();
+  const eligibilityCtx = { detectedLanguages: userSettings?.detectedLanguages ?? null };
+  const cands: typeof candsRaw = [];
+  const drops: Array<{ reason: string }> = [];
+  const forceApproachByKey = new Map<string, "cleanroom-rebuild">();
+  for (const c of candsRaw) {
+    const m = c.githubUrl?.match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
+    const key = m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : null;
+    const verdict: EligibilityVerdict = checkEligibility(
+      {
+        primaryLanguage: c.primaryLanguage,
+        repoShape: (c.repoShape as RepoShape | null) ?? null,
+        postedAt: c.postedAt,
+        score: c.score,
+        source: c.source,
+      },
+      eligibilityCtx,
+    );
+    if (!verdict.eligible) {
+      drops.push({ reason: verdict.reason });
+      continue;
+    }
+    if (verdict.forceApproach && key) forceApproachByKey.set(key, verdict.forceApproach);
+    cands.push(c);
+  }
+  if (drops.length > 0) {
+    const summary = summariseDrops(drops);
+    void recordEvent(runId, userId, "skip", `Eligibility: dropped ${drops.length} (${summary.join(", ")})`);
+  }
+  console.log(`[pipeline] eligibility: ${candsRaw.length} → ${cands.length} (${drops.length} dropped)`);
 
   const weights = await getSourceQualityWeights(userId);
 

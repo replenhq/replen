@@ -230,6 +230,9 @@ export async function runPruneSuggestions(runId: number, userId: number, ghToken
         prunedDepEcosystem: dep.ecosystem,
         prunedDepAction: verdict.action,
         prunedDepVersion: dep.version,
+        // Stored separately from writeup_md so cross-match consistency
+        // (sprint 2) can join on it rather than regex the prose.
+        prunedDepReplacement: verdict.action === "replace" ? (verdict.replacementName ?? null) : null,
       });
       totalMatches++;
       void recordEvent(

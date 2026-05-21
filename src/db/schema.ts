@@ -372,6 +372,12 @@ export const matches = sqliteTable(
     prunedDepEcosystem: text("pruned_dep_ecosystem"), // 'npm' | 'python' | 'cargo' | 'go'
     prunedDepAction: text("pruned_dep_action"),       // 'drop' | 'replace'
     prunedDepVersion: text("pruned_dep_version"),     // raw version string from the manifest
+    // Pipeline v2 / Sprint 2 — name of the package this match suggests
+    // as a replacement (when prunedDepAction == 'replace'). Required for
+    // cross-match consistency detection: if match A says "drop fluent-
+    // ffmpeg" and match B says "replace @ffmpeg-installer with fluent-
+    // ffmpeg" we now have the structured signal to detect that.
+    prunedDepReplacement: text("pruned_dep_replacement"),
   },
   (t) => ({
     idxRepoProject: index("idx_match_repo_project").on(t.repoId, t.projectId),
