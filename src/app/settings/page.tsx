@@ -114,12 +114,23 @@ export default async function SettingsPage({ searchParams }: Params) {
     "use server";
     const u = await requireWritableUser();
     const existingPrev = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, u.id)).get();
-    const newToken = (form.get("githubToken") as string || "").trim();
+    // Secrets render as a masked sentinel (`•••••`) because we never echo
+    // the plaintext back. When the user hits Save without retyping, the
+    // form re-submits that sentinel. Without this guard, writeUserSecret
+    // would encrypt the literal bullet string and brick the secret.
+    // Same shape as the webhookUrl `•••••` check further down — promoted
+    // here so it covers every secret field. Catches arbitrary-length
+    // bullet runs because Field's masked render width can vary.
+    const isMaskedSentinel = (s: string): boolean => /^•+$/.test(s);
+    const rawToken = (form.get("githubToken") as string || "").trim();
+    const newToken = isMaskedSentinel(rawToken) ? "" : rawToken;
     const provider = ((form.get("provider") as string) || "").toLowerCase();
-    const newPrimaryKey = (form.get("llmPrimaryApiKey") as string || "").trim();
+    const rawPrimaryKey = (form.get("llmPrimaryApiKey") as string || "").trim();
+    const newPrimaryKey = isMaskedSentinel(rawPrimaryKey) ? "" : rawPrimaryKey;
     let newPrimaryBaseUrlRaw = (form.get("llmPrimaryBaseUrl") as string || "").trim();
     let newPrimaryModel = (form.get("llmPrimaryModel") as string || "").trim();
-    const newSensitiveKey = (form.get("llmSensitiveApiKey") as string || "").trim();
+    const rawSensitiveKey = (form.get("llmSensitiveApiKey") as string || "").trim();
+    const newSensitiveKey = isMaskedSentinel(rawSensitiveKey) ? "" : rawSensitiveKey;
     const newSensitiveBaseUrlRaw = (form.get("llmSensitiveBaseUrl") as string || "").trim();
     const newSensitiveModel = (form.get("llmSensitiveModel") as string || "").trim();
     const newSensitiveWire = (form.get("llmSensitiveWireFormat") as string || "").trim() || null;
@@ -367,11 +378,11 @@ export default async function SettingsPage({ searchParams }: Params) {
               hasKey={currentProvider === "openai" && !!rawSettings?.llmPrimaryApiKey}
               label="OpenAI"
               tag="Best writeups"
-              cost="~$5+ / million tokens"
+              cost="~$0.15–$0.60 / million tokens"
               keyLink="https://platform.openai.com/api-keys"
               keyLinkLabel="Get an OpenAI API key →"
               currentModel={currentProvider === "openai" ? (rawSettings?.llmPrimaryModel ?? "gpt-4o-mini") : null}
-              note="gpt-4o-mini is the sweet spot. Stricter formatting + better prose than DeepSeek at ~5× cost."
+              note="gpt-4o-mini is the sweet spot — stricter formatting + better prose than DeepSeek, and actually a hair cheaper for output-heavy workloads like ours."
             />
             <ProviderOption
               value="anthropic"

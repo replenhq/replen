@@ -27,6 +27,7 @@ import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } fro
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import type { ProjectAssessment } from "./reason";
 import { renderSourceBlock, type FormattedExcerpt } from "./source-context";
+import { applyScoreCap, computeRepoFlags } from "./score-cap";
 
 export type TargetedAssessment = ProjectAssessment & {
   matchedOutcome: string;
@@ -68,6 +69,20 @@ GRADING NOTES:
   - "Planned, not yet wired" or "what's NOT in scope" sections in the project docs are STRONG opportunities - grade up if the repo fills one.
   - If a "Currently building" block is provided, it lists what the user is actively working on THIS PERIOD. A match that fits the current work (themes, recent files, branch) grades stronger than one that fits only the project's general doc shape, AND should be referenced in the writeup by name (theme tag, file path, or PR number). If the candidate is unrelated to the current work but still useful for the project's general shape, grade normally without forcing the link.
   - If a "Candidate repo: source excerpts" block is provided, treat the source as ground truth and the README as a claim.
+  - Hedging phrases ("could be useful", "this can help") are fine WHEN immediately followed by a specific claim. They are NOT fine as standalone filler.
+
+CITATION REQUIREMENT (for score 80+):
+The writeup MUST cite at least one specific identifier from the CANDIDATE repo's README, wrapped in backticks — file path, function/CLI name, class, or similar. Naming a project file from the USER's docs doesn't count; the citation has to anchor the candidate's actual capability. If you can't name a concrete thing the candidate ships, the score is below 80.
+
+ANTI-HALLUCINATION:
+Score reflects substance, not articulation. Do NOT invent integration angles the candidate's README doesn't demonstrate. If you have to stretch the candidate's stated purpose to fit (a game-platform deployment tool used as a generic rsync replacement, a media downloader recommended as a tunnel manager, etc.), score below 50. Keyword overlap is not capability.
+
+APPROACH MUST MATCH RISK PROFILE:
+Risk signals (no license, alpha/pre-release, abandoned, single maintainer, wrong language family for full adoption) constrain which integrationApproach is honest — not the score itself. Match approach to what's safe:
+- "depend-on-it" / "vendor" → license must be permissive, language must match, project must be production-ready and maintained.
+- "cherry-pick" → license still matters (you're copying code), but alpha/dormant don't disqualify.
+- "cleanroom-rebuild" → no disqualifiers. Any repo with a good IDEA is fair game.
+If a signal forces you to a less-binding approach, take it; score the value of the approach you chose.
 
 Output JSON only:
 {
@@ -194,14 +209,28 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       return null;
     }
 
+    // Mechanical score caps — see score-cap.ts. Backstop for cases where the
+    // LLM scored confidently despite a risk signal that should have demoted.
+    const approach = (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a";
+    const flags = computeRepoFlags(safety, writeup);
+    const capped = applyScoreCap({
+      rawScore: Number(o.relevanceScore ?? 0),
+      rawRelevance: rel as ProjectAssessment["relevance"],
+      approach,
+      flags,
+    });
+    if (capped.demotions.length > 0 && capped.score !== Number(o.relevanceScore ?? 0)) {
+      console.log(`[score-targeted:cap] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: ${o.relevanceScore}→${capped.score} (${capped.demotions.join("; ")})`);
+    }
+
     return {
       projectSlug: project.slug,
-      relevance: rel as ProjectAssessment["relevance"],
-      relevanceScore: Number(o.relevanceScore ?? 0),
+      relevance: capped.relevance,
+      relevanceScore: capped.score,
       summary,
       whyUseful,
       suggestedUse,
-      integrationApproach: (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a",
+      integrationApproach: approach,
       risks,
       writeup,
       matchedOutcome: attribution.outcome,

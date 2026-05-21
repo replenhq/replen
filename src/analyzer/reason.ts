@@ -5,6 +5,7 @@ import { sanitizeUntrusted, UNTRUSTED_CONTENT_RULE, looksLikeInjectionLeak } fro
 import { sanitizeMarkdown } from "../lib/markdown-sanitize";
 import { errorMsg } from "../lib/error-msg";
 import { scrubBannedVocab, renderActivityBlock } from "./score-targeted";
+import { applyScoreCap, computeRepoFlags } from "./score-cap";
 
 export type ProjectAssessment = {
   projectSlug: string;
@@ -134,9 +135,22 @@ N is the number of plug points the repo GENUINELY supports for THIS project. Cou
 
 Cardinal rules:
 - Reference the user's project's actual components by name (services, modules, files) - pull these from their CLAUDE.md or README context provided. If you don't have specifics, use generic-but-grounded references (e.g. "your image-processing layer") rather than empty filler.
-- No filler phrases like "could be useful for", "interesting potential", "worth exploring". Every sentence must carry concrete information.
+- Every sentence must carry concrete information. Hedging phrases ("could be useful", "this can help", "may streamline") are fine WHEN immediately followed by a specific claim (a file path, a function name, an observable behaviour). They are NOT fine as standalone filler.
 - License / star count / risk goes in the metadata fields, NOT in the writeup body.
 - 400-900 words. Aim for substance not length.
+
+CITATION REQUIREMENT (for score 80+):
+The writeup MUST cite at least one specific identifier from the CANDIDATE repo's README, wrapped in backticks: a file path (\`cmd/ditto/ditto.go\`), a function/CLI name (\`bengal build\`), a class/module (\`CloudflareTunnelProvider\`), or similar. Naming a project file from the USER's docs doesn't count — the citation has to anchor the candidate's actual capability. If you can't name a concrete thing the candidate ships, the score is below 80.
+
+ANTI-HALLUCINATION:
+Score reflects substance, not articulation. Do NOT invent integration angles that aren't demonstrated in the candidate's README. If you have to stretch the candidate's stated purpose to make it fit (e.g. a game-platform deployment tool used as a generic rsync replacement, a media downloader recommended as a tunnel manager, an Android remote-control library proposed for static-site delivery), the score is below 50. The candidate must DEMONSTRATE the capability you're recommending; keyword overlap is not capability.
+
+APPROACH MUST MATCH RISK PROFILE:
+Risk signals (no license, alpha/pre-release, abandoned, single maintainer, wrong language family for full adoption) constrain which integrationApproach is honest — not the score itself. An idea worth lifting from a Kotlin repo for a TypeScript project is fine: pick "cleanroom-rebuild". A library you'd love to drop in but it has no license: pick "cherry-pick" instead of "depend-on-it". Match the approach to what's actually safe:
+- "depend-on-it" or "vendor" → license must be permissive, language must match the user's stack, project must be production-ready and maintained.
+- "cherry-pick" → license still matters (you're copying code), language must be readable for the user's team, but alpha/dormant don't disqualify.
+- "cleanroom-rebuild" → nothing disqualifies. Any repo with a good IDEA is fair game regardless of license, language, or activity.
+If a risk signal forces you to a less-binding approach, that's the right call; score the value of the approach you chose.
 
 If you can't justify even one concrete plug point AND can't name a specific borrowable idea or pattern, set relevance="general-awareness" with score under 25 and write a single sentence saying so — these get dropped before reaching the user.
 
@@ -290,14 +304,29 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       console.warn(`[reason] dropping output for ${safety.meta.owner}/${safety.meta.name} → ${project?.slug ?? "_general"}: ${leakReason}`);
       return null;
     }
+    // Apply mechanical score caps. The LLM's risk-signal handling depends on
+    // it reliably following the APPROACH MUST MATCH RISK PROFILE section in
+    // the prompt; gpt-4o-mini is articulate enough to score high while
+    // overlooking the constraint. The cap layer is the deterministic backstop.
+    const approach = (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a";
+    const flags = computeRepoFlags(safety, writeup);
+    const capped = applyScoreCap({
+      rawScore: Number(o.relevanceScore ?? 0),
+      rawRelevance: rel,
+      approach,
+      flags,
+    });
+    if (capped.demotions.length > 0 && capped.score !== Number(o.relevanceScore ?? 0)) {
+      console.log(`[reason:cap] ${safety.meta.owner}/${safety.meta.name} → ${project?.slug ?? "_general"}: ${o.relevanceScore}→${capped.score} (${capped.demotions.join("; ")})`);
+    }
     return {
       projectSlug: project?.slug ?? "_general",
-      relevance: rel,
-      relevanceScore: Number(o.relevanceScore ?? 0),
+      relevance: capped.relevance,
+      relevanceScore: capped.score,
       summary,
       whyUseful: sanitizeMarkdown(scrubBannedVocab(String(o.whyUseful ?? "").trim())),
       suggestedUse: sanitizeMarkdown(scrubBannedVocab(String(o.suggestedUse ?? "").trim())),
-      integrationApproach: (o.integrationApproach as ProjectAssessment["integrationApproach"]) ?? "n/a",
+      integrationApproach: approach,
       risks,
       writeup,
     };

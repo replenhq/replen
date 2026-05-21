@@ -10,9 +10,21 @@ export const MODEL_PRICING: Record<string, ModelPrice> = {
   // DeepSeek - discount tier; flash is what we use for triage + low-sensitivity reasoning.
   "deepseek-v4-flash": { inputPer1M: 0.07, outputPer1M: 1.10 },
   "deepseek-v4-pro":   { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-chat":     { inputPer1M: 0.27, outputPer1M: 1.10 },
+  // OpenAI. gpt-4o-mini is the recommended OpenAI default — cheaper than
+  // DeepSeek v4-flash on the output-heavy workloads Replen runs (writeups
+  // dominate token spend). Other gpt-4 variants are listed so daily cost
+  // cap + cost_usd accounting still work if a user overrides the model.
+  "gpt-4o-mini":       { inputPer1M: 0.15, outputPer1M: 0.60 },
+  "gpt-4o":            { inputPer1M: 2.50, outputPer1M: 10.00 },
+  "gpt-4-turbo":       { inputPer1M: 10.00, outputPer1M: 30.00 },
+  "gpt-4.1-mini":      { inputPer1M: 0.40, outputPer1M: 1.60 },
+  "gpt-4.1":           { inputPer1M: 2.00, outputPer1M: 8.00 },
+  "gpt-3.5-turbo":     { inputPer1M: 0.50, outputPer1M: 1.50 },
   // Anthropic Claude Opus - used for high-sensitivity projects.
   "claude-opus-4-7":   { inputPer1M: 15.00, outputPer1M: 75.00 },
   "claude-sonnet-4-6": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "claude-haiku-4-5":  { inputPer1M: 1.00, outputPer1M: 5.00 },
 };
 
 export function priceFor(model: string): ModelPrice | undefined {
