@@ -18,10 +18,11 @@ export const dynamic = "force-dynamic";
 // emits — it's read here, displayed once, and never persisted. Refreshing the
 // page (or copy-pasting the URL elsewhere later) loses the token; that's the
 // intended UX, paired with the hash-only at-rest model.
-type Params = { searchParams: Promise<{ newToken?: string }> };
+type Params = { searchParams: Promise<{ newToken?: string; saved?: string }> };
 
 export default async function SettingsPage({ searchParams }: Params) {
   const sp = await searchParams;
+  const justSaved = sp.saved === "1";
   const justRotatedToken = typeof sp.newToken === "string" && /^ing_[A-Za-z0-9_-]{8,}$/.test(sp.newToken)
     ? sp.newToken
     : null;
@@ -122,15 +123,23 @@ export default async function SettingsPage({ searchParams }: Params) {
     const newSensitiveBaseUrlRaw = (form.get("llmSensitiveBaseUrl") as string || "").trim();
     const newSensitiveModel = (form.get("llmSensitiveModel") as string || "").trim();
     const newSensitiveWire = (form.get("llmSensitiveWireFormat") as string || "").trim() || null;
-    // If the user picked a known provider in the radio and didn't
-    // override the base URL / model in the advanced section, fill in
-    // the canonical defaults so they don't have to think about it.
-    // "custom" preserves whatever's already stored.
+    // The radio is the source of truth. Picking DeepSeek / OpenAI /
+    // Anthropic LOCKS the Base URL to the canonical endpoint — whatever's
+    // in the Advanced field is ignored. This is the only way to keep the
+    // UX foolproof: a user once typed `https://api.openai.com/` (no
+    // `/v1`) and every call 404'd because the chat-completions path is
+    // `/v1/chat/completions`. Stage 1 swallowed those failures
+    // silently and kept stale cached summaries, so the bug was invisible
+    // until we tried to reprocess writeups. Anyone who needs a custom
+    // proxy or non-standard model can pick "Custom / self-hosted" — that
+    // mode preserves whatever they type. Model field stays overrideable
+    // under known providers so power users can swap gpt-4o-mini for
+    // gpt-4-turbo etc.
     if (provider === "deepseek") {
-      if (!newPrimaryBaseUrlRaw) newPrimaryBaseUrlRaw = "https://api.deepseek.com";
+      newPrimaryBaseUrlRaw = "https://api.deepseek.com";
       if (!newPrimaryModel) newPrimaryModel = "deepseek-chat";
     } else if (provider === "openai") {
-      if (!newPrimaryBaseUrlRaw) newPrimaryBaseUrlRaw = "https://api.openai.com/v1";
+      newPrimaryBaseUrlRaw = "https://api.openai.com/v1";
       if (!newPrimaryModel) newPrimaryModel = "gpt-4o-mini";
     }
     // If the user picked "anthropic" in the primary-slot radio, route
@@ -265,6 +274,7 @@ export default async function SettingsPage({ searchParams }: Params) {
     }
     revalidatePath("/settings");
     revalidatePath("/projects");
+    redirect("/settings?saved=1");
   }
 
   async function rotateIngestToken() {
@@ -309,6 +319,21 @@ export default async function SettingsPage({ searchParams }: Params) {
         Account: <strong>{user.email}</strong>. Repo-level overrides (sensitivity, model picker) live on <a href="/projects">/projects</a>.
       </p>
 
+      {justSaved && (
+        <div role="status" style={{
+          marginTop: 12,
+          padding: "10px 14px",
+          background: "rgba(34,197,94,0.10)",
+          border: "1px solid rgba(34,197,94,0.45)",
+          borderRadius: 6,
+          color: "var(--fg, #1a1a1a)",
+          fontSize: 14,
+          fontWeight: 500,
+        }}>
+          ✓ Saved. Hit <a href="/" style={{ color: "inherit", textDecorationColor: "currentColor" }}>Refresh</a> on the feed to re-run the pipeline with the new settings.
+        </div>
+      )}
+
       <form action={save} style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16, maxWidth: 640 }}>
 
         {/* ── Section 1: AI provider ───────────────────────────────── */}
@@ -317,43 +342,59 @@ export default async function SettingsPage({ searchParams }: Params) {
             Replen makes around 50 small AI calls per run. You pay the provider directly with your own key. DeepSeek is the cheapest by far and works just as well for most projects.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* `hasKey` on the OpenAI-compatible providers (DeepSeek / OpenAI
+                / Custom) is tied to `currentProvider` rather than raw column
+                presence: all three share `llmPrimaryApiKey` as their storage,
+                so a saved OpenAI key would otherwise light "✓ key saved" on
+                every OpenAI-compatible card. Tying it to currentProvider
+                means the badge only appears on the card that actually
+                represents the stored config. */}
             <ProviderOption
               value="deepseek"
               currentProvider={currentProvider}
-              hasKey={!!rawSettings?.llmPrimaryApiKey || !!rawSettings?.deepseekApiKey}
+              hasKey={currentProvider === "deepseek" && (!!rawSettings?.llmPrimaryApiKey || !!rawSettings?.deepseekApiKey)}
               label="DeepSeek"
-              tag="Recommended"
+              tag="Cheapest"
               cost="~$0.27 / million tokens"
               keyLink="https://platform.deepseek.com/api_keys"
               keyLinkLabel="Get a DeepSeek API key →"
+              currentModel={currentProvider === "deepseek" ? (rawSettings?.llmPrimaryModel ?? "deepseek-chat") : null}
+              note="Cheapest by ~5×. Writeup formatting is looser — paragraphs sometimes glue together."
             />
             <ProviderOption
               value="openai"
               currentProvider={currentProvider}
-              hasKey={false}
+              hasKey={currentProvider === "openai" && !!rawSettings?.llmPrimaryApiKey}
               label="OpenAI"
+              tag="Best writeups"
               cost="~$5+ / million tokens"
               keyLink="https://platform.openai.com/api-keys"
               keyLinkLabel="Get an OpenAI API key →"
+              currentModel={currentProvider === "openai" ? (rawSettings?.llmPrimaryModel ?? "gpt-4o-mini") : null}
+              note="gpt-4o-mini is the sweet spot. Stricter formatting + better prose than DeepSeek at ~5× cost."
             />
             <ProviderOption
               value="anthropic"
               currentProvider={currentProvider}
-              hasKey={!!rawSettings?.llmSensitiveApiKey || !!rawSettings?.anthropicApiKey}
+              hasKey={currentProvider === "anthropic" && (!!rawSettings?.llmSensitiveApiKey || !!rawSettings?.anthropicApiKey)}
               label="Anthropic Claude"
               tag="For sensitive projects"
               cost="~$3-15 / million tokens"
               keyLink="https://console.anthropic.com/settings/keys"
               keyLinkLabel="Get an Anthropic API key →"
+              currentModel={currentProvider === "anthropic" ? (rawSettings?.llmSensitiveModel ?? "claude-sonnet-4-6") : null}
+              note="Routes through the sensitive slot. Recommended for projects you flag high-sensitivity on /projects."
             />
             <ProviderOption
               value="custom"
               currentProvider={currentProvider}
-              hasKey={false}
+              hasKey={currentProvider === "custom" && !!rawSettings?.llmPrimaryApiKey}
               label="Custom / self-hosted"
               cost="Any OpenAI-compatible endpoint"
               keyLink=""
               keyLinkLabel=""
+              currentModel={currentProvider === "custom" ? (rawSettings?.llmPrimaryModel ?? null) : null}
+              note="Any OpenAI-compatible endpoint (Groq, Together, Fireworks, OpenRouter, llama.cpp, ollama)."
             />
           </div>
           <Field
@@ -365,8 +406,24 @@ export default async function SettingsPage({ searchParams }: Params) {
             statusBadge={primaryStatus}
           />
           <details style={{ marginTop: 4 }}>
-            <summary style={settingsAdvancedSummary}>Advanced: custom base URL / model name</summary>
-            <Field label="Base URL" name="llmPrimaryBaseUrl" value={rawSettings?.llmPrimaryBaseUrl ?? ""} type="url" placeholder="https://api.deepseek.com  (or any OpenAI-compatible endpoint)" />
+            <summary style={settingsAdvancedSummary}>Advanced: override model / point at a proxy</summary>
+            <p style={{ ...settingsHelp, fontSize: 12, marginTop: 6 }}>
+              <b>Base URL</b> is locked to the official endpoint when DeepSeek / OpenAI / Anthropic is selected above.
+              To use a proxy (Groq, OpenRouter, llama.cpp, ollama, Azure OpenAI, etc.) pick <b>Custom / self-hosted</b> instead.
+              <br />
+              <b>Model</b> can be overridden under any provider — e.g. <code>gpt-4-turbo</code> instead of <code>gpt-4o-mini</code> on OpenAI.
+            </p>
+            <Field
+              label={
+                currentProvider === "custom"
+                  ? "Base URL"
+                  : "Base URL (locked — pick 'Custom' above to override)"
+              }
+              name="llmPrimaryBaseUrl"
+              value={rawSettings?.llmPrimaryBaseUrl ?? ""}
+              type="url"
+              placeholder="https://api.deepseek.com  (or any OpenAI-compatible endpoint)"
+            />
             <Field label="Model" name="llmPrimaryModel" value={rawSettings?.llmPrimaryModel ?? ""} placeholder="deepseek-chat  ·  gpt-4o-mini  ·  llama-3.3-70b-versatile" />
           </details>
         </Section>
@@ -686,7 +743,7 @@ function CostStat({ label, value }: { label: string; value: string }) {
 }
 
 function ProviderOption({
-  value, currentProvider, hasKey, label, tag, cost, keyLink, keyLinkLabel,
+  value, currentProvider, hasKey, label, tag, cost, keyLink, keyLinkLabel, currentModel, note,
 }: {
   value: "deepseek" | "openai" | "anthropic" | "custom";
   currentProvider: "deepseek" | "openai" | "anthropic" | "custom" | null;
@@ -696,30 +753,51 @@ function ProviderOption({
   cost: string;
   keyLink: string;
   keyLinkLabel: string;
+  currentModel?: string | null;
+  note?: string;
 }) {
   const isCurrent = currentProvider === value;
   return (
     <label style={{
       display: "flex", flexDirection: "column", gap: 4,
       padding: "10px 12px",
-      border: `1px solid ${isCurrent ? "var(--amber-line, rgba(255,200,87,0.4))" : "var(--line, #ccc4)"}`,
+      // "Selected" = amber. Tag badges (Cheapest / Best writeups / etc.)
+      // sit on a neutral grey so they don't visually duplicate the amber
+      // selection state — fixes the "Recommended yellow box looked like
+      // a selection" report.
+      border: `1px solid ${isCurrent ? "var(--amber-line, rgba(255,200,87,0.7))" : "var(--line, #ccc4)"}`,
       borderRadius: 8,
       cursor: "pointer",
-      background: isCurrent ? "var(--amber-soft, rgba(255,200,87,0.08))" : "var(--surface-1, transparent)",
+      background: isCurrent ? "var(--amber-soft, rgba(255,200,87,0.12))" : "var(--surface-1, transparent)",
+      borderWidth: isCurrent ? 2 : 1,
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <input type="radio" name="provider" value={value} defaultChecked={isCurrent || (currentProvider === null && value === "deepseek")} />
         <span style={{ fontWeight: 600 }}>{label}</span>
         {tag && (
-          <span style={settingsBadge}>{tag}</span>
+          <span style={{
+            fontSize: 11,
+            padding: "1px 7px",
+            borderRadius: 999,
+            background: "rgba(120,120,120,0.10)",
+            border: "1px solid rgba(120,120,120,0.25)",
+            color: "var(--fg-dim, #555)",
+            fontWeight: 500,
+          }}>{tag}</span>
         )}
         {hasKey && (
           <span style={{ ...settingsBadge, background: "var(--green-soft)", color: "var(--green)", borderColor: "var(--green-line)" }}>
             ✓ key saved
           </span>
         )}
+        {isCurrent && currentModel && (
+          <code style={{ fontSize: 11, padding: "1px 6px", background: "rgba(0,0,0,0.06)", borderRadius: 4 }}>{currentModel}</code>
+        )}
         <span className="meta" style={{ marginLeft: "auto", fontSize: 12 }}>{cost}</span>
       </div>
+      {note && (
+        <p style={{ margin: "2px 0 0 24px", fontSize: 12, color: "var(--fg-dim, #555)", lineHeight: 1.4 }}>{note}</p>
+      )}
       {keyLink && (
         <a href={keyLink} target="_blank" rel="noreferrer" style={{
           fontSize: 12, color: "var(--amber, #ffc857)", textDecoration: "none", marginLeft: 24,

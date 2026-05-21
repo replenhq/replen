@@ -23,6 +23,31 @@ import { totalCostUsd } from "../lib/pricing";
 import { recordEvent } from "./events";
 import { readUserSecret } from "../lib/user-secrets";
 
+// Translate internal "regen needed" reason codes into friendlier labels for
+// the streamer. New-user signals like "no-summary" / "no-vectors" / "no-
+// activity" read as failures to first-time visitors — they're not, they
+// just mean "no cache yet, building it now". Everything else passes through.
+function friendlyRegenReason(reason: string): string {
+  switch (reason) {
+    case "no-summary":
+    case "no-vectors":
+    case "no-activity":
+    case "no-summary-yet":
+      return "first run";
+    case "stale":
+    case "stale-summary":
+    case "stale-vectors":
+    case "stale-activity":
+      return "refreshing";
+    case "head-changed":
+      return "repo updated";
+    case "prompt-version-bump":
+      return "prompt updated";
+    default:
+      return reason;
+  }
+}
+
 // Synchronously creates the digest_runs row (so the dashboard query sees an
 // in-flight run on the very next render) and kicks off the actual pipeline
 // work fire-and-forget. Returns immediately. Callers (server actions, cron)
@@ -348,7 +373,7 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
         );
       }
       if (!decision.regen) continue;
-      void recordEvent(runId, userId, "scan", `Refreshing project context for ${p.slug} (${decision.reason})`);
+      void recordEvent(runId, userId, "scan", `Refreshing project context for ${p.slug} (${friendlyRegenReason(decision.reason)})`);
       try {
         const summary = await generateProjectSummary({
           name: p.name,
@@ -412,7 +437,7 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
       } catch {
         continue;
       }
-      void recordEvent(runId, userId, "scan", `Generating search vectors for ${p.slug} (${decision.reason})`);
+      void recordEvent(runId, userId, "scan", `Generating search vectors for ${p.slug} (${friendlyRegenReason(decision.reason)})`);
       try {
         const vectors = await generateSearchVectors(summary, p.summaryHash);
         if (!vectors) continue;
@@ -506,7 +531,7 @@ async function refreshStaleActivity(runId: number, userId: number, cfg: UserConf
       });
       if (!decision.regen) continue;
 
-      void recordEvent(runId, userId, "scan", `Refreshing activity for ${p.slug} (${decision.reason})`);
+      void recordEvent(runId, userId, "scan", `Refreshing activity for ${p.slug} (${friendlyRegenReason(decision.reason)})`);
 
       try {
         const summary = await summariseActivity(activity, p.name, p.slug, {
