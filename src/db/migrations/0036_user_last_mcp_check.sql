@@ -1,0 +1,14 @@
+-- replen_check_new: cursor for "what's new for the user since they last
+-- engaged via MCP." Combined with users.last_viewed_at (dashboard-driven)
+-- as max(both) so the dashboard, the email click-through, and the MCP
+-- session-start hook all advance a single conceptual cursor without
+-- stepping on each other:
+--
+--   dashboard visit → bumps last_viewed_at
+--   replen_check_new call → bumps last_mcp_check_at
+--   /api/mcp/check-new asks: any actionable match newer than max(both)?
+--
+-- NULL on existing rows is treated as "no prior MCP check" — the very
+-- first call from any user returns their current backlog (up to a small
+-- preview limit). That's the desirable bootstrap behaviour.
+ALTER TABLE `users` ADD `last_mcp_check_at` integer;

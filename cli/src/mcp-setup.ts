@@ -63,7 +63,57 @@ export async function setupMcp(token: string, base: string): Promise<void> {
     },
   };
 
-  writeJsonAtomic(CONFIG_PATH, { ...config, mcpServers });
+  const hooks = installSessionStartHook(
+    (config.hooks as Record<string, unknown> | undefined) ?? {},
+  );
+
+  writeJsonAtomic(CONFIG_PATH, { ...config, mcpServers, hooks });
 
   console.log(`  ✓ ${overwrite ? "Updated" : "Added"} "${SERVER_NAME}" in ${CONFIG_PATH}`);
+  console.log(`  ✓ Installed SessionStart hook (surfaces new matches automatically)`);
+}
+
+// SessionStart hook: on every Claude Code session, runs `replen check-new
+// --hook`, which prints a one-block summary to stdout if (and only if)
+// new actionable matches landed since the user last engaged. Claude Code
+// injects that stdout into the agent's opening context, so the agent
+// surfaces the matches to the user without anyone having to ask.
+//
+// When nothing's new the command prints nothing — silence is the calm-
+// cadence position. The 2-second timeout (handled inside check-new --hook)
+// ensures a slow API can't stall session opening.
+//
+// We use the command string `npx --quiet replen check-new --hook` as our
+// idempotency marker: if a SessionStart entry already contains that
+// substring we replace it; otherwise we append. Any other SessionStart
+// hooks the user has are preserved verbatim.
+const HOOK_COMMAND = "npx --quiet replen check-new --hook";
+const HOOK_MARKER = "replen check-new --hook";
+
+type HookEntry = {
+  matcher?: string;
+  hooks?: Array<{ type: string; command?: string }>;
+};
+
+function installSessionStartHook(
+  existing: Record<string, unknown>,
+): Record<string, unknown> {
+  const sessionStart = ((existing.SessionStart as HookEntry[] | undefined) ?? []).slice();
+
+  const ours: HookEntry = {
+    matcher: "*",
+    hooks: [{ type: "command", command: HOOK_COMMAND }],
+  };
+
+  const idx = sessionStart.findIndex((entry) =>
+    (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(HOOK_MARKER)),
+  );
+
+  if (idx >= 0) {
+    sessionStart[idx] = ours;
+  } else {
+    sessionStart.push(ours);
+  }
+
+  return { ...existing, SessionStart: sessionStart };
 }

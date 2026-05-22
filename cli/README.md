@@ -1,6 +1,6 @@
 # replen
 
-**Smarter AI Development workflows.** One-command setup for [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase, every morning.
+**Smarter AI Development workflows.** One-command setup for [replen](https://replen.dev) - the AI that asks *"can we do this better?"* on your codebase. Calm cadence: 1-3 actionable matches a month, not a daily feed.
 
 ```bash
 npx replen
@@ -23,6 +23,28 @@ npx replen status       # show current config
 npx replen mcp setup    # re-wire MCP using saved auth
 npx replen logout       # forget saved auth (token stays valid; rotate on /settings to revoke)
 ```
+
+## Plain-shell usage (no Claude Code / Codex needed)
+
+```bash
+npx replen run                  # trigger a pipeline run
+npx replen progress             # tail the run live; exits when done
+npx replen check-new            # one-shot: any new actionable matches since
+                                # you last engaged? (also runs automatically
+                                # at every Claude Code session start)
+npx replen feed                 # show recent matches (default 2 days)
+npx replen watch                # keep a terminal open — rings the bell when
+                                # a new match lands. Default poll 5min.
+npx replen search <query>       # full-text search past matches
+npx replen starred              # starred matches + handoff PR status
+npx replen handoff <matchId>    # open the handoff PR for a starred match
+```
+
+`watch` is the calm-utility companion: leave it running in a `tmux` pane and forget about it. The first poll establishes a baseline; existing matches don't ring.
+
+`check-new` is wired into Claude Code automatically by `npx replen` setup — it installs a SessionStart hook that runs `npx replen check-new --hook` whenever you open Claude Code. The hook is silent unless there's something new since you last engaged (across dashboard, email, or a prior session); when there is, the new matches show up in the agent's opening context without you having to ask. Calm-cadence by design.
+
+Every data command accepts `--json` for scripting.
 
 ## Self-host
 

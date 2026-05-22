@@ -51,6 +51,7 @@ const TOOLS: Tool[] = [
       const lines = [
         "Replen MCP — available tools:",
         "",
+        "  replen_check_new  Session-start check: is there anything new + actionable since the user last engaged? Cheap, terse, silent when nothing's new.",
         "  replen_today      List matches from the last N days (default 2). Filter by relevance / project.",
         "  replen_search     Full-text search across all your prior matches.",
         "  replen_starred    Starred matches with handoff-PR status (awaiting / open-pr / merged).",
@@ -67,6 +68,28 @@ const TOOLS: Tool[] = [
         "  • Open handoff PR:   replen_handoff({ matchId })",
       ];
       return lines.join("\n");
+    },
+  },
+  {
+    name: "replen_check_new",
+    description:
+      "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +
+      "Call this ONCE at the start of every session, before asking the user what they want to work on. " +
+      "Scoped by default to the repo this MCP was spawned in (the repo's full_name matched against the user's project profiles). Pass repo='' to check the user's entire feed. " +
+      "If hasNew is true: mention the count + repos in 1-2 lines to the user, then ask if they want details (which they get via replen_today). " +
+      "If hasNew is false: say NOTHING — do not tell the user 'no new replen matches', that is noise. Silence is the correct response. " +
+      "Cheap (~50ms, one tiny DB query). Bumps an internal cursor so the next call only sees what's new after this one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+      },
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({ repo: z.string().optional() }).parse(args);
+      void parsed; // resolveRepo reads args.repo directly so default-repo resolution works.
+      const data = await apiGet(cfg, "/api/mcp/check-new", { repo: resolveRepo(args, cfg) });
+      return JSON.stringify(data, null, 2);
     },
   },
   {

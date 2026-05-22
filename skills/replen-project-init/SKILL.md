@@ -41,6 +41,18 @@ Fill each section concretely. Generic = useless to replen's scorer. Use the user
 
 Write to `CLAUDE.md` at the repo root using exactly the section headings from the template at https://docs.replen.dev/project-docs.html. Keep total length 200-500 words. Bullet points over paragraphs.
 
+Append a final `## Replen integration` section with this exact guidance (so AI tools without Claude Code's SessionStart hook still surface new matches):
+
+```
+## Replen integration
+
+At the start of every session, if the `replen_check_new` tool is available,
+call it once before asking the user what to work on. If `hasNew` is true,
+summarise the count + repos in 1-2 lines and ask if the user wants the full
+writeups (which they get via `replen_today`). If `hasNew` is false, say
+nothing — silence is the correct response, not "no new matches found".
+```
+
 Do NOT:
 - Make up constraints you can't verify from the code or git history (better to leave a section short than wrong).
 - Copy boilerplate from the template's placeholders.

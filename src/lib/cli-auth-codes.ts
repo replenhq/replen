@@ -12,12 +12,24 @@
 //
 // In-memory only: a process restart loses pending codes. Acceptable for a
 // 2-minute window on a single replica; the user just re-runs `npx replen`.
+//
+// Bundle-shared state via globalThis (fix 2026-05-22). Next.js 16's production
+// bundler can place a server action (`authorizeCli` in cli-auth/actions.ts)
+// and an API route handler (`/api/cli-auth/exchange`) into separate runtime
+// chunks. Without globalThis-pinning, each chunk would receive its own copy
+// of the module-scoped `codes` Map: mint stores in chunk A's Map; redeem
+// reads from chunk B's empty Map; every CLI auth attempt fails with "unknown
+// or expired code." Pinning to globalThis ensures every chunk in this Node
+// process resolves to the same Map instance, restoring the intended
+// single-process semantics.
 
 import { randomBytes } from "node:crypto";
 
 type Entry = { token: string; base: string; userId: number; state: string; expiresAt: number };
 
-const codes = new Map<string, Entry>();
+const g = globalThis as unknown as { __replenCliAuthCodes?: Map<string, Entry> };
+g.__replenCliAuthCodes ??= new Map<string, Entry>();
+const codes = g.__replenCliAuthCodes;
 const TTL_MS = 2 * 60 * 1000;
 
 function purge(): void {

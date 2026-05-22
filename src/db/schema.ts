@@ -19,6 +19,10 @@ export const users = sqliteTable(
     // Most recent visit to / (dashboard). Used to mark matches as "new since
     // your last visit" with a clear-all button.
     lastViewedAt: integer("last_viewed_at", { mode: "timestamp" }),
+    // Most recent /api/mcp/check-new call. Combined with lastViewedAt as
+    // max(both) to determine "what's new for this user across all surfaces."
+    // Bumped on every MCP/hook check, even when zero new matches qualify.
+    lastMcpCheckAt: integer("last_mcp_check_at", { mode: "timestamp" }),
     // Per-user Data Encryption Key (DEK): a random 32-byte AES key, itself
     // encrypted under the master Key Encryption Key (ENCRYPTION_KEY) and
     // stored here as `enc:v1:<iv>:<tag>:<ct>`. All this user's secrets in

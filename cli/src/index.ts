@@ -3,7 +3,7 @@ import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
 import { runProjectInit } from "./project-init.js";
-import { runFeed, runHandoff, runProgress, runRun, runSearch, runStarred } from "./commands.js";
+import { runCheckNew, runFeed, runHandoff, runProgress, runRun, runSearch, runStarred, runWatch } from "./commands.js";
 
 const HELP = `replen: Smarter AI Development workflows
 
@@ -19,9 +19,19 @@ Usage:
 Use replen from a plain shell (no Claude Code / Codex needed):
   npx replen run                       Trigger a fresh pipeline run
   npx replen progress                  Live tail of the current run; exits when done
+  npx replen check-new                 One-shot: any new actionable matches
+                  [--repo OWNER/NAME]  since you last engaged? Used by the
+                                       SessionStart hook to surface new
+                                       matches automatically in Claude Code.
   npx replen feed [--days N]           Today's matches (default 2 days)
                   [--project SLUG]     Limit to one project
                   [--relevance high,medium]
+  npx replen watch                     Long-running poll: rings the terminal bell
+                  [--interval SEC]     when a new match lands (default 300s).
+                  [--days N]           First poll establishes baseline; existing
+                  [--project SLUG]     matches don't ring. Ctrl-C to stop.
+                  [--relevance high,medium]
+                  [--no-bell]
   npx replen search <query>            Full-text search across past matches
   npx replen starred                   Starred matches + handoff PR status
   npx replen handoff <matchId>         Open the handoff PR for a starred match
@@ -91,6 +101,8 @@ async function main() {
   if (cmd === "run") return runRun(argv);
   if (cmd === "progress") return runProgress(argv);
   if (cmd === "feed") return runFeed(argv);
+  if (cmd === "watch") return runWatch(argv);
+  if (cmd === "check-new") return runCheckNew(argv);
   if (cmd === "search") return runSearch(argv);
   if (cmd === "starred") return runStarred(argv);
   if (cmd === "handoff") return runHandoff(argv);
