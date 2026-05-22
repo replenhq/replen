@@ -1,0 +1,69 @@
+{
+  "_comment": "Layer B of the under-the-radar dedup. Curated set of 'every developer in this ecosystem has heard of these' libraries. Owners + repo names appear here; either side matching the candidate triggers the drop. Lowercase. Keep additions to the obvious mainstream — if anyone might NOT know a library, leave it out. Updated by humans quarterly; see docs/pipeline-v2.md Sprint 4 Layer B.",
+  "ts-js": [
+    "react", "vue", "angular", "svelte", "solid", "preact",
+    "next", "nuxt", "remix", "sveltekit", "astro", "gatsby",
+    "express", "fastify", "koa", "hapi", "nestjs", "hono",
+    "lodash", "ramda", "underscore",
+    "axios", "ky", "got", "node-fetch", "undici",
+    "tailwindcss", "bootstrap", "material-ui", "mui", "chakra-ui", "shadcn-ui", "shadcn", "radix-ui",
+    "vite", "webpack", "rollup", "esbuild", "parcel", "turbopack",
+    "typescript", "babel",
+    "eslint", "prettier",
+    "jest", "vitest", "mocha", "playwright", "cypress", "puppeteer",
+    "prisma", "drizzle", "drizzle-orm", "typeorm", "sequelize", "mongoose", "knex",
+    "redux", "zustand", "mobx", "jotai", "valtio", "recoil",
+    "react-query", "tanstack-query", "swr",
+    "react-router", "react-hook-form", "formik",
+    "zod", "yup", "joi", "io-ts",
+    "luxon", "date-fns", "moment", "dayjs",
+    "winston", "pino", "bunyan",
+    "discord.js", "telegraf", "octokit",
+    "stripe", "supabase-js", "firebase",
+    "puppeteer", "playwright",
+    "socket.io", "ws"
+  ],
+  "python": [
+    "django", "flask", "fastapi", "starlette", "tornado", "pyramid", "bottle", "sanic", "aiohttp", "litestar",
+    "requests", "httpx", "urllib3", "aiohttp",
+    "numpy", "scipy", "pandas", "polars", "matplotlib", "seaborn", "plotly", "bokeh",
+    "pytorch", "tensorflow", "keras", "scikit-learn", "sklearn", "xgboost", "lightgbm", "huggingface", "transformers", "diffusers",
+    "sqlalchemy", "alembic", "pydantic", "marshmallow", "attrs",
+    "celery", "redis-py", "kombu",
+    "pytest", "tox", "nose", "unittest", "hypothesis",
+    "black", "ruff", "flake8", "mypy", "pylint", "isort",
+    "beautifulsoup", "beautifulsoup4", "lxml", "scrapy", "selenium",
+    "click", "typer", "argparse", "rich", "tqdm",
+    "openai", "anthropic", "langchain", "llama-index",
+    "pillow", "opencv-python",
+    "boto3", "botocore",
+    "uvicorn", "gunicorn", "hypercorn"
+  ],
+  "rust": [
+    "serde", "tokio", "async-std", "actix-web", "axum", "rocket", "warp", "hyper", "tower",
+    "reqwest", "ureq",
+    "diesel", "sqlx", "sea-orm",
+    "clap", "structopt",
+    "anyhow", "thiserror", "eyre",
+    "rayon", "crossbeam",
+    "tracing", "log", "env_logger",
+    "chrono", "time"
+  ],
+  "go": [
+    "gin", "echo", "fiber", "chi", "gorilla", "iris",
+    "gorm", "sqlx", "ent",
+    "cobra", "viper", "kong",
+    "zap", "logrus", "zerolog",
+    "testify", "gomock",
+    "go-redis", "redis"
+  ],
+  "java-kotlin": [
+    "spring", "spring-boot", "spring-framework",
+    "hibernate", "jackson",
+    "junit", "mockito",
+    "ktor", "kotlinx-coroutines"
+  ],
+  "swift": [
+    "alamofire", "swiftui", "combine", "vapor", "rxswift"
+  ]
+}

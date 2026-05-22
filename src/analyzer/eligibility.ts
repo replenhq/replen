@@ -27,6 +27,12 @@ export type EligibilityInput = {
   postedAt: Date | null;     // candidate's created/pushed date as fetched
   score: number | null;       // star count (or proxy)
   source: string;             // for tracing rules to specific fetchers
+  // Github owner + repo name for the user-known dedup probe. Derived
+  // from githubUrl at the caller (e.g. github.com/owner/name → owner,
+  // name). Lowercase comparison is the caller's concern; this module
+  // takes the raw values.
+  owner?: string | null;
+  name?: string | null;
 };
 
 export type EligibilityContext = {
@@ -34,6 +40,14 @@ export type EligibilityContext = {
   // language signal" — we degrade gracefully by not enforcing the
   // language-family rule rather than refusing every candidate.
   detectedLanguages: string | null;
+  // Layer A of the "under-the-radar" filter: lowercase tokens
+  // representing every dep across the user's project manifests
+  // (package.json / pyproject.toml / Cargo.toml / go.mod). When a
+  // candidate's owner or repo name matches one of these tokens, the
+  // user definitionally already knows about it. Built by
+  // src/analyzer/known-deps.ts; null/empty means "we don't have the
+  // signal, degrade gracefully."
+  knownDeps?: Set<string> | null;
 };
 
 export type EligibilityVerdict =
@@ -77,6 +91,24 @@ export function checkEligibility(
   ctx: EligibilityContext,
 ): EligibilityVerdict {
   const shape = c.repoShape ?? "unknown";
+
+  // 0. User-known dedup (Layer A — manifest deps). Cheapest probe
+  //    that fires: O(1) set lookup against the lowercased owner/name
+  //    tokens. If the candidate appears as a dep in any of the user's
+  //    projects (or its owner does), the user already knows about it
+  //    — Replen's whole positioning is "under-the-radar specifics,"
+  //    not "have you considered <thing you're already using>." Runs
+  //    BEFORE the structural rules because it's the highest-confidence
+  //    drop signal we have: 100% certain when it fires, false-negative-
+  //    biased (we don't drop unrelated repos that happen to share a
+  //    name) by design.
+  if (ctx.knownDeps && ctx.knownDeps.size > 0) {
+    const owner = c.owner?.toLowerCase();
+    const name = c.name?.toLowerCase();
+    if ((owner && ctx.knownDeps.has(owner)) || (name && ctx.knownDeps.has(name))) {
+      return { eligible: false, reason: "already in your manifests" };
+    }
+  }
 
   // 1. Aggregator (Composio-class). These compete with the user's product
   //    rather than integrate into it — "use this instead of building."

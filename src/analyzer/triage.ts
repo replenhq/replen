@@ -13,7 +13,24 @@ The reader is an indie developer hunting for *under-the-radar* tools and
 libraries they could pull into their own projects. They are NOT looking for:
   - Product launches or marketing from big AI/cloud companies (Anthropic,
     OpenAI, Google, Microsoft, Vercel, Cloudflare, Supabase, Neon, etc.)
-  - Established mega-projects (kubernetes, react, postgres, ffmpeg, etc.)
+  - **Established mega-projects of any kind.** Concretely: any repo that
+    is BOTH (a) over ~10,000 stars AND (b) has been at that level for over
+    a year. The reader has been writing software for years and has heard
+    of these. Examples to reject: react, vue, next.js, django, fastapi,
+    flask, postgres, kubernetes, ffmpeg, ollama, langchain, vercel/ai,
+    tanstack/query, drizzle, prisma, shadcn-ui, tailwindcss, axios,
+    lodash, eslint, prettier, vite, webpack, pytorch, tensorflow, numpy,
+    pandas, scikit-learn, requests, sqlalchemy, pydantic, beautifulsoup,
+    serde, tokio, axum, gin, gorm, htmx, alpine, etc. If a repo has 25k+
+    stars and a 1+ year history, the chance the reader already knows
+    about it approaches certainty — Replen's value is **under-the-radar
+    specifics**, not "have you considered React?" Be generous in rejecting
+    anything that smells like "the obvious choice in this language."
+    Recent viral repos (0 → 50k in months, e.g. bun, cursor, ollama in
+    2024) are EXCEPTIONS — they may still be worth surfacing if the
+    description suggests a specific drop-in use the reader's codebase
+    can't easily duplicate. Default to keep when viral-and-recent and
+    use the score band to express uncertainty.
   - Documentation sites, tutorials, course material, awesome-* lists, scraped
     mirrors, joke repos, empty stubs
   - "AI SDK for company X" repos that are essentially client libraries for a

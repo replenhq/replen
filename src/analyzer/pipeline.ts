@@ -18,6 +18,7 @@ import { recordEvent } from "../scheduler/events";
 import { LlmQuotaError } from "./llm";
 import { decideMatchFilter } from "./match-filters";
 import { checkEligibility, summariseDrops, type EligibilityVerdict } from "./eligibility";
+import { getKnownDeps } from "./known-deps";
 import type { RepoShape } from "../fetchers/repo-shape";
 
 const HOURS = 36;
@@ -101,7 +102,19 @@ async function runAnalysisInner(runId: number, userId: number) {
     .from(schema.userSettings)
     .where(eq(schema.userSettings.userId, userId))
     .get();
-  const eligibilityCtx = { detectedLanguages: userSettings?.detectedLanguages ?? null };
+  // Layer A of the "user already knows it" filter: pull every dep
+  // from the user's project manifests once at the start of analysis.
+  // ~5 GitHub API calls per project (most return 404 fast); the result
+  // is a small Set probed in O(1) per candidate. See known-deps.ts +
+  // pipeline-v2.md sprint 4.
+  const knownDeps = await getKnownDeps(userId, readRunOrEnv("githubToken", "GITHUB_TOKEN")).catch((e) => {
+    console.warn(`[pipeline] getKnownDeps failed; degrading without dedup signal:`, e);
+    return new Set<string>();
+  });
+  const eligibilityCtx = {
+    detectedLanguages: userSettings?.detectedLanguages ?? null,
+    knownDeps,
+  };
   const cands: typeof candsRaw = [];
   const drops: Array<{ reason: string }> = [];
   const forceApproachByKey = new Map<string, "cleanroom-rebuild">();
@@ -115,6 +128,8 @@ async function runAnalysisInner(runId: number, userId: number) {
         postedAt: c.postedAt,
         score: c.score,
         source: c.source,
+        owner: m ? m[1] : null,
+        name: m ? m[2] : null,
       },
       eligibilityCtx,
     );
