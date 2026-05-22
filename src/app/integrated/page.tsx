@@ -2,6 +2,8 @@ import { db, schema } from "@/db/client";
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
 import { refreshHandoffStatuses } from "../actions";
+import { SkillTierBanner, fetchSubscriptionTier, fetchSkillState } from "@/components/SkillTierBanner";
+import { formatTimestampToMinute } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -50,9 +52,36 @@ export default async function Integrated() {
     await refreshHandoffStatuses();
   }
 
+  const subscriptionTier = await fetchSubscriptionTier(user.id);
+  const skillHandedOff = subscriptionTier === "skill" ? await fetchSkillState(user.id, ["handed_off"]) : null;
+
   return (
     <>
+      <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <h1>Integrated</h1>
+      {skillHandedOff && skillHandedOff.rows.length > 0 && (
+        <section style={{ margin: "12px 0 20px", padding: "12px 14px", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8 }}>
+          <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>From skill-mode sessions</h2>
+          <ul style={{ paddingLeft: 0, listStyle: "none", margin: 0 }}>
+            {skillHandedOff.rows.map((row) => {
+              const r = skillHandedOff.repoMap.get(row.repoId);
+              const p = row.projectId ? skillHandedOff.projectMap.get(row.projectId) : null;
+              return (
+                <li key={row.id} style={{ padding: "6px 0", borderBottom: "1px solid rgba(0,0,0,0.05)", fontSize: 13 }}>
+                  <a href={r?.url ?? "#"} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600 }}>
+                    {r ? `${r.owner}/${r.name}` : `repo#${row.repoId}`}
+                  </a>
+                  {p?.slug && <span className="meta" style={{ marginLeft: 8 }}>· into {p.slug}</span>}
+                  {row.handoffPrUrl && (
+                    <> · <a href={row.handoffPrUrl} target="_blank" rel="noopener noreferrer">PR ↗</a></>
+                  )}
+                  <span className="meta" style={{ marginLeft: 8 }}>· {formatTimestampToMinute(row.actionAt ?? row.surfacedAt)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <p className="meta">{integrated.length} OSS {integrated.length === 1 ? "package" : "packages"} merged via handoff PRs.</p>
 
       <form action={refresh} style={{ margin: "8px 0 20px" }}>

@@ -269,6 +269,16 @@ export default async function SettingsPage({ searchParams }: Params) {
       // Detected languages are owned by the re-detect action / PAT save below;
       // don't clobber them on a vanilla settings save.
       detectedLanguages: existingPrev?.detectedLanguages ?? null,
+      // Skill-mode matching mode. Validate against the three known values;
+      // anything else (forged form posts, etc.) falls back to the
+      // recommended default.
+      filterMode: ((): "zero-knowledge" | "tags" | "fingerprint" => {
+        const raw = (form.get("filterMode") as string) || "tags";
+        return raw === "zero-knowledge" || raw === "tags" || raw === "fingerprint" ? raw : "tags";
+      })(),
+      // Subscription tier is system-managed (never user-editable from this
+      // form). Preserve whatever's there, defaulting to 'skill' for new rows.
+      subscriptionTier: existingPrev?.subscriptionTier ?? "skill",
       updatedAt: new Date(),
     };
     if (existingPrev) {
@@ -347,7 +357,45 @@ export default async function SettingsPage({ searchParams }: Params) {
 
       <form action={save} style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16, maxWidth: 640 }}>
 
-        {/* ── Section 1: AI provider ───────────────────────────────── */}
+        {/* ── Section 0: Matching mode ─────────────────────────────────
+            Controls /api/inventory/today's pre-filter. Three options
+            ordered by how much info Replen sees about the user's
+            projects. Default 'tags' is the sweet spot. */}
+        <Section title="Matching mode">
+          <p style={settingsHelp}>
+            How much should Replen know about your projects when filtering
+            today's OSS candidates? Your code never leaves your machine
+            either way — this only controls what metadata the
+            candidate-inventory endpoint uses to pre-filter what gets
+            sent for the agent to triage.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <FilterModeOption
+              value="zero-knowledge"
+              currentValue={s?.filterMode ?? "tags"}
+              title="Zero-knowledge"
+              description="Replen knows nothing about your projects. You get the full firehose; the agent triages everything in-session. Most private, slowest per-session."
+            />
+            <FilterModeOption
+              value="tags"
+              currentValue={s?.filterMode ?? "tags"}
+              title="Tag-based (recommended)"
+              description="A small JSON array of tags per project (e.g. 'typescript', 'next.js', 'news'). Replen intersects with candidate metadata. Tags are user-curated; no source code shared."
+            />
+            <FilterModeOption
+              value="fingerprint"
+              currentValue={s?.filterMode ?? "tags"}
+              title="Project fingerprint (opt-in)"
+              description="An opaque LSH-style hash of your project's shape (file-tree fingerprint + dep set MinHash). Sharpest pre-filter; not your source, but identifying enough that some teams will prefer 'tags'. Computed locally and pushed once."
+            />
+          </div>
+        </Section>
+
+        {/* ── Section 1: AI provider ─────────────────────────────────
+            In skill-tier (default after migration 0038) the agent's
+            own subscription handles reasoning, so this section is
+            optional. Kept fully wired for hosted-tier users + as a
+            fallback path. */}
         <Section title="AI provider">
           <p style={settingsHelp}>
             Replen makes around 50 small AI calls per run. You pay the provider directly with your own key. DeepSeek is the cheapest by far and works just as well for most projects.
@@ -754,6 +802,48 @@ function CostStat({ label, value }: { label: string; value: string }) {
       <div style={{ fontSize: 11, color: "var(--faint, #66645e)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 600, color: "var(--fg)" }}>{value}</div>
     </div>
+  );
+}
+
+// Radio-button selector for the three matching modes. Mirrors the
+// ProviderOption visual pattern so the form feels consistent.
+function FilterModeOption({
+  value,
+  currentValue,
+  title,
+  description,
+}: {
+  value: "zero-knowledge" | "tags" | "fingerprint";
+  currentValue: string;
+  title: string;
+  description: string;
+}) {
+  const selected = currentValue === value;
+  return (
+    <label
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: "10px 12px",
+        borderRadius: 8,
+        border: `1px solid ${selected ? "var(--accent, #1a1a1a)" : "rgba(0,0,0,0.08)"}`,
+        background: selected ? "var(--accent-bg, rgba(0,0,0,0.02))" : "transparent",
+        cursor: "pointer",
+        alignItems: "flex-start",
+      }}
+    >
+      <input
+        type="radio"
+        name="filterMode"
+        value={value}
+        defaultChecked={selected}
+        style={{ marginTop: 4 }}
+      />
+      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={{ fontWeight: 500, fontSize: 14 }}>{title}</span>
+        <span style={{ fontSize: 13, color: "rgba(0,0,0,0.6)", lineHeight: 1.4 }}>{description}</span>
+      </span>
+    </label>
   );
 }
 

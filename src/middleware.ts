@@ -162,6 +162,15 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/mcp/")) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
+  // /api/inventory/*, /api/state: skill-mode endpoints called by the
+  // user's local CLI / MCP / skill. Same token auth as /api/mcp/*,
+  // enforced in each route's handler.
+  if (
+    request.nextUrl.pathname.startsWith("/api/inventory/") ||
+    request.nextUrl.pathname === "/api/state"
+  ) {
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+  }
   // /api/cli-auth/exchange: one-time exchange code redemption. Route enforces
   // state matching and 2-min TTL; no Firebase session needed.
   if (request.nextUrl.pathname.startsWith("/api/cli-auth/exchange")) {

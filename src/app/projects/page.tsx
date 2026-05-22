@@ -56,6 +56,7 @@ export default async function Projects() {
             <th style={{ textAlign: "right" }}>Matches</th>
             <th></th>
             <th>GitHub repo</th>
+            <th title="Comma-separated tags (e.g. 'typescript, next.js, news'). Used by filter mode B on /settings to pre-filter the inventory before sending candidates to the skill for triage. Empty = no per-project filter applied; the user's whole tag union is used.">Tags</th>
             <th title="github:owner/name when sourced via API. Filesystem paths shown for rows that haven't refreshed since the GitHub-pull rebuild — they'll switch on next pipeline run once a repo is set.">Source</th>
           </tr>
         </thead>
@@ -143,6 +144,22 @@ export default async function Projects() {
                       }}
                     />
                     <button title="Save GitHub repo. Replen uses this to fetch docs/activity/manifests via the API and to open handoff PRs." style={{ padding: "1px 6px", fontSize: 11 }}>save</button>
+                  </form>
+                </td>
+                <td>
+                  <form className="inline" action={async (form: FormData) => { "use server"; await setProjectTags(p.id, (form.get("tags") as string) ?? ""); }} style={{ display: "inline-flex", gap: 4 }}>
+                    <input
+                      name="tags"
+                      defaultValue={renderTagsCsv(p.tags)}
+                      placeholder="typescript, next.js, news"
+                      style={{
+                        padding: "1px 4px",
+                        fontSize: 12,
+                        width: 180,
+                        fontFamily: "ui-monospace, monospace",
+                      }}
+                    />
+                    <button title="Save tags (comma-separated). Used by filter mode 'tags' on /settings to pre-filter the inventory before sending to the skill." style={{ padding: "1px 6px", fontSize: 11 }}>save</button>
                   </form>
                 </td>
                 <td className="path">{p.path}</td>
@@ -262,6 +279,41 @@ async function autoDetectGithubRepos() {
   if (!token) throw new Error("could not decrypt GitHub PAT");
   await autoDetectAndStoreRepos(user.id, token);
   revalidatePath("/projects");
+}
+
+// Skill-mode: per-project tag list (filter mode B). Comma-separated
+// input → JSON-stringified array on storage. Normalises whitespace
+// + lowercases + dedups + caps token count.
+async function setProjectTags(id: number, value: string) {
+  "use server";
+  const user = await requireUser();
+  if (!Number.isInteger(id) || id <= 0) throw new Error("invalid project id");
+  const tags = Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0 && s.length <= 40)
+        .slice(0, 30),
+    ),
+  );
+  const stored = tags.length > 0 ? JSON.stringify(tags) : null;
+  await db
+    .update(schema.projectProfiles)
+    .set({ tags: stored })
+    .where(and(eq(schema.projectProfiles.id, id), eq(schema.projectProfiles.userId, user.id)));
+  revalidatePath("/projects");
+}
+
+// Stored JSON → CSV for the input field. Defensive on malformed JSON.
+function renderTagsCsv(raw: string | null): string {
+  if (!raw) return "";
+  try {
+    const a = JSON.parse(raw);
+    return Array.isArray(a) ? a.filter((s) => typeof s === "string").join(", ") : "";
+  } catch {
+    return "";
+  }
 }
 
 async function setGithubFullName(id: number, value: string) {

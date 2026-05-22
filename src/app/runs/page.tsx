@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { runPipelineNow } from "@/app/actions";
 import { sourceKind } from "@/lib/source-rank";
 import { RunRow } from "@/components/RunRow";
+import { SkillTierBanner, fetchSubscriptionTier } from "@/components/SkillTierBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -134,9 +135,19 @@ export default async function Runs() {
     }))
     .sort((a, b) => b.matches - a.matches);
 
+  const subscriptionTier = await fetchSubscriptionTier(user.id);
+
   return (
     <>
+      <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <h1>Runs</h1>
+      {subscriptionTier === "skill" && runs.length === 0 && (
+        <p className="meta" style={{ marginTop: 8 }}>
+          Skill-mode users don't have hosted pipeline runs — your matching happens in-session in
+          Claude Code via <code>/replen-match</code>. This page is empty by design. If you also have
+          historical hosted runs from before the pivot, they would show below.
+        </p>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, margin: "12px 0 20px" }}>
         <Card label="last 7 days" value={fmtCost(cost7)} sub={`${last7.length} runs`} />
         <Card label="last 30 days" value={fmtCost(cost30)} sub={`${last30.length} runs · ${matches30} matches`} />

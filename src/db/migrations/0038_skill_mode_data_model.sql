@@ -27,10 +27,10 @@
 --     handed_off. Per (user, repo, project) for context — the same
 --     repo can be surfaced in two project contexts and carry
 --     independent state.
-ALTER TABLE `user_settings` ADD `filter_mode` text NOT NULL DEFAULT 'tags';
-ALTER TABLE `user_settings` ADD `subscription_tier` text NOT NULL DEFAULT 'skill';
-ALTER TABLE `project_profiles` ADD `tags` text;
-ALTER TABLE `project_profiles` ADD `fingerprint_hash` text;
+ALTER TABLE `user_settings` ADD `filter_mode` text NOT NULL DEFAULT 'tags';--> statement-breakpoint
+ALTER TABLE `user_settings` ADD `subscription_tier` text NOT NULL DEFAULT 'skill';--> statement-breakpoint
+ALTER TABLE `project_profiles` ADD `tags` text;--> statement-breakpoint
+ALTER TABLE `project_profiles` ADD `fingerprint_hash` text;--> statement-breakpoint
 CREATE TABLE `user_match_state` (
   `id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
   `user_id` integer NOT NULL REFERENCES `users`(`id`) ON DELETE CASCADE,
@@ -41,7 +41,7 @@ CREATE TABLE `user_match_state` (
   `action_at` integer,
   `handoff_pr_url` text,
   `user_note` text
-);
-CREATE UNIQUE INDEX `uniq_user_match_state_repo_project` ON `user_match_state`(`user_id`, `repo_id`, `project_id`);
-CREATE INDEX `idx_user_match_state_user_status` ON `user_match_state`(`user_id`, `status`);
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `uniq_user_match_state_repo_project` ON `user_match_state`(`user_id`, `repo_id`, `project_id`);--> statement-breakpoint
+CREATE INDEX `idx_user_match_state_user_status` ON `user_match_state`(`user_id`, `status`);--> statement-breakpoint
 CREATE INDEX `idx_user_match_state_surfaced` ON `user_match_state`(`user_id`, `surfaced_at`);

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { formatTimestampToMinute } from "@/lib/format-date";
 import { createHandoff, refreshHandoffStatuses, setMatchStatus } from "../actions";
 import { BulkBar, RowCheck } from "./BulkBar";
+import { SkillTierBanner, fetchSubscriptionTier, fetchSkillState } from "@/components/SkillTierBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -124,9 +125,35 @@ export default async function Starred() {
     await refreshHandoffStatuses();
   }
 
+  const subscriptionTier = await fetchSubscriptionTier(user.id);
+  const skillStarred = subscriptionTier === "skill" ? await fetchSkillState(user.id, ["starred"]) : null;
+
   return (
     <>
+      <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <h1>⭐ Starred &amp; 🔖 Bookmarks</h1>
+      {skillStarred && skillStarred.rows.length > 0 && (
+        <section style={{ margin: "12px 0 20px", padding: "12px 14px", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8 }}>
+          <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>From skill-mode sessions</h2>
+          <table style={{ width: "100%", fontSize: 13 }}>
+            <thead><tr><th style={{ textAlign: "left" }}>Repo</th><th style={{ textAlign: "left" }}>Project</th><th style={{ textAlign: "left" }}>Note</th><th style={{ textAlign: "right" }}>Starred</th></tr></thead>
+            <tbody>
+              {skillStarred.rows.map((row) => {
+                const r = skillStarred.repoMap.get(row.repoId);
+                const p = row.projectId ? skillStarred.projectMap.get(row.projectId) : null;
+                return (
+                  <tr key={row.id}>
+                    <td><a href={r?.url ?? "#"} target="_blank" rel="noopener noreferrer">{r ? `${r.owner}/${r.name}` : `repo#${row.repoId}`}</a></td>
+                    <td>{p?.slug ?? "—"}</td>
+                    <td style={{ color: "rgba(0,0,0,0.6)" }}>{row.userNote ?? ""}</td>
+                    <td style={{ textAlign: "right", color: "rgba(0,0,0,0.55)" }}>{formatTimestampToMinute(row.actionAt ?? row.surfacedAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      )}
       <p className="meta">
         {starred.length} starred · {awaiting.length} awaiting handoff · {openPr.length} PR open · {integrated.length} integrated · {bookmarks.length} bookmarked
       </p>

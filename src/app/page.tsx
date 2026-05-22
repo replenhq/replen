@@ -12,6 +12,7 @@ import { isDemoUser } from "@/lib/auth/demo-mode";
 import { DemoMatchActions } from "@/components/DemoMatchActions";
 import { DemoStreamerProvider, DemoStreamerButton, DemoStreamerLog } from "@/components/DemoStreamer";
 import { SparseDocsCards, buildSparseProject, type SparseProject } from "@/components/SparseDocsCards";
+import { SkillTierBanner, fetchSubscriptionTier } from "@/components/SkillTierBanner";
 import { assessDocSparsity } from "@/projects/self-improvement";
 import { formatTimestampToMinute } from "@/lib/format-date";
 import type { CSSProperties } from "react";
@@ -377,9 +378,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   });
 
   const demoMode = isDemoUser(user);
+  const subscriptionTier = await fetchSubscriptionTier(user.id);
 
   const feedBody = (
     <>
+      <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <div className="feed-header">
         <h1 className="feed-title">
           What could you make better today<span style={{ color: "var(--amber)" }}>?</span>
