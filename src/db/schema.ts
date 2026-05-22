@@ -304,6 +304,11 @@ export const matches = sqliteTable(
     whyUseful: text("why_useful"),
     suggestedUse: text("suggested_use"),
     integrationApproach: text("integration_approach"),
+    // Pipeline v2 Sprint 4: LLM-estimated effort to actually do this
+    // match. One of "quick" (<1d), "moderate" (1-3d), "deep" (1+ week),
+    // or null when not estimated. Lets the user pick what to act on
+    // TODAY vs what to queue. See src/db/migrations/0035_match_effort_band.sql.
+    effortBand: text("effort_band"),
     risks: text("risks"),
     writeupMd: text("writeup_md"),
     // 'unread' | 'starred' | 'bookmarked' | 'hidden'. 'starred' = "action

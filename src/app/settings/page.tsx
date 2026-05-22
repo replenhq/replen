@@ -497,14 +497,33 @@ export default async function SettingsPage({ searchParams }: Params) {
           </div>
         </details>
 
-        {/* ── Section 4: Email digest ──────────────────────────────── */}
+        {/* ── Section 4: Real-time alerts ──────────────────────────── */}
+        <Section title="Real-time alerts (Slack / Discord)">
+          <p style={settingsHelp}>
+            Push notification when an actionable match lands. Fires on <strong>high</strong> + <strong>medium</strong> relevance, skipping general-awareness so the channel stays signal-dense. Most weeks it&rsquo;ll be silent — that&rsquo;s the point.
+          </p>
+          <Field label="Webhook URL" name="webhookUrl" value={s?.webhookUrl ?? ""} type="text" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+            <span style={{ fontSize: 13 }}>Format</span>
+            <select name="webhookKind" defaultValue={rawSettings?.webhookKind ?? "generic"} style={{ padding: 6, maxWidth: 240 }}>
+              <option value="slack">Slack (blocks)</option>
+              <option value="discord">Discord (embeds)</option>
+              <option value="generic">Generic JSON</option>
+            </select>
+          </label>
+          <p style={{ ...settingsHelp, fontSize: 12, marginTop: 8 }}>
+            Slack: create a webhook at <code>https://api.slack.com/messaging/webhooks</code>. Discord: server settings → integrations → webhooks.
+          </p>
+        </Section>
+
+        {/* ── Section 5: Email digest ──────────────────────────────── */}
         <Section title="Email digest (optional)">
           <p style={settingsHelp}>
-            Send the daily summary to your inbox. The dashboard is the primary surface; email is a useful nudge but not required.
+            Email sent only when there&rsquo;s an actionable match (high or medium). General-awareness alone doesn&rsquo;t trigger one — the dashboard covers that. Most days no email goes out, by design.
           </p>
           <Field label="Email destination" name="emailToAddress" value={s?.emailToAddress ?? ""} type="email" placeholder="you@example.com" />
           <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-            <input type="checkbox" name="enabled" defaultChecked={s?.enabled !== false} /> Automatic daily run
+            <input type="checkbox" name="enabled" defaultChecked={s?.enabled !== false} /> Automatic daily pipeline run
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
             Run at (24h, UTC):
@@ -565,21 +584,6 @@ export default async function SettingsPage({ searchParams }: Params) {
               )}
             </div>
 
-            <div>
-              <h3 style={settingsSubHeader}>Real-time webhook</h3>
-              <p style={settingsHelp}>
-                Slack / Discord / generic JSON. Fires after each run when at least one <code>high</code>-relevance match is found.
-              </p>
-              <Field label="Webhook URL" name="webhookUrl" value={s?.webhookUrl ?? ""} type="text" placeholder="https://hooks.slack.com/services/…  or  https://discord.com/api/webhooks/…" />
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
-                <span style={{ fontSize: 13 }}>Format</span>
-                <select name="webhookKind" defaultValue={rawSettings?.webhookKind ?? "generic"} style={{ padding: 6, maxWidth: 240 }}>
-                  <option value="slack">Slack (blocks)</option>
-                  <option value="discord">Discord (embeds)</option>
-                  <option value="generic">Generic JSON</option>
-                </select>
-              </label>
-            </div>
           </div>
         </details>
 

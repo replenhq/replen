@@ -73,6 +73,28 @@ SCORE BANDS (urgency, not fit):
   0-24    false alarm. The "stale" verdict is misleading and the dep should
           stay. Pair with action="keep".
 
+IMPACT QUANTIFICATION (mandatory for action="drop" or "replace"):
+The writeup MUST lead with a single line stating the concrete expected
+impact in numbers. Use the dep-health signals + your knowledge of the
+ecosystem to estimate. Always label estimates as "est." so the reader
+knows these are not measured. Examples of the shape required:
+
+  drop:    "Removes ~N transitive deps (est.), trims ~X kB from your
+           lockfile (est.), patches Y known CVEs as of <month>, cuts
+           Z lines of code that wrap the dep across your project."
+
+  replace: "Restores active maintenance (last push N days ago vs
+           current dep's M days ago), unblocks Node/Python version Z
+           upgrades, ~X kB bundle delta (est.), ~Y lines of API
+           migration (est.)."
+
+Pick the 2-3 impact dimensions most relevant to THIS dep + project.
+Don't pad with irrelevant numbers — for a CLI-only build dep you
+shouldn't be quoting bundle deltas. Be specific about what you do
+NOT know: if you can't estimate CVE count, say "unknown CVE count,
+last security audit was X months ago" rather than inventing a
+number.
+
 Output JSON only:
 {
   "action": "drop" | "replace" | "keep",
@@ -81,7 +103,7 @@ Output JSON only:
   "whyUseful": "1 sentence: the single reason this matters to act on",
   "suggestedUse": "1 sentence: the concrete first command/action",
   "risks": "1 sentence: licence / behavioural-difference / migration cost",
-  "writeup": "200-400 word writeup explaining the why and the how, across 2-3 paragraphs SEPARATED BY BLANK LINES (\\\\n\\\\n in the JSON string). One block of dense prose is a formatting violation. Structure: paragraph 1 — what the dep is + the health signal that triggered this (archived / N days stale / no license). Paragraph 2 — what it does for THIS project's current work (cite files/themes) and what concretely changes if removed or replaced. Paragraph 3 (optional, only when 'replace') — the migration shape: install + import swap + any API delta. Reference the project's actual current work where relevant. If recommending a replacement, give 1-2 sentences on what changes during the migration.",
+  "writeup": "200-400 word writeup explaining the why and the how, across 2-3 paragraphs SEPARATED BY BLANK LINES (\\\\n\\\\n in the JSON string). One block of dense prose is a formatting violation. Structure: paragraph 1 OPENS WITH THE IMPACT-QUANTIFICATION line specified above, then explains what the dep is + the health signal that triggered this (archived / N days stale / no license). Paragraph 2 — what it does for THIS project's current work (cite files/themes) and what concretely changes if removed or replaced. Paragraph 3 (optional, only when 'replace') — the migration shape: install + import swap + any API delta. Reference the project's actual current work where relevant.",
   "score": 0-100
 }`;
 

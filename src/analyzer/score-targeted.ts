@@ -95,6 +95,13 @@ Output JSON only:
   "whyUseful": "1 sentence: the single most valuable thing (plug point OR idea to lift)",
   "suggestedUse": "1 sentence: the concrete first action",
   "integrationApproach": "depend-on-it" | "cherry-pick" | "vendor" | "cleanroom-rebuild" | "n/a",
+  "effortBand": "quick" | "moderate" | "deep",
+    // quick    = under a day (single sitting, drop a dep, copy a file)
+    // moderate = 1-3 days (real API delta, multiple sites updated, light port)
+    // deep     = 1+ week (framework adoption, paradigm shift, large rewrite)
+    // Calibrated honestly. Drop-dead-dep is almost always "quick."
+    // cleanroom-rebuild of a substantial idea is almost always "deep."
+    // Most cherry-picks land "moderate."
   "risks": "1 sentence: licence / abandoned / single maintainer / etc.",
   "writeup": "the prose as described above"
 }`;
@@ -253,6 +260,12 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       console.log(`[score-targeted:cap] ${safety.meta.owner}/${safety.meta.name} → ${project.slug}: ${o.relevanceScore}→${capped.score} (${capped.demotions.join("; ")})`);
     }
 
+    const effortBand = (() => {
+      const v = String(o.effortBand ?? "").trim().toLowerCase();
+      if (v === "quick" || v === "moderate" || v === "deep") return v;
+      return null;
+    })();
+
     return {
       projectSlug: project.slug,
       relevance: capped.relevance,
@@ -263,6 +276,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       integrationApproach: approach,
       risks,
       writeup,
+      effortBand,
       matchedOutcome: attribution.outcome,
       matchedOutcomeSource: attribution.outcomeSource,
       matchedOutcomeConfidence: attribution.outcomeConfidence,

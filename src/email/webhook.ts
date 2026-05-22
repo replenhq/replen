@@ -2,12 +2,16 @@ import { db, schema } from "../db/client";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { resolveSafeWithPinnedDispatcher, validateWebhookUrl } from "../lib/url-guard";
 
-// Real-time alert for high-relevance matches in a just-finished run. POSTs
-// a JSON payload that Slack and Discord both accept (text + simple blocks /
-// embeds). `generic` mode posts a plain `{ runId, matches: [...] }` JSON.
+// Real-time alert for actionable matches (high OR medium) in a just-
+// finished run. POSTs a JSON payload that Slack and Discord both
+// accept (text + simple blocks / embeds). `generic` mode posts a plain
+// `{ runId, matches: [...] }` JSON.
 //
-// We deliberately only ping for `relevance=high`; anything weaker is digest
-// noise and would defeat the point of a real-time channel.
+// Fires on high+medium together because the calm-utility positioning
+// makes high a once-a-month event — a high-only filter would leave
+// the Slack/Discord channel silent for weeks. Medium = "should-fix-
+// this-quarter" is exactly the shape of thing the user wants pushed.
+// General-awareness stays off; that's purely dashboard browsing.
 export async function sendHighRelevanceWebhook(
   runId: number,
   userId: number,
@@ -20,7 +24,7 @@ export async function sendHighRelevanceWebhook(
     .where(and(
       eq(schema.matches.runId, runId),
       eq(schema.matches.userId, userId),
-      eq(schema.matches.relevance, "high"),
+      inArray(schema.matches.relevance, ["high", "medium"]),
     ))
     .orderBy(desc(schema.matches.relevanceScore))
     .limit(10);

@@ -220,6 +220,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   const quotaSlot = parseQuotaReason(latestRun?.pausedReason ?? null);
   const lastRunAt = latestRun?.finishedAt ?? null;
 
+  // Zero-state copy needs the user's configured cron hour so the
+  // "next pipeline runs at HH:00 UTC" line is honest. Settings already
+  // queried up-thread in the projects loop; we'll re-use that query
+  // result if it's in scope, else fetch.
+  const cronSettings = await db
+    .select({ cronHourUtc: schema.userSettings.cronHourUtc })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, user.id))
+    .get();
+  const cronHourUtc = cronSettings?.cronHourUtc ?? 6;
+
   // Audit chip seed: most recent run (in-flight wins over completed)
   // events so the chip surfaces on a fresh page load without waiting
   // for the first poll. Capped to the last 80 events — the streamer
@@ -429,7 +440,29 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
       />
       <p className="meta">{matches.length} matches shown · {orderedGroups.length} projects · window: last {days}d</p>
       {matches.length === 0 && (
-        <p>No matches in this window. Try widening the day filter, or click <b>Refresh</b> above to run the pipeline now.</p>
+        <div style={{
+          margin: "20px 0 24px",
+          padding: "24px 24px 22px",
+          border: "1px dashed var(--line, #ccc4)",
+          borderRadius: 10,
+          background: "var(--surface-1, transparent)",
+          color: "var(--dim, #888)",
+          fontSize: 14,
+          lineHeight: 1.6,
+        }}>
+          <div style={{ color: "var(--fg, #1a1a1a)", fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
+            Nothing new {lastRunAt ? "since the last pipeline run" : "yet"}.
+          </div>
+          <p style={{ margin: "0 0 8px" }}>
+            Replen is calm by design — the goal is <strong>1-3 useful matches per month</strong> you actually integrate, not a daily feed.
+            Most days there&rsquo;s genuinely nothing worth surfacing. {lastRunAt && (
+              <>The next scheduled pipeline runs at <strong>{String(cronHourUtc).padStart(2, "0")}:00 UTC</strong>.</>
+            )}
+          </p>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            Try widening the day filter above to <a href="/?days=30" style={{ color: "var(--amber, #ffc857)", textDecoration: "none" }}>last 30 days</a>, or click <b>Refresh</b> at the top to kick off a run now.
+          </p>
+        </div>
       )}
       {orderedGroups.map(([slug, list]) => {
         const project = list[0].projectId ? projectMap.get(list[0].projectId) : null;
@@ -582,6 +615,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
                       >
                         {integrationApproachLabel(m.integrationApproach)}
                       </a>
+                    )}
+                    {m.effortBand && (
+                      <span
+                        className="tag"
+                        title={effortBandTitle(m.effortBand)}
+                        style={{ ...effortBandStyle(m.effortBand) }}
+                      >
+                        {effortBandLabel(m.effortBand)}
+                      </span>
                     )}
                     <span className="meta">{repo.stars ?? 0}★ · {repo.primaryLanguage ?? "?"} · {repo.license ?? "no license"}</span>
                   </div>
@@ -746,6 +788,35 @@ function integrationApproachStyle(a: string | null): CSSProperties {
     case "cherry-pick": return { background: "#ddd6fe", color: "#5b21b6" };
     case "depend-on-it": return { background: "#d1fae5", color: "#065f46" };
     case "vendor": return { background: "#e0e7ff", color: "#3730a3" };
+    default: return {};
+  }
+}
+
+// Effort-band chip helpers. Pipeline v2 Sprint 4 — LLM-estimated how
+// long the first viable slice takes, so the user can pick what to act
+// on TODAY vs queue for later.
+function effortBandLabel(b: string | null): string {
+  switch (b) {
+    case "quick":    return "🟢 < 1 day";
+    case "moderate": return "🟡 1-3 days";
+    case "deep":     return "🔴 1+ week";
+    default: return "";
+  }
+}
+function effortBandTitle(b: string | null): string {
+  switch (b) {
+    case "quick":    return "Effort: under a day — single sitting, drop a dep, copy a file";
+    case "moderate": return "Effort: 1-3 days — real API delta, multi-site update, light port";
+    case "deep":     return "Effort: 1+ week — framework adoption, paradigm shift";
+    default: return "Effort not estimated";
+  }
+}
+function effortBandStyle(b: string | null): CSSProperties {
+  // Soft backgrounds, no link styling — purely informational.
+  switch (b) {
+    case "quick":    return { background: "rgba(34,197,94,0.10)", color: "var(--green, #1f8a4c)", borderColor: "rgba(34,197,94,0.30)" };
+    case "moderate": return { background: "rgba(234,179,8,0.10)", color: "var(--amber, #b58400)", borderColor: "rgba(234,179,8,0.30)" };
+    case "deep":     return { background: "rgba(239,68,68,0.10)", color: "#c0392b", borderColor: "rgba(239,68,68,0.30)" };
     default: return {};
   }
 }

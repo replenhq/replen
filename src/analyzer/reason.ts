@@ -18,6 +18,12 @@ export type ProjectAssessment = {
   integrationApproach: "cherry-pick" | "vendor" | "cleanroom-rebuild" | "depend-on-it" | "n/a";
   risks: string;
   writeup: string;
+  // Pipeline v2 Sprint 4: LLM-estimated effort band.
+  //   quick    = <1 day (drop a dep, copy a file, single sitting)
+  //   moderate = 1-3 days (real API delta, multi-site update, light port)
+  //   deep     = 1+ week (framework adoption, paradigm shift)
+  // null when not estimated (older rows / synthesis / structural prunes).
+  effortBand?: "quick" | "moderate" | "deep" | null;
 };
 
 export type ReasoningOutput = {
@@ -179,6 +185,12 @@ Also fill the structured fields:
     "cleanroom-rebuild" → take the IDEA, write your own (no code transferred)
     "n/a"               → nothing to integrate or rebuild
 - risks: 1 sentence - license issues, abandoned, single maintainer, weird hooks, recent star spike, anything to actually worry about
+- effortBand: honest estimate of how long the FIRST viable slice takes:
+    "quick"    = <1 day (drop a dep, copy a small file, single sitting)
+    "moderate" = 1-3 days (real API delta, multi-site update, light port)
+    "deep"     = 1+ week (framework adoption, paradigm shift, multi-team)
+  Calibrate per project. A 1-week port for a hobby project is "deep";
+  the same port for a team project might still be "moderate."
 
 Output JSON ONLY:
 {
@@ -187,6 +199,7 @@ Output JSON ONLY:
   "summary": "...",
   "whyUseful": "...",
   "suggestedUse": "...",
+  "effortBand": "quick" | "moderate" | "deep",
   "integrationApproach": "...",
   "risks": "...",
   "writeup": "<the prose scoping note as described above>"
@@ -320,6 +333,11 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
     if (capped.demotions.length > 0 && capped.score !== Number(o.relevanceScore ?? 0)) {
       console.log(`[reason:cap] ${safety.meta.owner}/${safety.meta.name} → ${project?.slug ?? "_general"}: ${o.relevanceScore}→${capped.score} (${capped.demotions.join("; ")})`);
     }
+    const effortBand = (() => {
+      const v = String(o.effortBand ?? "").trim().toLowerCase();
+      if (v === "quick" || v === "moderate" || v === "deep") return v;
+      return null;
+    })();
     return {
       projectSlug: project?.slug ?? "_general",
       relevance: capped.relevance,
@@ -330,6 +348,7 @@ ${sanitizeUntrusted(safety.readmeMd.slice(0, 15000), "REPO_README")}`;
       integrationApproach: approach,
       risks,
       writeup,
+      effortBand,
     };
   } catch {
     return null;

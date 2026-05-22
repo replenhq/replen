@@ -49,6 +49,19 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
     return false;
   }
 
+  // Calm-utility cadence: only send when there's at least one high or
+  // medium match. General-awareness alone isn't worth interrupting the
+  // user's inbox — those still surface on the dashboard but the email
+  // is reserved for "act on this." Matches the 1-3-useful-things-per-
+  // month positioning rather than a daily-digest cadence.
+  const actionableCount = matchesForRun.filter(
+    (m) => m.relevance === "high" || m.relevance === "medium",
+  ).length;
+  if (actionableCount === 0) {
+    console.log(`[email] user=${userId} ${matchesForRun.length} matches but none high/medium; skipping (calm cadence)`);
+    return false;
+  }
+
   const repoIds = [...new Set(matchesForRun.map((m) => m.repoId))];
   const repoMap = new Map<number, Repo>();
   if (repoIds.length > 0) {
@@ -76,12 +89,21 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
 
   const html = renderHtml(matchesForRun, repoMap, projectMap, bookmarkDateById);
   const text = renderText(matchesForRun, repoMap, projectMap);
-  const today = new Date().toISOString().slice(0, 10);
+
+  // Value-led subject line. The user is going to make a single yes/no
+  // decision on whether to open this email — that decision should be
+  // about the substance of the top match, not a date stamp. Shape:
+  //   1 match: "Replace fluent-ffmpeg in tech-news-site (medium)"
+  //   2+:      "Drop fluent-ffmpeg in tech-news-site + 2 more (high)"
+  // Old subject "Replen digest - 2026-05-22 - 27 matches" tested as
+  // pure noise — date is in the email client's own metadata, the count
+  // sounds like spam.
+  const subject = buildSubject(matchesForRun, repoMap, projectMap);
 
   const r = await provider.send({
     from: `"${fromName}" <${fromAddr}>`,
     to,
-    subject: `Replen digest - ${today} - ${matchesForRun.length} matches`,
+    subject,
     html,
     text,
   });
@@ -94,6 +116,42 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
 
 function writeupBody(m: Match): string {
   return (m.writeupMd ?? "").split("\n\n- - -\n")[0]?.trim() || m.summary || "";
+}
+
+/** Compose the email subject from the highest-scored actionable match.
+ *  Skips general-awareness when picking the top; if the run is entirely
+ *  general-awareness this caller is already short-circuited upstream.
+ */
+function buildSubject(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>): string {
+  const actionable = matches.filter((m) => m.relevance === "high" || m.relevance === "medium");
+  // Pick the top by score; ties broken by relevance (high > medium).
+  const top = [...actionable].sort((a, b) => {
+    if (a.relevance !== b.relevance) return a.relevance === "high" ? -1 : 1;
+    return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
+  })[0];
+  if (!top) return "Replen — new matches"; // belt + braces; shouldn't hit
+  const repo = repos.get(top.repoId);
+  const projSlug = top.projectId ? projects.get(top.projectId)?.slug ?? null : null;
+  const inProject = projSlug ? ` in ${projSlug}` : "";
+  const more = actionable.length - 1;
+  const moreSuffix = more > 0 ? ` + ${more} more` : "";
+  const tierSuffix = ` (${top.relevance})`;
+
+  // Prune actions get a verb-led headline: "Drop X" or "Replace X with Y."
+  // Stronger signal than the repo name for prune matches because the
+  // user thinks in terms of "what should I remove" not "what new repo."
+  if (top.discoveryMode === "prune" && top.prunedDepName) {
+    const dep = top.prunedDepName;
+    if (top.prunedDepAction === "replace" && top.prunedDepReplacement) {
+      return `Replace ${dep} with ${top.prunedDepReplacement}${inProject}${moreSuffix}${tierSuffix}`;
+    }
+    if (top.prunedDepAction === "drop") {
+      return `Drop ${dep}${inProject}${moreSuffix}${tierSuffix}`;
+    }
+  }
+  // Non-prune: repo name + project + tier.
+  const repoLabel = repo ? `${repo.owner}/${repo.name}` : "new match";
+  return `${repoLabel}${inProject}${moreSuffix}${tierSuffix}`;
 }
 
 function relevanceColor(rel: string): { bg: string; fg: string } {

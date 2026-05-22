@@ -1,0 +1,14 @@
+-- Pipeline v2 / Sprint 4 final piece: per-match effort estimate.
+--
+-- Score-band + approach tell the user "is this worth it?" but not
+-- "how much work is it?" A medium-65 cherry-pick could be a 30-minute
+-- copy-paste or a multi-week port. Surface the estimate so the user
+-- can pick what to act on TODAY vs queue for later.
+--
+-- Three bands, LLM-estimated at scoring time:
+--   quick    : less than a day (single sitting / copy-paste / drop a dep)
+--   moderate : 1-3 days (real but bounded — API delta, multi-site update)
+--   deep     : 1+ week (framework adoption, paradigm shift, multi-team)
+--   null     : not estimated (older rows pre-migration / synthesis rows /
+--              prune drops where the effort is implicit)
+ALTER TABLE `matches` ADD `effort_band` text;
