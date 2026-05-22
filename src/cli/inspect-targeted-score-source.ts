@@ -69,6 +69,7 @@ async function loadProjectFromPath(
     readmeMd: readme,
     claudeMd,
     techSummary: tech,
+    shape: null,
     profileHash: "inspector",
     active: true,
     included: true,

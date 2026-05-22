@@ -19,7 +19,7 @@ import { scanRepo } from "../scanner/safety";
 import { scoreTargetedCandidate } from "../analyzer/score-targeted";
 import { resolveUserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
-import type { LocalProject } from "../projects/loader";
+import { parseShapeJson, type LocalProject } from "../projects/loader";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -57,6 +57,7 @@ async function main() {
     readmeMd: projectRow.readmeMd,
     claudeMd: projectRow.claudeMd,
     techSummary: projectRow.techSummary,
+    shape: parseShapeJson(projectRow.shapeJson),
     profileHash: projectRow.profileHash,
     active: !!projectRow.active,
     included: !!projectRow.included,

@@ -8,7 +8,7 @@ import { scoreWithSourceVerification } from "./source-context";
 import { scoreBookmarkAgainstProject } from "./resurface";
 import { readRunOrEnv } from "./run-context";
 import type { ProjectSummary } from "../projects/summarize";
-import { type LocalProject } from "../projects/loader";
+import { parseShapeJson, type LocalProject } from "../projects/loader";
 import type { ProjectActivitySummary } from "../projects/activity-summary";
 import { shouldSkip as shouldSkipBigCo } from "../fetchers/big-co";
 import { getSourceQualityWeights, parseTrendingMembership, sourceKind as sourceKindOf, sourceRank } from "../lib/source-rank";
@@ -75,6 +75,7 @@ async function runAnalysisInner(runId: number, userId: number) {
     readmeMd: p.readmeMd,
     claudeMd: p.claudeMd,
     techSummary: p.techSummary,
+    shape: parseShapeJson(p.shapeJson),
     profileHash: p.profileHash,
     active: !!p.active,
     included: !!p.included,
@@ -851,6 +852,7 @@ async function runResurfacePass(
       readmeMd: project.readmeMd,
       claudeMd: project.claudeMd,
       techSummary: project.techSummary,
+      shape: parseShapeJson(project.shapeJson),
       profileHash: project.profileHash,
       active: !!project.active,
       included: !!project.included,

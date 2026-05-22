@@ -16,7 +16,7 @@ import { db, schema } from "../db/client";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { reasonAboutRepo, renderWriteup, type ProjectAssessment } from "../analyzer/reason";
 import { resolveUserConfig } from "./user-config";
-import type { LocalProject } from "../projects/loader";
+import { parseShapeJson, type LocalProject } from "../projects/loader";
 import type { SafetyReport } from "../scanner/safety";
 import { withRunConfig } from "../analyzer/run-context";
 import { errorMsg } from "../lib/error-msg";
@@ -108,6 +108,7 @@ async function reprocessForUserInner(userId: number, opts: ReprocessOpts): Promi
       readmeMd: p.readmeMd,
       claudeMd: p.claudeMd,
       techSummary: p.techSummary,
+      shape: parseShapeJson(p.shapeJson),
       profileHash: p.profileHash,
       active: !!p.active,
       included: !!p.included,

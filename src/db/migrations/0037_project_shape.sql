@@ -1,0 +1,21 @@
+-- Sprint 5: Loader expansion — give the hosted scorer the same project
+-- shape Claude Code sees locally. Currently summarize.ts gets only
+-- readmeMd + claudeMd + techSummary; we add:
+--
+--   1. fileTree — sorted list of repo paths (denylist-filtered). The
+--      killer existence-pruning signal: a scorer that sees
+--      lib/social/imageRenderer.ts in the tree can reject "social card
+--      generator" candidates as duplicating existing code.
+--
+--   2. structured — concatenated content of non-markdown signal files
+--      that paint architecture without bloating the markdown blob:
+--      prisma/schema.prisma, db/schema.*, migrations/*.sql (last 5),
+--      *.mmd (Mermaid), *.puml (PlantUML), *.drawio.svg, tsconfig.json,
+--      next.config.*, vite.config.*, Dockerfile, fly.toml, vercel.json,
+--      apphosting.yaml. Per-file 10KB cap; total ~60KB per project.
+--
+-- Stored as a single JSON blob so future signals (exports index, import
+-- graph, etc.) extend the shape without further migrations. NULL on
+-- existing rows is treated as "no shape captured yet" — loader fills it
+-- on the next run.
+ALTER TABLE `project_profiles` ADD `shape_json` text;

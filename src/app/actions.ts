@@ -11,6 +11,7 @@ import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } fr
 import { startPipelineForUser } from "@/scheduler/run-once";
 import { proposeDocsImprovement } from "@/projects/self-improvement";
 import { generateProjectSummary, PROMPT_VERSION } from "@/projects/summarize";
+import { parseShapeJson } from "@/projects/loader";
 import { resolveUserConfig } from "@/scheduler/user-config";
 import { withRunConfig } from "@/analyzer/run-context";
 
@@ -364,6 +365,7 @@ export async function recomputeProjectSummary(projectId: number): Promise<{ ok: 
         readmeMd: project.readmeMd,
         claudeMd: project.claudeMd,
         techSummary: project.techSummary,
+        shape: parseShapeJson(project.shapeJson),
       }),
   );
   if (!summary) {

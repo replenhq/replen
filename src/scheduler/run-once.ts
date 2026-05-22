@@ -2,7 +2,7 @@ import { db, schema } from "../db/client";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { runFetchers } from "../fetchers";
 import { runAnalysis } from "../analyzer/pipeline";
-import { discoverProjectsForUser, upsertProjects } from "../projects/loader";
+import { discoverProjectsForUser, parseShapeJson, upsertProjects } from "../projects/loader";
 import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
@@ -409,6 +409,7 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
           readmeMd: p.readmeMd,
           claudeMd: p.claudeMd,
           techSummary: p.techSummary,
+          shape: parseShapeJson(p.shapeJson),
         });
         if (!summary) continue; // project has no docs at all — skip silently
         await db

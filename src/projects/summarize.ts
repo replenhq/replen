@@ -7,7 +7,12 @@ import { chatCompletion, triageModel } from "../analyzer/llm";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing summaries — they re-generate on next pipeline run.
-export const PROMPT_VERSION = "1";
+//
+// "2" (Sprint 5): prompt now consumes ProjectShape (file tree + structured
+// non-markdown signal files: schemas, configs, diagrams) alongside
+// readme/claude/techSummary. Old "1" summaries are grounded only in
+// markdown and will mis-rank.
+export const PROMPT_VERSION = "2";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -81,12 +86,23 @@ export type SummarizeInput = {
   readmeMd: string | null;
   claudeMd: string | null;
   techSummary: string | null;
+  // Sprint 5: structured project shape (file tree + non-markdown signal
+  // files). Null on legacy rows / projects with no shape data yet.
+  shape: import("./loader").ProjectShape | null;
 };
 
 // Per-file char cap. The LLM only needs the top of each doc to grasp purpose
 // and goals; the rest is implementation detail that we don't want to pay for.
 const PER_FILE_CHARS = 8000;
-const TOTAL_INPUT_CHARS = 24000;
+// Total bumped for Sprint 5: shape (fileTree + structured) adds genuine
+// signal the markdown alone misses, so we widen the budget to fit it.
+const TOTAL_INPUT_CHARS = 48000;
+// File tree is sent as a compact path list. Cap on count so a huge repo
+// doesn't dominate. Each path is ~40 chars avg → 250 paths ≈ 10KB.
+const FILE_TREE_CAP = 250;
+// Structured (configs/schemas/diagrams) cap inside the prompt. The loader
+// already caps the stored blob at 60KB; this is the prompt slice.
+const STRUCTURED_PROMPT_CHARS = 24_000;
 
 const SYSTEM_PROMPT = `You extract a structured summary of a software project so that another
 system (replen) can later find tools and libraries that would improve the
@@ -112,6 +128,14 @@ Rules:
   sidecar process.
 - If the docs are sparse, the summary should be sparse. Don't pad. Don't
   invent capabilities or outcomes that aren't grounded in the input.
+- The "Repo file tree" + "Structured signal files" sections (when present)
+  are GROUND TRUTH about the project's actual shape. Trust them over the
+  prose docs when they conflict — a docs description of "we use Postgres"
+  with no schema file is weaker evidence than a tree showing
+  prisma/schema.prisma with explicit models. Mention specific filenames /
+  directories in currentTech where they tell the matching system something
+  precise (e.g. currentTech.images: "branded social cards rendered in
+  lib/social/imageRenderer.ts").
 
 Output JSON only. No prose before or after. Schema:
 {
@@ -138,9 +162,23 @@ function buildUserPrompt(input: SummarizeInput): string {
   if (claudeMd) parts.push(`\n--- CLAUDE.md ---\n${claudeMd}`);
   if (readmeMd) parts.push(`\n--- README.md ---\n${readmeMd}`);
   if (techSummary) parts.push(`\n--- techSummary (manifest digest) ---\n${techSummary}`);
+  // Sprint 5: project shape — file tree + structured non-markdown signals.
+  // Trim the file tree to FILE_TREE_CAP entries by stride sampling so we
+  // keep diversity across the repo rather than just the alphabetic head.
+  if (input.shape) {
+    const { fileTree, structured } = input.shape;
+    if (fileTree.length > 0) {
+      const stride = Math.max(1, Math.ceil(fileTree.length / FILE_TREE_CAP));
+      const sampled = stride === 1 ? fileTree : fileTree.filter((_, i) => i % stride === 0);
+      parts.push(`\n--- Repo file tree (${fileTree.length} files; showing ${sampled.length}) ---\n${sampled.join("\n")}`);
+    }
+    if (structured.length > 0) {
+      const trimmed = structured.slice(0, STRUCTURED_PROMPT_CHARS);
+      parts.push(`\n--- Structured signal files (schemas, configs, diagrams) ---\n${trimmed}`);
+    }
+  }
   const joined = parts.join("\n");
-  // Hard cap on total input size so we don't blow the LLM context window on
-  // a project with a giant CLAUDE.md.
+  // Hard cap on total input size so we don't blow the LLM context window.
   return joined.length > TOTAL_INPUT_CHARS ? joined.slice(0, TOTAL_INPUT_CHARS) : joined;
 }
 

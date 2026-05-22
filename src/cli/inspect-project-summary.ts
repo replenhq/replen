@@ -12,6 +12,7 @@
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
 import { generateProjectSummary, needsRegeneration, PROMPT_VERSION } from "../projects/summarize";
+import { parseShapeJson } from "../projects/loader";
 import { resolveUserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
 
@@ -72,6 +73,7 @@ async function main() {
         readmeMd: project.readmeMd,
         claudeMd: project.claudeMd,
         techSummary: project.techSummary,
+        shape: parseShapeJson(project.shapeJson),
       }),
   );
 

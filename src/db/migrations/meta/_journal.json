@@ -260,6 +260,13 @@
       "when": 1779735600000,
       "tag": "0036_user_last_mcp_check",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1779739200000,
+      "tag": "0037_project_shape",
+      "breakpoints": true
     }
   ]
 }

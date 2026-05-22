@@ -237,6 +237,17 @@ export const projectProfiles = sqliteTable(
     readmeMd: text("readme_md"),
     claudeMd: text("claude_md"),
     techSummary: text("tech_summary"),
+    // Sprint 5 loader expansion: structured project-shape blob captured at
+    // loader time. JSON object: { fileTree: string[], structured: string }.
+    // - fileTree: sorted repo paths (denylist-filtered, lockfiles + build
+    //   artefacts excluded). Lets the scorer existence-prune candidates that
+    //   duplicate code the user already has.
+    // - structured: concatenated non-markdown signal files (prisma schema,
+    //   migrations, Mermaid/PlantUML diagrams, runtime configs). Captures
+    //   architecture detail the markdown blob misses.
+    // NULL on existing rows = loader hasn't refreshed yet; treated as
+    // "no shape data" by summarize.ts. Repopulated next loader pass.
+    shapeJson: text("shape_json"),
     // Comma-separated GitHub-topic-style keywords derived once from the
     // profile docs (e.g. "computer-vision,object-detection,supervision-lib").
     // Used by the gh-search fetcher to surface niche-relevant repos beyond

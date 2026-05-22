@@ -12,6 +12,20 @@ export type DiscoverOpts = {
   extraDocCharLimit?: number; // max chars per file (default 20000)
 };
 
+export type ProjectShape = {
+  // Sorted, denylist-filtered repo paths. Cap ~500 entries. The killer
+  // existence-pruning signal: a scorer that sees lib/social/imageRenderer.ts
+  // in this list can reject "social card generator" candidates as duplicating
+  // existing code, without needing to read the file's contents.
+  fileTree: string[];
+  // Concatenated non-markdown signal files: prisma schema, db migrations,
+  // Mermaid / PlantUML diagrams, runtime configs (next.config, tsconfig,
+  // Dockerfile, fly.toml, etc.). Already formatted with file-name
+  // delimiters, same shape as the existing claudeMd/readmeMd blobs. Per-
+  // file 10KB cap; total ~60KB.
+  structured: string;
+};
+
 export type LocalProject = {
   slug: string;
   path: string;
@@ -19,6 +33,10 @@ export type LocalProject = {
   readmeMd: string | null;
   claudeMd: string | null;
   techSummary: string | null;
+  // Sprint 5: structured project shape (file tree + non-markdown signal
+  // files). See ProjectShape above. NULL when the repo has nothing of
+  // shape — e.g. README-only projects.
+  shape: ProjectShape | null;
   profileHash: string;
   active: boolean;
   included?: boolean;
@@ -111,6 +129,228 @@ const DEFAULT_AUX_PATTERNS = [
   ".specify/memory/*.md",
 ];
 
+// Sprint 5: file-tree denylist for the project-shape build. Goes beyond
+// the existing DOC_DENY_LIST (markdown-only) — these are dirs/files that
+// add noise to the tree without telling the scorer anything useful, or that
+// contain secrets we must never ship to the LLM.
+//
+// Path-prefix matches: any path starting with one of these is dropped.
+const SHAPE_PATH_DENY_PREFIXES = [
+  "node_modules/",
+  ".next/",
+  "dist/",
+  "build/",
+  "out/",
+  "target/",
+  "coverage/",
+  ".pytest_cache/",
+  "__pycache__/",
+  ".venv/",
+  "venv/",
+  ".idea/",
+  ".vscode/",
+  ".git/",
+  ".cache/",
+  ".turbo/",
+  ".parcel-cache/",
+  // Build artefacts that occasionally end up tree-tracked
+  "artifacts-zk/",
+  "cache-zk/",
+];
+// Suffix matches (full-path basename matches): lockfiles + generated bundles
+// + binary blobs that consume tree budget without adding signal.
+const SHAPE_PATH_DENY_SUFFIXES = [
+  "/.DS_Store", ".DS_Store",
+  "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+  "Cargo.lock", "Pipfile.lock", "poetry.lock", "uv.lock",
+  ".map", ".min.js", ".min.css", ".bundle.js",
+];
+// Security deny: must NEVER leak to the LLM. Substring match on the path.
+// Goes beyond .env to catch env.local, env.production, etc. and any file
+// claiming to hold credentials/keys/secrets.
+const SHAPE_SECURITY_DENY = [
+  ".env",
+  ".pem", ".key", ".p12", ".pfx", ".asc",
+  "credentials", "secrets/",
+  "id_rsa", "id_ed25519",
+];
+
+// Non-markdown signal files we explicitly fetch the contents of for the
+// `structured` shape blob. Ordered by likely-utility: schema/migrations
+// first (they describe the domain model), then arch diagrams, then runtime
+// configs. The loader walks blobs once, matches against this list, and
+// concatenates with per-file 10KB caps + a global ~60KB cap.
+//
+// Exact-name files (top-level only):
+const SHAPE_EXACT_NAMES = [
+  // Runtime / build configs
+  "tsconfig.json", "next.config.js", "next.config.mjs", "next.config.ts",
+  "vite.config.js", "vite.config.ts", "vite.config.mjs",
+  "Dockerfile", "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+  "fly.toml", "vercel.json", "netlify.toml", "apphosting.yaml", "render.yaml",
+  "wrangler.toml", "wrangler.jsonc",
+  "tailwind.config.js", "tailwind.config.ts", "postcss.config.js",
+  "drizzle.config.ts", "drizzle.config.js",
+  // Lint / type
+  "eslint.config.js", "eslint.config.mjs",
+  // Env example (sample only — real .env is in security deny)
+  ".env.example", ".env.sample",
+  // Python build
+  "pyproject.toml",
+  // Hardhat (zksync etc)
+  "hardhat.config.js", "hardhat.config.ts", "hardhat.config.cjs",
+  "foundry.toml",
+];
+// Glob patterns for shape contents. Match any path (not just root). Same
+// glob → regex translator as the markdown loader.
+const SHAPE_GLOB_PATTERNS = [
+  // Database schema definitions
+  "prisma/schema.prisma",
+  "**/schema.prisma",
+  "db/schema.ts", "db/schema.js",
+  "src/db/schema.ts", "src/db/schema.js",
+  // SQL migrations: top 5 by sorted-path order (usually = newest)
+  "migrations/*.sql",
+  "db/migrations/*.sql",
+  "prisma/migrations/**/migration.sql",
+  // Architecture diagrams (non-markdown)
+  "**/*.mmd",          // Mermaid
+  "**/*.puml",         // PlantUML
+  "**/*.plantuml",
+  "**/*.dot",          // Graphviz
+  "**/*.d2",           // D2
+  "docs/**/*.drawio.svg",
+  "docs/**/*.drawio",
+  // Infrastructure-as-code: signal for "what runs where"
+  "**/*.tf",           // Terraform (sample, not full)
+  "k8s/**/*.yaml",
+  "kubernetes/**/*.yaml",
+  ".github/workflows/*.yml",
+  ".github/workflows/*.yaml",
+];
+// Per-file char cap inside the structured blob. Most config files are small;
+// the cap protects against an enormous tsconfig with hundreds of paths.
+const SHAPE_PER_FILE_CHARS = 10_000;
+// Global cap for the structured blob (sum of per-file content + headers).
+// Protects the project_profiles row size + the summarize.ts token budget.
+const SHAPE_STRUCTURED_TOTAL_CAP = 60_000;
+// Cap on fileTree entries. A repo with 5000 files would otherwise blow the
+// project_profiles row size. The denylist filters most build-generated noise
+// out; a 500-cap on what remains is plenty for grounding "does X exist?".
+const SHAPE_FILETREE_CAP = 500;
+
+// Safe-parse a projectProfiles.shape_json row value into a ProjectShape.
+// Defensive: malformed JSON / wrong shape returns null so downstream code
+// degrades gracefully (treats project as "no shape").
+export function parseShapeJson(raw: string | null | undefined): ProjectShape | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as Partial<ProjectShape>;
+    const fileTree = Array.isArray(o?.fileTree)
+      ? o.fileTree.filter((s): s is string => typeof s === "string")
+      : [];
+    const structured = typeof o?.structured === "string" ? o.structured : "";
+    if (fileTree.length === 0 && structured.length === 0) return null;
+    return { fileTree, structured };
+  } catch {
+    return null;
+  }
+}
+
+function isPathDenied(path: string): boolean {
+  // Security checks first — these are absolute deny.
+  for (const sec of SHAPE_SECURITY_DENY) {
+    if (path.includes(sec)) return true;
+  }
+  for (const prefix of SHAPE_PATH_DENY_PREFIXES) {
+    if (path === prefix.slice(0, -1) || path.startsWith(prefix)) return true;
+    if (path.includes("/" + prefix)) return true; // nested e.g. apps/foo/node_modules/...
+  }
+  for (const suffix of SHAPE_PATH_DENY_SUFFIXES) {
+    if (path.endsWith(suffix)) return true;
+  }
+  return false;
+}
+
+// Build the project shape blob: file tree + concatenated structured signal
+// files. Walks the same `blobs` we already have from fetchTree; only the
+// structured fetch adds API calls (one per matched signal file, capped).
+async function buildProjectShape(
+  owner: string,
+  repoName: string,
+  ref: string,
+  blobs: TreeEntry[],
+  token: string,
+): Promise<ProjectShape | null> {
+  // Build the file tree first — no API calls, pure local filter.
+  const allowedPaths: string[] = [];
+  for (const b of blobs) {
+    if (b.type !== "blob") continue;
+    if (isPathDenied(b.path)) continue;
+    allowedPaths.push(b.path);
+  }
+  allowedPaths.sort();
+  const fileTree = allowedPaths.slice(0, SHAPE_FILETREE_CAP);
+
+  // Build the structured content blob. Match against SHAPE_EXACT_NAMES
+  // (top-level basename) + SHAPE_GLOB_PATTERNS.
+  const exactSet = new Set(SHAPE_EXACT_NAMES);
+  const globRegexes = SHAPE_GLOB_PATTERNS.map(globToRegex);
+  // Track migration-pattern matches separately so we can keep only the
+  // most-recent ~5 (alphabetical = chronological for typical naming).
+  const migrationMatches: string[] = [];
+  const otherMatches: string[] = [];
+  for (const b of blobs) {
+    if (b.type !== "blob") continue;
+    if (isPathDenied(b.path)) continue;
+    // Top-level exact match
+    if (!b.path.includes("/") && exactSet.has(b.path)) {
+      otherMatches.push(b.path);
+      continue;
+    }
+    // Glob match
+    for (const rx of globRegexes) {
+      if (rx.test(b.path)) {
+        if (b.path.includes("migrations/") || b.path.includes("migration.sql")) {
+          migrationMatches.push(b.path);
+        } else {
+          otherMatches.push(b.path);
+        }
+        break;
+      }
+    }
+  }
+  // Keep only the 5 most-recent migrations (last 5 alphabetically).
+  migrationMatches.sort();
+  const migrationsToFetch = migrationMatches.slice(-5);
+  const toFetch = [...otherMatches, ...migrationsToFetch];
+  // Dedup (some files match both exact + glob).
+  const uniq = Array.from(new Set(toFetch));
+
+  const parts: string[] = [];
+  let total = 0;
+  for (const path of uniq) {
+    if (total >= SHAPE_STRUCTURED_TOTAL_CAP) break;
+    try {
+      const content = await fetchFile(owner, repoName, path, token, ref);
+      if (!content) continue;
+      const trimmed = content.slice(0, SHAPE_PER_FILE_CHARS);
+      const block = `# === file: ${path} ===\n${trimmed}`;
+      // Don't push if adding it would explode past the cap by >50%.
+      if (total + block.length > SHAPE_STRUCTURED_TOTAL_CAP * 1.5) break;
+      parts.push(block);
+      total += block.length;
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      // Other failures: skip the file, keep going.
+    }
+  }
+  const structured = parts.join("\n\n");
+
+  if (fileTree.length === 0 && structured.length === 0) return null;
+  return { fileTree, structured };
+}
+
 // GitHub-pull version: iterates the user's existing project_profiles
 // rows and fetches docs/manifests via the GitHub API instead of the
 // local filesystem mirror. Same DOC_NAMES / CLAUDE_NAMES / glob set,
@@ -188,11 +428,24 @@ export async function discoverProjectsForUser(
       : [];
     const claudeMd = mergeExtraIntoClaudeMd(claudeMdRaw, extraDocs);
     const techSummary = await buildTechSummaryFromTree(owner, repoName, head.headSha, blobs, blobPaths, token);
+    // Sprint 5: structured shape (file tree + non-markdown signal files).
+    // Same blob walk as above; no extra tree call.
+    let shape: ProjectShape | null = null;
+    try {
+      shape = await buildProjectShape(owner, repoName, head.headSha, blobs, token);
+    } catch (e) {
+      if (e instanceof GitHubApiError && (e.status === 403 || e.status === 429)) throw e;
+      console.warn(`[loader] shape ${row.githubFullName} failed:`, (e as Error).message);
+      // Non-fatal: project still loads with markdown blobs; shape stays null.
+    }
 
     const hasManifest = MANIFEST_NAMES.some((n) => blobPaths.has(n));
-    if (!docMd && !claudeMd && !hasManifest) continue;
+    if (!docMd && !claudeMd && !hasManifest && !shape) continue;
 
-    const profile = `${docMd ?? ""}\n---\n${claudeMd ?? ""}\n---\n${techSummary ?? ""}`;
+    // Profile hash includes shape so a config/schema change re-triggers the
+    // downstream summarize + search-vectors caches.
+    const shapeForHash = shape ? `${shape.fileTree.join("\n")}\n${shape.structured}` : "";
+    const profile = `${docMd ?? ""}\n---\n${claudeMd ?? ""}\n---\n${techSummary ?? ""}\n---\n${shapeForHash}`;
     const profileHash = createHash("sha1").update(profile).digest("hex");
     out.push({
       slug: row.slug,
@@ -205,6 +458,7 @@ export async function discoverProjectsForUser(
       readmeMd: docMd,
       claudeMd,
       techSummary,
+      shape,
       profileHash,
       active: docMd !== null || claudeMd !== null || techSummary !== null,
     });
@@ -369,6 +623,7 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
             readmeMd: p.readmeMd,
             claudeMd: p.claudeMd,
             techSummary: p.techSummary,
+            shapeJson: p.shape ? JSON.stringify(p.shape) : null,
             profileHash: p.profileHash,
             active: p.active,
             ...(hashChanged ? { searchKeywords: null } : {}),
@@ -387,6 +642,7 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
         readmeMd: p.readmeMd,
         claudeMd: p.claudeMd,
         techSummary: p.techSummary,
+        shapeJson: p.shape ? JSON.stringify(p.shape) : null,
         profileHash: p.profileHash,
         active: p.active,
         included: true,
