@@ -267,6 +267,13 @@
       "when": 1779739200000,
       "tag": "0037_project_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1779742800000,
+      "tag": "0038_skill_mode_data_model",
+      "breakpoints": true
     }
   ]
 }

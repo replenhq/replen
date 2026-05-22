@@ -112,6 +112,15 @@ export const userSettings = sqliteTable(
     // of a hardcoded list - most content creators are just repackaging
     // gh-trending, so widening that lens is high-leverage.
     detectedLanguages: text("detected_languages"),
+    // Skill-mode pivot: which pre-filter the inventory endpoint applies.
+    // 'zero-knowledge' = full firehose, 'tags' = project-tag intersection
+    // (default), 'fingerprint' = LSH-style similarity on a project shape
+    // hash (opt-in). User-settable in /settings.
+    filterMode: text("filter_mode").notNull().default("tags"),
+    // 'skill' (in-CLI, subscription tokens, default) | 'hosted' (legacy
+    // hosted pipeline with BYO API keys, for non-CLI users). Determines
+    // which code path the pipeline runs for a given user.
+    subscriptionTier: text("subscription_tier").notNull().default("skill"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({
@@ -297,11 +306,57 @@ export const projectProfiles = sqliteTable(
     // GitHub "owner/name" of this project's own repo. Used by the
     // "create handoff PR" feature to know where to commit. Optional.
     githubFullName: text("github_full_name"),
+    // Skill-mode filter B: user-curated tag list for the inventory
+    // pre-filter. JSON array of strings (e.g. ["typescript", "next.js",
+    // "news", "social-syndication"]). Auto-suggested at project-onboard
+    // time from the project shape; user-editable in /settings.
+    tags: text("tags"),
+    // Skill-mode filter C (opt-in): opaque hash of the project shape
+    // (file-tree fingerprint + dep set MinHash) used for similarity-
+    // based pre-filtering. Computed locally by the CLI and pushed once.
+    // The source is never sent — only the hash.
+    fingerprintHash: text("fingerprint_hash"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({
     uniqSlug: uniqueIndex("uniq_profile_user_slug").on(t.userId, t.slug),
     idxUser: index("idx_profile_user").on(t.userId),
+  })
+);
+
+// Skill-mode per-(user, repo, project) lifecycle state. Replaces what
+// the legacy `matches` table tracks for hosted-tier users. In skill
+// mode the agent produces writeups in-session and they NEVER persist
+// server-side (privacy property — no user code or generated text
+// leaves the user's machine). We only track outcomes here: that a repo
+// was surfaced, that the user starred/hid it, that a handoff PR was
+// opened. Same repo can appear in two project contexts with
+// independent state.
+export const userMatchState = sqliteTable(
+  "user_match_state",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull().references(() => repos.id, { onDelete: "cascade" }),
+    // Nullable: a repo can be surfaced in a "global" (no specific
+    // project) context too. setNull on project delete so the row
+    // outlives a removed project.
+    projectId: integer("project_id").references(() => projectProfiles.id, { onDelete: "set null" }),
+    // 'surfaced' (the inventory served it; default initial state),
+    // 'starred' (user explicitly bookmarked), 'hidden' (user
+    // dismissed; never resurface), 'handed_off' (handoff PR opened
+    // against this repo). Lifecycle is monotonic except hidden which
+    // can be cleared by user action in /settings.
+    status: text("status").notNull(),
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+    actionAt: integer("action_at", { mode: "timestamp" }),
+    handoffPrUrl: text("handoff_pr_url"),
+    userNote: text("user_note"),
+  },
+  (t) => ({
+    uniqUserRepoProject: uniqueIndex("uniq_user_match_state_repo_project").on(t.userId, t.repoId, t.projectId),
+    idxUserStatus: index("idx_user_match_state_user_status").on(t.userId, t.status),
+    idxUserSurfaced: index("idx_user_match_state_surfaced").on(t.userId, t.surfacedAt),
   })
 );
 

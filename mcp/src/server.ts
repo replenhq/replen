@@ -51,23 +51,99 @@ const TOOLS: Tool[] = [
       const lines = [
         "Replen MCP — available tools:",
         "",
-        "  replen_check_new  Session-start check: is there anything new + actionable since the user last engaged? Cheap, terse, silent when nothing's new.",
-        "  replen_today      List matches from the last N days (default 2). Filter by relevance / project.",
-        "  replen_search     Full-text search across all your prior matches.",
-        "  replen_starred    Starred matches with handoff-PR status (awaiting / open-pr / merged).",
-        "  replen_analyze    Pull raw README + repo meta + your project profiles for one repo.",
-        "  replen_handoff    Open a handoff PR in the matched project's own repo (requires matchId).",
-        "  replen_feedback   Record good / bad / clear / star / unstar / hide on a match.",
-        "  replen_run        Trigger a fresh pipeline run. Rate-limited (1 per 60s).",
-        "  replen_status     Live progress of the current/most-recent run + event tail.",
+        "  Skill-mode (current — in-session matching with subscription tokens):",
+        "    replen_match     Pulls today's candidate inventory scoped to the cwd repo so YOU triage each one against the local codebase. Returns candidates + metadata. You produce the writeups; no API key used.",
+        "    replen_state     Record a user action (starred / hidden / handed_off / surfaced) on a candidate.",
+        "    replen_check_new Session-start check: is there anything new + actionable? Cheap, terse, silent when nothing's new.",
         "",
-        "Common flows:",
-        "  • Morning triage:    'use replen to triage today'  (or /replen-triage)",
-        "  • Fresh refresh:     replen_run, then poll replen_status until done, then replen_today",
-        "  • Quick brief:       replen_analyze({ owner, name })",
-        "  • Open handoff PR:   replen_handoff({ matchId })",
+        "  Legacy hosted-tier (still works for users in subscription_tier='hosted'; in skill-mode these return empty/stale data):",
+        "    replen_today     LLM-scored matches from the last N days. In skill-mode use replen_match instead.",
+        "    replen_search    Full-text search across hosted-tier match history.",
+        "    replen_starred   Starred hosted-tier matches with handoff-PR status.",
+        "    replen_feedback  Record good / bad / clear / star / unstar / hide on a hosted-tier match.",
+        "    replen_run       Trigger a fresh hosted pipeline run. Rate-limited (1 per 60s).",
+        "    replen_status    Live progress of the current/most-recent hosted run.",
+        "",
+        "  Shared (work in both tiers):",
+        "    replen_analyze   Pull raw README + repo meta + your project profiles for one repo. Use as evidence-gathering inside replen_match.",
+        "    replen_handoff   Open a handoff PR in the matched project's own repo. Server-side because git writes need credentials we don't carry locally.",
+        "",
+        "Common flow (skill-mode):",
+        "  • Triage today: replen_match → analyse each candidate against local code → present writeups → replen_state per user action.",
       ];
       return lines.join("\n");
+    },
+  },
+  {
+    name: "replen_match",
+    description:
+      "Skill-mode entry point. Pulls today's candidate inventory scoped to the cwd repo and returns candidates with metadata + a server-side 'whyShortlisted' line. " +
+      "After calling this, YOU (the agent) triage each candidate against the local codebase using your subscription tokens (no API key used, no hosted LLM call):\n" +
+      "  1. For each candidate, WebFetch the candidate's README + grep the user's source for related code (under src/, lib/, app/ — skip node_modules, dist, .next).\n" +
+      "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w).\n" +
+      "  3. Compose a writeup with concrete file-level impact references — name actual files the candidate replaces or improves.\n" +
+      "  4. Present writeups to the user, ask which to star / hide / handoff / skip, call replen_state for each action.\n" +
+      "If 0 candidates returned: tell the user calm-cadence is working and stop. " +
+      "Cap on real-life triage: 5 candidates max per session. " +
+      "Scoped by default to the repo this MCP was spawned in. Pass repo='' to see the global firehose across all the user's projects.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+        limit: { type: "number", minimum: 1, maximum: 20, default: 5, description: "Max candidates to return. Default 5." },
+        days: { type: "number", minimum: 1, maximum: 14, default: 2, description: "Days of inventory to consider. Default 2." },
+      },
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        limit: z.number().int().min(1).max(20).default(5),
+        days: z.number().int().min(1).max(14).default(2),
+      }).parse(args);
+      const data = await apiGet(cfg, "/api/inventory/today", {
+        repo: resolveRepo(args, cfg),
+        limit: parsed.limit,
+        days: parsed.days,
+      });
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
+    name: "replen_state",
+    description:
+      "Record a user action on a Replen candidate. Call AFTER you've presented writeups via replen_match and the user has chosen what to do with each one. " +
+      "Statuses:\n" +
+      "  - 'starred'    user wants to come back to this; never re-surface\n" +
+      "  - 'hidden'     user dismissed it; never re-surface\n" +
+      "  - 'handed_off' user wants a handoff PR opened (use replen_handoff to actually open the PR, then call this with the resulting PR url)\n" +
+      "  - 'surfaced'   the closing 'I showed this, user neither stared nor hid' bookend; call once per candidate you presented, even skips. Lets the inventory deprioritise without locking out.\n" +
+      "Idempotent — repeating bumps action_at without duplicating rows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name of the candidate repo" },
+        repoId: { type: "number", description: "Alternative to repo — the candidate's repoId from replen_match output" },
+        projectId: { type: "number", description: "Optional project profile id from replen_match's candidates[].projectMatch context. Omit for global state." },
+        status: { type: "string", enum: ["starred", "hidden", "handed_off", "surfaced"] },
+        handoffPrUrl: { type: "string", description: "PR url if status=handed_off" },
+        userNote: { type: "string", description: "User's optional note attached to the action" },
+      },
+      required: ["status"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        repoId: z.number().int().positive().optional(),
+        projectId: z.number().int().positive().nullable().optional(),
+        status: z.enum(["starred", "hidden", "handed_off", "surfaced"]),
+        handoffPrUrl: z.string().url().optional(),
+        userNote: z.string().max(2000).optional(),
+      }).parse(args);
+      if (!parsed.repo && parsed.repoId === undefined) {
+        throw new Error("must specify repo (owner/name) or repoId");
+      }
+      const data = await apiPost(cfg, "/api/state", parsed);
+      return JSON.stringify(data, null, 2);
     },
   },
   {

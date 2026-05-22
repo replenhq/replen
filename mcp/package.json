@@ -1,6 +1,8 @@
 {
   "name": "@replen/mcp",
   "version": "0.3.0",
+  "private": true,
+  "_forkNote": "Fork-only — never publish from this tree. The live @replen/mcp is published from nsokin/replen, not nsokin/replen-skill. 'private: true' makes 'npm publish' refuse from this directory until we explicitly rename + publish to a new package name. See FORK.md.",
   "description": "MCP server for replen - Smarter AI Development workflows. Brings replen's proactive 'can we do this better?' research into Claude Code / Codex / any MCP host, so your AI coding workflow can act on the day's matches without ever leaving the chat.",
   "type": "module",
   "bin": {

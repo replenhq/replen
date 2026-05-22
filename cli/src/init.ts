@@ -160,9 +160,13 @@ export async function runInit(): Promise<void> {
   await setupMcp(exchange.token, exchange.base);
 
   console.log("");
-  console.log("  All set. Restart Claude Code (or Codex) and try:");
-  console.log("    /replen-triage      → runs the morning triage protocol");
-  console.log("    use replen to replen_today → pulls today's matches");
+  console.log("  All set. Restart Claude Code and try:");
+  console.log("    /replen-match       → triage today's candidates against this repo,");
+  console.log("                         in-session, using your subscription tokens");
+  console.log("    (no LLM API keys needed — the agent does the reasoning)");
+  console.log("");
+  console.log("  Other MCP hosts (Codex / Cursor / Aider):");
+  console.log("    \"use replen_match\" — same tool, no slash command");
   console.log("");
   console.log(`  Dashboard: ${exchange.base}`);
   console.log("");

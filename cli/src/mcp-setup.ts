@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { installSkills } from "./skill-install.js";
 
 // Write the @replen/mcp server entry into Claude Code's config. Uses npx so
 // the user doesn't need a separate global install; Claude Code will fetch
@@ -71,6 +72,12 @@ export async function setupMcp(token: string, base: string): Promise<void> {
 
   console.log(`  ✓ ${overwrite ? "Updated" : "Added"} "${SERVER_NAME}" in ${CONFIG_PATH}`);
   console.log(`  ✓ Installed SessionStart hook (surfaces new matches automatically)`);
+
+  // Skill install runs alongside the MCP+hook setup so any Claude Code
+  // session can `/replen-match` to trigger in-session triage. Other MCP
+  // hosts (Codex, Cursor) don't have a skills concept; they use the
+  // replen_match MCP tool description as the equivalent instruction.
+  installSkills();
 }
 
 // SessionStart hook: on every Claude Code session, runs `replen check-new
