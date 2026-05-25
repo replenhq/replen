@@ -159,6 +159,15 @@ export async function runInit(): Promise<void> {
 
   await setupMcp(exchange.token, exchange.base);
 
+  // Phase A: auto-discover the user's local projects, extract tags
+  // from manifests, and register them in one shot. Replaces the
+  // legacy "paste a GitHub PAT and let us call api.github.com" flow
+  // for project discovery.
+  console.log("");
+  console.log("  Scanning your local repos for projects…");
+  const { syncDiscoveredProjects } = await import("./sync-projects.js");
+  await syncDiscoveredProjects({ token: exchange.token, base: exchange.base });
+
   console.log("");
   console.log("  All set. Restart Claude Code and try:");
   console.log("    /replen-match       → triage today's candidates against this repo,");

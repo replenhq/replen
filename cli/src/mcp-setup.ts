@@ -78,6 +78,19 @@ export async function setupMcp(token: string, base: string): Promise<void> {
   // hosts (Codex, Cursor) don't have a skills concept; they use the
   // replen_match MCP tool description as the equivalent instruction.
   installSkills();
+
+  // Auto-inject the "## Replen integration" section into each local
+  // project's CLAUDE.md. This is the adoption-unblock — without it
+  // Claude Code (v2.1.141) doesn't reliably auto-surface matches
+  // because the SessionStart hook stdout-injection is buggy. Per-project
+  // CLAUDE.md instruction is the only working surface today, and we
+  // can't expect every user to hand-edit every repo. Idempotent +
+  // versioned; safe to re-run.
+  console.log("");
+  const { injectInstructions, summariseOutcome } = await import("./inject-instruction.js");
+  const outcome = await injectInstructions();
+  const summary = summariseOutcome(outcome);
+  if (summary) console.log(summary);
 }
 
 // SessionStart hook: on every Claude Code session, runs `replen check-new

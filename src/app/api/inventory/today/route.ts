@@ -226,9 +226,22 @@ export async function GET(req: Request) {
     }),
   );
 
-  // Build the response, dropping anything excluded by user_match_state.
-  const candidatesOut = repoLookups
-    .filter(({ r }) => r && !excludedRepoIds.has(r.id))
+  // Dedup by repoId: multiple sources can surface the same repo (e.g.
+  // ossinsight-trending:all + gh-search-recent:all + reddit:LocalLLaMA
+  // each independently picking up NousResearch/hermes-agent). Keep the
+  // first occurrence (already sorted by candidate score desc → stars desc,
+  // so we keep the strongest-source attribution).
+  const seenRepoIds = new Set<number>();
+  const dedup = repoLookups.filter(({ r }) => {
+    if (!r) return false;
+    if (excludedRepoIds.has(r.id)) return false;
+    if (seenRepoIds.has(r.id)) return false;
+    seenRepoIds.add(r.id);
+    return true;
+  });
+
+  // Build the response.
+  const candidatesOut = dedup
     .slice(0, limit)
     .map(({ c, r }) => ({
       candidateId: c.id,

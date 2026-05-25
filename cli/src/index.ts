@@ -13,6 +13,14 @@ Usage:
   npx replen mcp setup       Re-wire MCP using saved auth
   npx replen project-init    Print a prompt your AI coding tool uses to draft
                              a CLAUDE.md tuned for replen
+  npx replen inject [-y]     Append the "## Replen integration" section to
+                             every CLAUDE.md + AGENTS.md (Claude Code +
+                             Codex) under ~/github/, ~/code/, ~/projects/
+                             so the agent auto-surfaces matches on session
+                             start. Idempotent. Asks for consent unless -y.
+  npx replen sync-projects   Re-scan local repos for new GitHub remotes
+                             and register them with Replen. Run after
+                             cloning a new repo.
   npx replen logout          Forget saved auth
   npx replen --help          This help
 
@@ -95,6 +103,26 @@ async function main() {
       }
     }
     console.log(`Note: this only clears local auth. The token is still valid until you rotate it on /settings.`);
+    return;
+  }
+
+  if (cmd === "inject") {
+    const { injectInstructions, summariseOutcome } = await import("./inject-instruction.js");
+    const yes = argv.includes("--yes") || argv.includes("-y");
+    const outcome = await injectInstructions({ yes });
+    const summary = summariseOutcome(outcome);
+    if (summary) console.log(summary);
+    return;
+  }
+
+  if (cmd === "sync-projects" || cmd === "sync") {
+    const cfg = await readConfig();
+    if (!cfg) {
+      console.error("Not signed in. Run `npx replen` first.");
+      process.exit(1);
+    }
+    const { syncDiscoveredProjects } = await import("./sync-projects.js");
+    await syncDiscoveredProjects({ token: cfg.token, base: cfg.base });
     return;
   }
 
