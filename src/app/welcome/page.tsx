@@ -37,6 +37,13 @@ export default async function Welcome({ searchParams }: { searchParams: Promise<
     .from(schema.digestRuns)
     .where(eq(schema.digestRuns.userId, user.id))
     .get();
+  // Skill-tier users don't need an LLM API key (their agent's subscription
+  // covers reasoning) or a hosted pipeline run (matching happens in-session
+  // via /replen-match). PAT is optional in skill mode too. Send them
+  // straight through to the feed where the SkillTierBanner explains
+  // what to do next.
+  const subscriptionTier = settings?.subscriptionTier ?? "skill";
+  if (subscriptionTier === "skill") redirect(returnTo ?? "/");
   // Already set up: jump straight to returnTo (e.g. back to /cli-auth)
   // or the feed if no returnTo was provided.
   if (hasGithub && hasLlm && hasRun) redirect(returnTo ?? "/");

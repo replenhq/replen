@@ -25,15 +25,13 @@
 
 ---
 
-**AI coding tools are reactive. Replen is proactive.**
+**Your AI coding tools, with awareness of the wider OSS ecosystem.**
 
-Claude Code, Codex, Cursor: they wait for you to ask. None of them look at your codebase on their own and ask *"what could we be doing better here? what are others doing we could learn from?"*
+Claude Code, Codex, Cursor already know your code. Replen tells them what else is out there — drop-in libraries, ideas worth porting, dead deps to swap. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
 
-Replen does. Every morning, on every project, against the live ecosystem. For each new repo in your niche, it does the comparative work a senior dev would: read it, compare against your codebase, decide (adopt as-is, port a specific idea, or skip) with the reasoning written in. The keepers come with a PR-ready briefing your AI coding workflow (Claude Code, Codex, whichever) picks up and integrates.
+1–3 actionable matches per month, by design. Most days, nothing — that's the point. When something real lands, your AI tool mentions it the next time you open it: "by the way, 2 new Replen matches landed for this repo. Top one: kvnang/workers-og — could simplify lib/social/imageRenderer.ts. Want the full triage?"
 
-The training-cutoff problem makes this more urgent. Every LLM has a date past which it just doesn't know, and your AI tool will happily confabulate around the gap. But the deeper reason is simpler: good engineering means asking *"can we do this better?"* continuously. Replen runs that loop for you.
-
-Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub searches tuned to your project's domain. Secrets encrypted at rest, bring-your-own-keys. Hosted at [app.replen.dev](https://app.replen.dev), or self-host (no Docker required).
+What we provide: the OSS candidate inventory (gh-trending, gh-targeted, Threads, Reddit, HN, ossinsight historical), a tiny per-user state store, the plumbing into Claude Code / Codex. What your AI tool provides: judgment against your actual code, in your session, on your subscription.
 
 ## Quickstart
 
@@ -41,34 +39,39 @@ Pulls from gh-trending, TikTok, Threads, Reddit, HN, plus niche-scouted GitHub s
 npx replen
 ```
 
-That single command:
-1. Opens your browser to sign up / sign in
-2. Captures auth back into the terminal (browser-callback OAuth, same pattern as `gh auth login`)
-3. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
+That single command, in 60 seconds:
 
-Your first matches arrive within minutes; the daily digest lands at the UTC hour you set thereafter. No token-paste, no JSON-fiddling.
+1. Opens your browser to sign in (Google or GitHub via Firebase)
+2. Scans your local repos under `~/github/`, `~/code/`, `~/projects/` for git repos
+3. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.) — no GitHub PAT needed
+4. Registers them with Replen as your projects
+5. Installs the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
+6. Installs the `/replen-match` skill in `~/.claude/skills/`
+7. Injects a small "Replen integration" section into each project's `CLAUDE.md` + `AGENTS.md`
 
-For self-host targets:
+**What you do not provide:**
+- ❌ OpenAI / Anthropic / DeepSeek API key — your AI tool's subscription handles reasoning
+- ❌ GitHub PAT — optional, only needed if you want server-side handoff PRs
+- ❌ Manual project setup — auto-discovered from your local filesystem
+- ❌ Per-project tag config — auto-extracted from manifests
 
-```bash
-REPLEN_BASE=https://replen.your-domain.dev npx replen
-```
+Open Claude Code (or Codex) in any of your tracked repos and start working normally. Replen mentions matches in your AI's response when there are any. Silent on quiet days.
 
-Subcommands: `replen status` · `replen mcp setup` · `replen logout` · `replen --help`.
+For self-host: `REPLEN_BASE=https://replen.your-domain.dev npx replen`.
+
+Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen mcp setup` · `replen logout` · `replen --help`.
 
 ## What it does
 
-1. **Reads your projects.** Builds a profile per project (purpose, outcome goals, stack, dependencies) so it knows what you'd actually adopt — regardless of project type (library, CLI, app, infra, research code).
-2. **Scouts and discovers.** Two passes feed the same triage funnel:
-   - **Scouted** — runs derive niche GitHub searches from each project's outcome goals and scout for repos solving exactly that. Catches things trending feeds miss.
-   - **Discovered** — sweeps gh-trending tailored to your stack, plus TikTok / Threads / Reddit / HN. The "background hum" of the ecosystem.
-3. **Compares each repo against your code.** Bring your own LLM: any OpenAI-compatible endpoint for routine triage, plus an optional second slot (e.g. Anthropic, or a privately-hosted model) for high-sensitivity projects. Verdict per match: **adopt as-is**, **port a specific idea**, or **skip**, with the reasoning written in. Auto-skips established big-co repos. For high-stakes scouted candidates, an optional **source-verification** pass shallow-clones the repo and cross-checks the README's claims against the actual code via a BM25 index — catches the case where a sales-pitch README promises functionality the code doesn't support.
-4. **Re-checks what you starred.** Every run re-evaluates your bookmarked general-awareness matches against *other* projects' outcome goals. If something you saved as "interesting for later" fits a different project's need today, it re-surfaces with a **re-checked** pill so you don't lose it to the backlog.
-5. **Delivers** three ways:
-   - **Web dashboard** at the digest URL: triage, star, hide, search, open handoff PRs. Each match wears a pill — `scouted`, `discovered`, or `re-checked` — so you know how it found you.
-   - **HTML email** every morning at the UTC hour you set.
-   - **MCP server** that exposes the same data inside Claude Code / Codex / any MCP host, so the agent can answer "what's worth integrating today?" with your codebase in context.
-6. **Closes the loop** when you star a keeper: opens a handoff PR in your project's repo with a markdown briefing for the next agent that touches the codebase, and polls the PR status until it's merged → match shows up on `/integrated`.
+1. **Scouts the OSS firehose.** Replen pulls candidates from gh-trending (per-language slices), gh-targeted (niche searches derived from your project's tags), ossinsight historical-walk-back, Threads, Reddit, HN — and applies a cheap eligibility filter (drop aggregators, drop archived deps, drop language-mismatched candidates, dedup across sources).
+
+2. **Tells your AI tool when something landed.** A small daily check returns up to 5 candidates per project. When you next open Claude Code / Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message.
+
+3. **The agent triages in-session.** Using your subscription tokens (no API key), your AI tool: WebFetches each candidate's README, greps your local source for related code, forms a verdict (adopt / port / skip) with score + effort estimate, and composes a writeup grounded in concrete file references in *your* repo. The hosted scorer can't do this — it doesn't have your code. The agent does, and writes honest verdicts including skips.
+
+4. **You act on the keepers.** Star / hide / handoff PR — captured in `/api/state` server-side; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
+
+5. **Hosted-tier (paid, optional, for non-CLI users).** Same pipeline, but Stage 3-4 LLM scoring runs on Replen's side with BYO API keys, and matches arrive via email digest + web dashboard instead of in-session. For PMs / designers / passive subscribers who don't live in a terminal.
 
 ## What a match looks like
 
@@ -86,22 +89,42 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 >
 > Do (1) first — single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
 
-The plug points reference your project's actual files because Replen reads them. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
+The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move. Hosted-tier writeups follow the same shape but only reference public hints about your project (its declared tags, manifests), since the hosted scorer can't see your code.
 
 ## Numbers we run on
 
 Engineering numbers we measure, not marketing claims we promise:
 
+**Skill-tier (default):**
+- **$0** inference cost on the Replen side — reasoning happens on your Claude Code / Codex subscription tokens. Your AI tool's normal rate limits apply.
+- **~5 s** for the daily `replen_check_new` call: list candidates, filter against `user_match_state`, return.
+- **~20-90 s** for in-session triage of one candidate — agent fetches the README, greps your code, writes the verdict. Multiple candidates run sequentially in the same conversation.
+
+**Hosted-tier (paid, optional):**
 - **~$0.09 / user / day** for the routine LLM pipeline on a cheap OpenAI-compatible model with prefix caching warm. Frontier models used only for high-sensitivity projects add ~$0.50-$2 on the days they fire. Hard cap default **$5 / user / day**, configurable on `/settings`.
-- **~1-15 s** to build a BM25 source index for a typical OSS repo (walk + tokenise + post-list). Cached per repo against `README sha` so subsequent verifications skip the rebuild.
-- **<250 ms** per source-context query against a built index — fast enough that the source-verification pass adds ~30-70 s end-to-end per candidate including the one-time clone.
+- **~1-15 s** to build a BM25 source index for a typical OSS repo (walk + tokenise + post-list). Cached per repo against `README sha`.
 - **~70 s** typical end-to-end for a per-user pipeline run with no source verification: fetch fan-out, triage, reason, write digest.
 
-Everything in this list is observable in the `digest_runs` table and the structured pipeline logs. We'll add user-outcome metrics (acceptance rate, hit-rate vs gh-trending baseline, time-to-integration) once we've shipped telemetry.
+Everything in this list is observable in the `digest_runs` table and the structured pipeline logs.
 
 ## Workflow
 
-The morning email is just the entry point. The interesting bit is what happens after you find something worth keeping:
+### Skill-tier (default)
+
+```
+1. Server-side fetcher pulls candidates           → gh-trending, gh-targeted, ossinsight,
+                                                    Threads, Reddit, HN; eligibility filter
+                                                    drops obvious junk
+2. You open Claude Code / Codex in a repo         → SessionStart hook + CLAUDE.md instruction
+                                                    surfaces "N new matches" in opening context
+3. Your AI tool mentions them after your prompt   → "by the way, 2 new Replen matches landed..."
+4. You ask for triage                             → "show me the top one"
+5. Agent invokes the /replen-match skill          → WebFetches READMEs, greps your local code,
+                                                    forms verdict (adopt/port/skip) with score
+6. You star, hide, or hand off                    → POST /api/state captures it; never re-surfaces
+```
+
+### Hosted-tier (optional, paid)
 
 ```
 1. Replen surfaces a match           → dashboard, in email, or via MCP tool
@@ -112,7 +135,7 @@ The morning email is just the entry point. The interesting bit is what happens a
 5. You review and merge              → Replen polls PR status, flips to integrated
 ```
 
-The briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Your agent validates against your real codebase and decides. Replen is research + dispatch; never the one writing code into your repo.
+In both tiers the briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Replen is research + dispatch; never the one writing code into your repo.
 
 Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-loop).
 
@@ -257,9 +280,9 @@ To install the MCP only (skip the auth flow), or to wire it into a host other th
 
 Token from `/settings` → "Connect Claude Code".
 
-### Skill (`skills/replen-triage/`)
+### Skill (`skills/replen-match/`)
 
-Optional Claude Code skill that wraps the MCP into a morning-triage protocol: fetch today, evaluate the high-relevance ones, propose handoffs, train source weights. Invoke with `/replen-triage`. Installed by copying `skills/replen-triage/` to `~/.claude/skills/`.
+The Claude Code skill that runs the skill-tier in-session triage protocol: list new candidates via the MCP, WebFetch each README, grep the user's local code, form a per-candidate verdict (adopt / port / skip) with a writeup grounded in real file paths. Invoke with `/replen-match` (or let the agent invoke it automatically when the SessionStart hook surfaces "N new matches"). `npx replen` installs it into `~/.claude/skills/` for you.
 
 The MCP gives the agent **tools** (data access); the skill gives it a **playbook** (when to call what, in what order). Domain-volatility split per [LlamaIndex's skills-vs-MCP article](https://www.llamaindex.ai/blog/skills-vs-mcp-tools-for-agents-when-to-use-what).
 
@@ -278,9 +301,12 @@ Source ranking (for tie-breaking when multiple sources surface the same repo): t
 
 ## Pipeline (per user, per run)
 
+**Skill-tier** stops after step 2; analysis happens in the user's AI session instead.
+**Hosted-tier** runs the full pipeline:
+
 1. **Cost guardrail**: sum the last 24h of runs; if ≥ `daily_cost_cap_usd`, skip and record a `paused_reason='cost-cap'` row.
-2. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`.
-3. **runAnalysis**:
+2. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`. (Skill-tier stops here — apply eligibility filter and surface via `replen_check_new` MCP tool.)
+3. **runAnalysis** (hosted-tier only):
    - Apply `user_feedback` weights to source ranking.
    - Skip already-actioned repos (starred / hidden / integrated / has handoff PR).
    - For each unique GitHub repo:
@@ -324,7 +350,7 @@ replen/
 ├── cli/                    `replen` CLI (the `npx replen` one-liner)
 ├── mcp/                    @replen/mcp MCP server package
 ├── skills/                 Claude Code skills
-│   └── replen-triage/      morning-triage protocol
+│   └── replen-match/       in-session match triage protocol
 ├── scripts/                deploy.sh, nginx config, systemd units, plists
 └── data/                   sqlite db (gitignored)
 ```

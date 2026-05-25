@@ -56,7 +56,7 @@ export default async function Projects() {
             <th style={{ textAlign: "right" }}>Matches</th>
             <th></th>
             <th>GitHub repo</th>
-            <th title="Comma-separated tags (e.g. 'typescript, next.js, news'). Used by filter mode B on /settings to pre-filter the inventory before sending candidates to the skill for triage. Empty = no per-project filter applied; the user's whole tag union is used.">Tags</th>
+            <th title="Comma-separated tags (auto-extracted from package.json / pyproject.toml on first sync). Used by filter mode B on /settings to pre-filter the inventory before sending candidates to the skill for triage. Edit freely; re-run 'npx replen sync-projects' to refresh from manifests.">Tags <span style={{ fontWeight: 400, fontSize: 11, color: "rgba(0,0,0,0.5)" }}>(auto)</span></th>
             <th title="github:owner/name when sourced via API. Filesystem paths shown for rows that haven't refreshed since the GitHub-pull rebuild — they'll switch on next pipeline run once a repo is set.">Source</th>
           </tr>
         </thead>

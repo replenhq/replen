@@ -333,6 +333,14 @@ export default async function SettingsPage({ searchParams }: Params) {
     redirect(`/settings?newToken=${encodeURIComponent(fresh)}#ingest`);
   }
 
+  // Skill-tier users don't need an LLM API key, don't need a GitHub
+  // PAT for matching (only optional for server-side handoff PRs), and
+  // have no hosted LLM cost to cap. Those three sections (AI provider,
+  // GitHub access, Costs) collapse into a single "Advanced — hosted-
+  // tier-only" disclosure below the matching mode + alerts. Hosted-
+  // tier users see them inline as before.
+  const isSkillTier = (s?.subscriptionTier ?? "skill") === "skill";
+
   return (
     <>
       <h1>Settings</h1>
@@ -396,6 +404,10 @@ export default async function SettingsPage({ searchParams }: Params) {
             own subscription handles reasoning, so this section is
             optional. Kept fully wired for hosted-tier users + as a
             fallback path. */}
+        <MaybeAdvanced
+          collapsed={isSkillTier}
+          summary="AI provider — not needed in skill mode (your AI tool's subscription handles reasoning). Click to configure for hosted-tier email/dashboard delivery."
+        >
         <Section title="AI provider">
           <p style={settingsHelp}>
             Replen makes around 50 small AI calls per run. You pay the provider directly with your own key. DeepSeek is the cheapest by far and works just as well for most projects.
@@ -486,8 +498,13 @@ export default async function SettingsPage({ searchParams }: Params) {
             <Field label="Model" name="llmPrimaryModel" value={rawSettings?.llmPrimaryModel ?? ""} placeholder="deepseek-chat  ·  gpt-4o-mini  ·  llama-3.3-70b-versatile" />
           </details>
         </Section>
+        </MaybeAdvanced>
 
         {/* ── Section 2: GitHub access ─────────────────────────────── */}
+        <MaybeAdvanced
+          collapsed={isSkillTier}
+          summary="GitHub access — optional in skill mode (your AI tool reads your repo locally). Click to configure for hosted-tier project loading + handoff PRs."
+        >
         <Section title="GitHub access">
           <p style={settingsHelp}>
             Replen reads your project README + CLAUDE.md + recent commits via your GitHub PAT. Same token opens docs-improvement PRs into your repos when needed.
@@ -516,8 +533,13 @@ export default async function SettingsPage({ searchParams }: Params) {
             placeholder="github_pat_…"
           />
         </Section>
+        </MaybeAdvanced>
 
         {/* ── Section 3: Sensitive projects (collapsed) ────────────── */}
+        <MaybeAdvanced
+          collapsed={isSkillTier}
+          summary="Sensitive-project routing — only relevant if you use the hosted-tier secondary LLM slot."
+        >
         <details style={settingsAdvancedDetails}>
           <summary style={settingsSectionSummary}>
             Sensitive projects (separate provider slot)
@@ -544,6 +566,7 @@ export default async function SettingsPage({ searchParams }: Params) {
             )}
           </div>
         </details>
+        </MaybeAdvanced>
 
         {/* ── Section 4: Real-time alerts ──────────────────────────── */}
         <Section title="Real-time alerts (Slack / Discord)">
@@ -581,6 +604,10 @@ export default async function SettingsPage({ searchParams }: Params) {
         </Section>
 
         {/* ── Section 5: Costs ─────────────────────────────────────── */}
+        <MaybeAdvanced
+          collapsed={isSkillTier}
+          summary="LLM cost cap — only applies in hosted tier (your AI tool's subscription handles reasoning in skill mode)."
+        >
         <Section title="Costs">
           <div style={{ display: "flex", gap: 24, marginBottom: 12, flexWrap: "wrap" }}>
             <CostStat label="Last 7 days" value={`$${weekCostUsd.toFixed(2)}`} />
@@ -596,6 +623,7 @@ export default async function SettingsPage({ searchParams }: Params) {
             <span style={settingsHint}>Run pauses when 24h spend hits this. 0 = no cap.</span>
           </label>
         </Section>
+        </MaybeAdvanced>
 
         {/* ── Section 6: Advanced (collapsed) ──────────────────────── */}
         <details style={settingsAdvancedDetails}>
@@ -764,6 +792,34 @@ function mcpConfig(token: string): string {
 function mcpSetupCommand(token: string): string {
   const base = process.env.PUBLIC_BASE_URL ?? "http://localhost:3030";
   return `npx -y @replen/mcp setup --token=${token} --base=${base}`;
+}
+
+// Wraps a child in a collapsed <details> when `collapsed`, renders
+// inline otherwise. Used to demote hosted-tier-only sections on
+// /settings for skill-tier users without removing them.
+function MaybeAdvanced({
+  collapsed,
+  summary,
+  children,
+}: {
+  collapsed: boolean;
+  summary: string;
+  children: React.ReactNode;
+}) {
+  if (!collapsed) return <>{children}</>;
+  return (
+    <details style={{
+      padding: "10px 14px",
+      border: "1px dashed var(--line, #ccc4)",
+      borderRadius: 10,
+      background: "var(--surface-2, rgba(0,0,0,0.02))",
+    }}>
+      <summary style={{ cursor: "pointer", fontSize: 13, color: "rgba(0,0,0,0.6)", padding: "4px 0" }}>
+        {summary}
+      </summary>
+      <div style={{ marginTop: 10 }}>{children}</div>
+    </details>
+  );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

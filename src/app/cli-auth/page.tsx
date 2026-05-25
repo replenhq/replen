@@ -64,14 +64,16 @@ export default async function CliAuthPage({ searchParams }: Params) {
   // brings the user back here after sign-in / sign-up.
   const user = await requireUser();
 
-  // New-user onboarding gate: if the user signed in but hasn't pasted
-  // a PAT + LLM key yet, send them through /welcome first. Returning
-  // to /cli-auth?... after onboarding completes means the CLI flow
-  // resumes from exactly where it paused.
+  // New-user onboarding gate: hosted-tier users need a PAT + LLM key
+  // before the CLI can be useful. Skill-tier users don't — their
+  // agent's subscription covers reasoning, and the GitHub PAT is
+  // optional (gh CLI auth covers handoff PRs). Skip the gate
+  // entirely in skill mode and let the CLI auth flow continue.
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, user.id)).get();
   const hasGithub = !!(settings?.githubToken || settings?.githubWriteToken);
   const hasLlm = !!(settings?.llmPrimaryApiKey || settings?.deepseekApiKey || settings?.anthropicApiKey || settings?.llmSensitiveApiKey);
-  if (!hasGithub || !hasLlm) {
+  const subscriptionTier = settings?.subscriptionTier ?? "skill";
+  if (subscriptionTier === "hosted" && (!hasGithub || !hasLlm)) {
     const here = `/cli-auth?port=${port}&state=${state}`;
     return (
       <main style={pageStyle}>

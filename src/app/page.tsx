@@ -12,7 +12,7 @@ import { isDemoUser } from "@/lib/auth/demo-mode";
 import { DemoMatchActions } from "@/components/DemoMatchActions";
 import { DemoStreamerProvider, DemoStreamerButton, DemoStreamerLog } from "@/components/DemoStreamer";
 import { SparseDocsCards, buildSparseProject, type SparseProject } from "@/components/SparseDocsCards";
-import { SkillTierBanner, fetchSubscriptionTier } from "@/components/SkillTierBanner";
+import { SkillTierBanner } from "@/components/SkillTierBanner";
 import { assessDocSparsity } from "@/projects/self-improvement";
 import { formatTimestampToMinute } from "@/lib/format-date";
 import type { CSSProperties } from "react";
@@ -34,10 +34,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
     .from(schema.digestRuns)
     .where(eq(schema.digestRuns.userId, user.id))
     .get();
-  // Onboarding gate: send to /welcome until the user has both keys + a
-  // pipeline run on file. Email is no longer required (digest is opt-in
-  // now; the dashboard is the primary surface).
-  if (!everRan && (!hasGithub || !hasLlm)) {
+  // Onboarding gate: hosted-tier users still need keys + a pipeline run.
+  // Skill-tier users skip this entirely — their agent's subscription covers
+  // reasoning, PAT is optional, and there's no hosted pipeline run to wait
+  // on. The SkillTierBanner below explains what they need to do instead.
+  const subscriptionTier = settings?.subscriptionTier ?? "skill";
+  if (subscriptionTier === "hosted" && !everRan && (!hasGithub || !hasLlm)) {
     redirect("/welcome");
   }
 
@@ -378,7 +380,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ r
   });
 
   const demoMode = isDemoUser(user);
-  const subscriptionTier = await fetchSubscriptionTier(user.id);
 
   const feedBody = (
     <>

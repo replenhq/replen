@@ -136,18 +136,37 @@ export default async function Runs() {
     .sort((a, b) => b.matches - a.matches);
 
   const subscriptionTier = await fetchSubscriptionTier(user.id);
+  const isSkillTier = subscriptionTier === "skill";
+
+  // Skill-tier users have no hosted pipeline runs to display by
+  // design (matching runs in-session via /replen-match). Show only the
+  // banner + explainer, hide the cost cards / source breakdown / run
+  // list entirely — they'd be empty or misleading.
+  if (isSkillTier && runs.length === 0) {
+    return (
+      <>
+        <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
+        <h1>Runs</h1>
+        <p className="meta" style={{ marginTop: 8, maxWidth: 640, lineHeight: 1.6 }}>
+          Skill mode doesn't run a hosted pipeline — your matching happens
+          in-session via <code>/replen-match</code> in Claude Code (or by
+          asking your AI tool naturally). No server-side LLM costs to
+          track here, no daily cron output.
+        </p>
+        <p className="meta" style={{ marginTop: 12, maxWidth: 640 }}>
+          If you switch to hosted tier on <a href="/settings">/settings</a>
+          (e.g. to add an email digest), this page starts filling with run
+          history and cost breakdowns. The data path below renders for
+          hosted-tier users only.
+        </p>
+      </>
+    );
+  }
 
   return (
     <>
       <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <h1>Runs</h1>
-      {subscriptionTier === "skill" && runs.length === 0 && (
-        <p className="meta" style={{ marginTop: 8 }}>
-          Skill-mode users don't have hosted pipeline runs — your matching happens in-session in
-          Claude Code via <code>/replen-match</code>. This page is empty by design. If you also have
-          historical hosted runs from before the pivot, they would show below.
-        </p>
-      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, margin: "12px 0 20px" }}>
         <Card label="last 7 days" value={fmtCost(cost7)} sub={`${last7.length} runs`} />
         <Card label="last 30 days" value={fmtCost(cost30)} sub={`${last30.length} runs · ${matches30} matches`} />
