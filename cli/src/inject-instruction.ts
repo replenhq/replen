@@ -99,7 +99,17 @@ type FileAction = "created" | "appended" | "alreadyCurrent" | "versionUpdated";
 
 function applyToClaudeMd(claudeMdPath: string): FileAction {
   if (!existsSync(claudeMdPath)) {
-    const header = `# CLAUDE.md\n\n<!-- This file is read by Claude Code at session start to understand the project. Edit freely above this marker — the Replen integration section below is auto-managed. -->\n\n`;
+    // Use the actual filename in the H1 / stub comment so a fresh
+    // GEMINI.md doesn't end up titled "# CLAUDE.md" (etc.). The
+    // SECTION_HEADER + SECTION_BODY content is the same across all
+    // three host conventions — only the file's own self-reference
+    // header differs.
+    const fileName = basename(claudeMdPath);
+    const hostHint =
+      fileName === "GEMINI.md" ? "Gemini CLI" :
+      fileName === "AGENTS.md" ? "Codex / agent hosts" :
+      "Claude Code";
+    const header = `# ${fileName}\n\n<!-- This file is read by ${hostHint} at session start to understand the project. Edit freely above this marker — the Replen integration section below is auto-managed. -->\n\n`;
     writeFileSync(claudeMdPath, header + SECTION_HEADER + "\n\n" + SECTION_BODY);
     return "created";
   }
@@ -255,11 +265,13 @@ export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: 
     }
   }
 
-  // We write to BOTH CLAUDE.md (Claude Code convention) and AGENTS.md
-  // (Codex convention). Same section content; each tool reads its own
-  // native file. Idempotent + collapsing applies to both.
+  // We write to CLAUDE.md (Claude Code convention), AGENTS.md (Codex
+  // convention), and GEMINI.md (Gemini CLI convention). Same section
+  // content; each tool reads its own native file at session start so
+  // the proactive replen_match instruction lands wherever the user
+  // happens to open. Idempotent + collapsing applies to all three.
   for (const path of repos) {
-    for (const fileName of ["CLAUDE.md", "AGENTS.md"] as const) {
+    for (const fileName of ["CLAUDE.md", "AGENTS.md", "GEMINI.md"] as const) {
       const filePath = join(path, fileName);
       try {
         const action = applyToClaudeMd(filePath);
