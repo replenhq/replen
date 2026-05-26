@@ -14,9 +14,59 @@ import type { Fetcher } from "./types";
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
 
-const FETCHERS: Fetcher[] = [hnFetcher, redditFetcher, ghTrendingFetcher, ossinsightTrendingFetcher, ghSearchFetcher, ghSearchRecentFetcher, ghTargetedSearchFetcher, historicalSearchFetcher, threadsFetcher, tiktokFetcher];
+// Discovered-pool fetchers: don't depend on per-project search vectors.
+// Pull candidates from broad sources (trending, news, social). Safe to
+// run before Stages 1+2 — gives new users their first inventory in
+// ~30-60s instead of after the per-project LLM work completes.
+const DISCOVERED_FETCHERS: Fetcher[] = [
+  hnFetcher,
+  redditFetcher,
+  ghTrendingFetcher,
+  ossinsightTrendingFetcher,
+  ghSearchFetcher,
+  ghSearchRecentFetcher,
+  historicalSearchFetcher,
+  threadsFetcher,
+  tiktokFetcher,
+];
+
+// Scouted-pool fetchers: depend on per-project search vectors generated
+// by Stage 2 (search-vectors.ts). Must run AFTER refreshStaleSearchVectors
+// or they'll skip projects without vectors. For first-time users with no
+// vectors yet, this yields zero results on the first run — that's fine,
+// the discovered pool already gave them something to look at, and the
+// second run (next cron tick or manual trigger) gets scouted matches.
+const SCOUTED_FETCHERS: Fetcher[] = [ghTargetedSearchFetcher];
+
+// All fetchers — kept for backwards compat with any caller that wants
+// "run everything" semantics. New code should prefer the split functions
+// below to control ordering relative to Stages 1+2.
+const FETCHERS: Fetcher[] = [...DISCOVERED_FETCHERS, ...SCOUTED_FETCHERS];
 
 export async function runFetchers(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
+  return runWithConfig(userId, cfg, FETCHERS);
+}
+
+/**
+ * Run only the fetchers that don't need per-project search vectors.
+ * Call this BEFORE refreshStaleSearchVectors so first-time users have
+ * candidate inventory within ~30-60s of install. Returns the discovered-
+ * pool insertion count.
+ */
+export async function runDiscoveredFetchers(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
+  return runWithConfig(userId, cfg, DISCOVERED_FETCHERS);
+}
+
+/**
+ * Run only the per-project gh-targeted-search fetcher. Call AFTER
+ * refreshStaleSearchVectors so each project's vectors are available to
+ * drive its targeted GitHub queries.
+ */
+export async function runScoutedFetchers(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
+  return runWithConfig(userId, cfg, SCOUTED_FETCHERS);
+}
+
+function runWithConfig(userId: number, cfg: UserConfig, fetchers: Fetcher[]): Promise<{ inserted: number; total: number }> {
   return withRunConfig(
     {
       llmPrimaryApiKey: cfg.llmPrimaryApiKey,
@@ -28,18 +78,18 @@ export async function runFetchers(userId: number, cfg: UserConfig): Promise<{ in
       threadsHandles: cfg.threadsHandles,
       tiktokHandles: cfg.tiktokHandles,
     },
-    () => runFetchersInner(userId, cfg)
+    () => runFetchersInner(userId, cfg, fetchers)
   );
 }
 
-async function runFetchersInner(userId: number, cfg: UserConfig): Promise<{ inserted: number; total: number }> {
+async function runFetchersInner(userId: number, cfg: UserConfig, fetchers: Fetcher[]): Promise<{ inserted: number; total: number }> {
   const now = new Date();
   const ctx = { detectedLanguages: cfg.detectedLanguages ?? null, userId };
 
   // Fetchers are independent; run them in parallel so a slow one (threads)
   // doesn't block the rest. Each failure is isolated.
   const results = await Promise.all(
-    FETCHERS.map(async (f) => {
+    fetchers.map(async (f) => {
       try {
         const items = await f.run(ctx);
         console.log(`[fetch] user=${userId} ${f.name}: ${items.length} items`);

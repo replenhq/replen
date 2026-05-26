@@ -168,6 +168,15 @@ export async function runInit(): Promise<void> {
   const { syncDiscoveredProjects } = await import("./sync-projects.js");
   await syncDiscoveredProjects({ token: exchange.token, base: exchange.base });
 
+  // Phase B: trigger the first ingest and stream progress until the
+  // discovered pool is ready (~30-60s). Without this, a new user
+  // would open Claude Code and find replen_match returning nothing —
+  // the server-side cron hasn't run yet for the just-registered
+  // projects. Streaming gives them visible activity AND ensures
+  // there's something to surface by the time they get to Claude Code.
+  const { runFirstIngest } = await import("./first-ingest.js");
+  await runFirstIngest({ token: exchange.token, base: exchange.base, savedAt: "" });
+
   console.log("");
   console.log("  All set. Restart Claude Code and try:");
   console.log("    /replen-match       → triage today's candidates against this repo,");

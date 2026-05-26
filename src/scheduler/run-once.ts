@@ -1,6 +1,6 @@
 import { db, schema } from "../db/client";
 import { and, eq, gte, sql } from "drizzle-orm";
-import { runFetchers } from "../fetchers";
+import { runDiscoveredFetchers, runScoutedFetchers } from "../fetchers";
 import { runAnalysis } from "../analyzer/pipeline";
 import { discoverProjectsForUser, parseShapeJson, upsertProjects } from "../projects/loader";
 import { sendDigestEmail } from "../email/send";
@@ -151,13 +151,28 @@ async function executePipeline(
     await loadProjectsForUser(runId, userId, cfg).catch((e) =>
       console.warn(`[pipeline] user=${userId} project load failed:`, e),
     );
+    // Phase 1 — Discovered pool. Runs BEFORE Stages 1/2 so first-time
+    // users see candidate inventory within ~30-60s of install instead of
+    // waiting for the per-project LLM work (Stage 1 summaries + Stage 2
+    // search vectors) to chew through every project. The discovered
+    // fetchers (gh-trending, HN, Reddit, TikTok, Threads, ossinsight,
+    // historical-search, gh-search, gh-search-recent) are language/topic-
+    // based and don't depend on per-project Stage-2 output.
+    void recordEvent(runId, userId, "fetch_start", "Pulling candidates from your sources…");
+    const discovered = await runDiscoveredFetchers(userId, cfg);
+    candidatesFound = discovered.inserted;
+    void recordEvent(runId, userId, "fetch_done", `Discovered pool: ${discovered.inserted} new candidate(s) (${discovered.total} seen)`);
+
+    // Phase 2 — Per-project LLM work.
     // Stage-1: structured summary + outcome goals per project.
     // Stage-2: search vectors derived from the summary.
-    // Both run BEFORE the fetcher so that on the first pipeline run the
-    // gh-targeted scouter has search vectors to query GitHub with, and the
-    // reasoning step has summaries to compare candidates against. Cache check
-    // in needsRegeneration/vectorsNeedRegeneration skips both on subsequent
-    // runs unless profileHash/summaryHash changed — steady-state cost is zero.
+    // These power per-project relevance for the scouted fetcher in
+    // Phase 3 and for the (hosted-tier) Stage 3+ reasoning. Cache check
+    // in needsRegeneration/vectorsNeedRegeneration skips both on
+    // subsequent runs unless profileHash/summaryHash changed — steady-
+    // state cost is zero. Silently skipped when no LLM_PRIMARY_API_KEY
+    // is configured (e.g. self-host without a key); scouted pool will
+    // then come up empty but discovered pool from Phase 1 still works.
     await refreshStaleProjectSummaries(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} summary refresh failed:`, e),
     );
@@ -172,10 +187,17 @@ async function executePipeline(
     await refreshStaleActivity(runId, userId, cfg).catch((e) =>
       console.warn(`[pipeline] user=${userId} activity refresh failed:`, e),
     );
-    void recordEvent(runId, userId, "fetch_start", "Fetching candidates from your sources…");
-    const fetched = await runFetchers(userId, cfg);
-    candidatesFound = fetched.inserted;
-    void recordEvent(runId, userId, "fetch_done", `Fetched ${fetched.inserted} new candidates (${fetched.total} total seen)`);
+
+    // Phase 3 — Scouted pool. Uses the per-project search vectors built
+    // in Phase 2 to issue targeted GitHub searches. On a project's first
+    // pipeline run this returns zero (no vectors yet) — that's by design;
+    // the user already has the discovered pool from Phase 1 and scouted
+    // matches appear on the second run once vectors exist.
+    const scouted = await runScoutedFetchers(userId, cfg);
+    candidatesFound += scouted.inserted;
+    if (scouted.inserted > 0 || scouted.total > 0) {
+      void recordEvent(runId, userId, "fetch_done", `Scouted pool: ${scouted.inserted} new candidate(s) (${scouted.total} seen)`);
+    }
 
     // Skill-tier short-circuit: stages 3-5 (analysis, prune, digest,
     // synthesis) run in the user's Claude Code / Codex session via
