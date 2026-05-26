@@ -4,6 +4,7 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
+import { cosineSimilarity, parseStoredEmbedding } from "@/lib/embeddings";
 
 // Skill-mode inventory endpoint.
 //
@@ -167,36 +168,107 @@ export async function GET(req: Request) {
   }
   const afterEligibility = eligible.length;
 
-  // Filter-mode application.
-  const filtered: Array<CandidateRow & { whyShortlisted: string }> = [];
+  // Filter-mode application + ranking.
+  //
+  // Two-stage ranking, in order of preference:
+  //   1. Semantic similarity (cosine of OpenAI text-embedding-3-small)
+  //      between the project's embedding and the candidate's embedding.
+  //      This is the PRIMARY signal — it captures "is this candidate
+  //      actually about what this project is about?" in a way bag-of-
+  //      tags can't.
+  //   2. Tag-overlap fallback: topicHits * 10 + (langHit ? 1 : 0).
+  //      Used when either side lacks an embedding (lazy backfill hasn't
+  //      reached them yet, or OPENAI_API_KEY isn't set on this instance).
+  //
+  // Pre-filter: when filter-mode is 'tags' / 'fingerprint' and the
+  // project has any tags configured, drop candidates with zero topic
+  // AND zero language overlap. Even semantic similarity benefits from
+  // a coarse filter — a 50%-similar Rust GUI library isn't useful for
+  // a Next.js webapp regardless of what cosine says.
+  //
+  // The project's embedding is loaded once if we're scoped to a single
+  // project; for the union-of-projects path we skip semantic ranking
+  // and fall back to tags only (semantically averaging vectors across
+  // unrelated projects produces an incoherent query vector).
+  const projectEmbedding = scopedProject
+    ? parseStoredEmbedding(scopedProject.embedding ?? null)
+    : null;
+
+  type ScoredRow = CandidateRow & {
+    whyShortlisted: string;
+    relevance: number;        // tag-overlap fallback score
+    cosine: number | null;    // semantic similarity (null when unavailable)
+  };
+  const filtered: ScoredRow[] = [];
   for (const c of eligible) {
     const reasons: string[] = [];
+    let relevance = 0;
+    let topicHits: string[] = [];
+    let langHit = false;
+
     if (filterMode === "zero-knowledge") {
       reasons.push("zero-knowledge mode: no per-user filter applied");
     } else if (filterMode === "tags" || filterMode === "fingerprint") {
       // v1: fingerprint mode falls back to tags. Real LSH similarity
       // ranking is a follow-up.
-      let topicHits: string[] = [];
       try {
         const candTopics: string[] = c.topics ? JSON.parse(c.topics) : [];
         topicHits = candTopics.map((t) => t.toLowerCase()).filter((t) => userTagSet.has(t));
       } catch {
         // ignore malformed topics JSON
       }
-      const langHit = c.primaryLanguage && userTagSet.has(c.primaryLanguage.toLowerCase());
+      langHit = !!(c.primaryLanguage && userTagSet.has(c.primaryLanguage.toLowerCase()));
       if (userTagSet.size === 0) {
         // No tags configured yet — degrade gracefully to passthrough rather than
         // returning an empty inventory and looking broken.
         reasons.push("no project tags configured; showing unfiltered");
       } else if (topicHits.length === 0 && !langHit) {
-        continue; // no overlap, drop this candidate
+        continue; // coarse pre-filter: drop hard misses even when embeddings agree
       } else {
         if (langHit) reasons.push(`language match: ${c.primaryLanguage}`);
         if (topicHits.length > 0) reasons.push(`topic overlap: ${topicHits.slice(0, 3).join(", ")}`);
+        relevance = topicHits.length * 10 + (langHit ? 1 : 0);
       }
     }
-    filtered.push({ ...c, whyShortlisted: reasons.join("; ") || "candidate eligible" });
+
+    // Semantic similarity layered on top. Only meaningful when both
+    // sides have an embedding; otherwise null → falls back to relevance.
+    let cosine: number | null = null;
+    if (projectEmbedding) {
+      const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
+      if (candEmbedding) {
+        const sim = cosineSimilarity(projectEmbedding, candEmbedding);
+        if (Number.isFinite(sim)) {
+          cosine = sim;
+          reasons.push(`semantic similarity: ${(sim * 100).toFixed(0)}%`);
+        }
+      }
+    }
+
+    filtered.push({
+      ...c,
+      whyShortlisted: reasons.join("; ") || "candidate eligible",
+      relevance,
+      cosine,
+    });
   }
+
+  // Sort: cosine similarity is the primary signal when available.
+  // Candidates with cosine scores rank by cosine desc. Candidates
+  // without cosine (lazy-backfill not yet reached them) interleave by
+  // their tag-overlap relevance — they aren't penalised vs. embedded
+  // ones until the embedding lands.
+  filtered.sort((a, b) => {
+    // Both have cosine: pure cosine ordering.
+    if (a.cosine !== null && b.cosine !== null) return b.cosine - a.cosine;
+    // One has cosine, other doesn't: prefer the one WITH cosine —
+    // a known semantic fit beats an unknown.
+    if (a.cosine !== null) return -1;
+    if (b.cosine !== null) return 1;
+    // Neither has cosine: fall back to tag-overlap relevance.
+    if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+    return 0;
+  });
   const afterFilter = filtered.length;
 
   // Join repos for richer metadata; resolve once per repo via single IN-query.
@@ -212,7 +284,7 @@ export async function GET(req: Request) {
       const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
       return on ? { ...c, owner: on.owner, name: on.name } : null;
     })
-    .filter((x): x is (CandidateRow & { whyShortlisted: string; owner: string; name: string }) => x !== null);
+    .filter((x): x is (typeof filtered[number] & { owner: string; name: string }) => x !== null);
 
   // Fetch repos in bulk.
   const repoLookups = await Promise.all(

@@ -187,6 +187,24 @@ export const candidates = sqliteTable(
     primaryLanguage: text("primary_language"),
     topics: text("topics"),       // JSON array of strings
     repoShape: text("repo_shape"), // library | framework | app | template | tutorial | aggregator | unknown
+    // Semantic embedding of the candidate's surface signal (title +
+    // description + topics + repo shape) using OpenAI
+    // text-embedding-3-small. JSON-serialised number[] of length 1536.
+    // Used by /api/inventory/today to rank candidates by cosine
+    // similarity against the project's embedding, instead of bag-of-
+    // tags intersection. Null until the embedding pass runs; lazy-
+    // backfilled at query time when a query hits a candidate without
+    // one.
+    //
+    // Why store as JSON rather than BLOB: SQLite has no native vector
+    // type, JS-side cosine similarity is fine for ~hundreds of vectors
+    // per query (microseconds), and JSON keeps inspection trivial.
+    // 1536 floats × ~10 chars each ≈ 15 KB per row — acceptable.
+    embedding: text("embedding"),
+    // sha256 of the text that was embedded. Lets us skip re-embedding
+    // when the candidate's surface signal hasn't changed.
+    embeddingContentHash: text("embedding_content_hash"),
+    embeddingGeneratedAt: integer("embedding_generated_at", { mode: "timestamp" }),
   },
   (t) => ({
     uniqSourceItem: uniqueIndex("uniq_source_item_user").on(t.userId, t.source, t.sourceItemId),
@@ -316,6 +334,15 @@ export const projectProfiles = sqliteTable(
     // based pre-filtering. Computed locally by the CLI and pushed once.
     // The source is never sent — only the hash.
     fingerprintHash: text("fingerprint_hash"),
+    // Semantic embedding of the project's profile (summary statement +
+    // outcome goals + tags + name + niche) using OpenAI text-embedding-
+    // 3-small. JSON number[1536]. Used as the query vector against
+    // candidates.embedding for semantic shortlisting. Recomputed when
+    // embeddingContentHash diverges from the current project content
+    // (cheap: ~$0.000005 per regen, infrequent in practice).
+    embedding: text("embedding"),
+    embeddingContentHash: text("embedding_content_hash"),
+    embeddingGeneratedAt: integer("embedding_generated_at", { mode: "timestamp" }),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

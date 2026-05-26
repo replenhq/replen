@@ -7,6 +7,11 @@ import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking, hasPrimaryKey, LlmQuotaError } from "../analyzer/llm";
+import { embed, projectEmbeddingText, serialiseEmbedding } from "../lib/embeddings";
+import { createHash } from "node:crypto";
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
 import { generateProjectSummary, needsRegeneration, PROMPT_VERSION, type ProjectSummary } from "../projects/summarize";
 import { assessDocSparsity } from "../projects/self-improvement";
 import {
@@ -186,6 +191,16 @@ async function executePipeline(
     // 24h or until git HEAD moves.
     await refreshStaleActivity(runId, userId, cfg).catch((e) =>
       console.warn(`[pipeline] user=${userId} activity refresh failed:`, e),
+    );
+
+    // Project embeddings (semantic matcher query vectors). Runs after
+    // Stage 1+2 so the embedded text reflects the freshest summary +
+    // outcome goals + tags. Cheap (~$0.000005 per project, only when
+    // content hash changed). Failures are non-fatal — the inventory
+    // query falls back to the legacy tag-intersection path when a
+    // project's embedding is missing.
+    await refreshStaleProjectEmbeddings(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} project embeddings failed:`, e),
     );
 
     // Phase 3 — Scouted pool. Uses the per-project search vectors built
@@ -555,6 +570,77 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
   );
   if (regenerated > 0) {
     void recordEvent(runId, userId, "scan", `Search vectors refreshed for ${regenerated} project(s)`);
+  }
+}
+
+// Semantic embeddings for projects. Computes the "what this project
+// is about" query vector that /api/inventory/today uses to rank
+// candidates by cosine similarity. Cached by content hash: only
+// re-embeds when the project's summary / outcome-goals / tags
+// content actually changes. Cost is ~$0.000005 per regen on
+// text-embedding-3-small; steady-state cost is zero.
+async function refreshStaleProjectEmbeddings(runId: number, userId: number): Promise<void> {
+  const projects = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      eq(schema.projectProfiles.included, true),
+    ));
+  if (projects.length === 0) return;
+
+  let regenerated = 0;
+  let skippedNoSummary = 0;
+  for (const p of projects) {
+    // Parse the project's data into the embedding-text shape.
+    let summary: ProjectSummary | null = null;
+    if (p.summaryJson) {
+      try { summary = JSON.parse(p.summaryJson) as ProjectSummary; } catch { /* ignore */ }
+    }
+    let tags: string[] = [];
+    if (p.tags) {
+      try {
+        const arr = JSON.parse(p.tags);
+        if (Array.isArray(arr)) tags = arr.filter((t): t is string => typeof t === "string");
+      } catch { /* ignore */ }
+    }
+    if (!summary && tags.length === 0 && !p.name) {
+      skippedNoSummary++;
+      continue;
+    }
+
+    const text = projectEmbeddingText({
+      name: p.name ?? null,
+      oneLiner: summary?.purpose ?? null,
+      niche: summary?.keyCapabilities?.join(", ") ?? null,
+      outcomeGoals: summary?.outcomeGoals?.map((g) => g.statement) ?? null,
+      tags,
+      primaryLanguage: null,
+    });
+    if (!text) continue;
+
+    const contentHash = sha256Hex(text);
+    if (p.embeddingContentHash === contentHash && p.embedding) continue; // cache hit
+
+    const result = await embed(text);
+    if (!result) continue;
+    await db
+      .update(schema.projectProfiles)
+      .set({
+        embedding: serialiseEmbedding(result.vector),
+        embeddingContentHash: contentHash,
+        embeddingGeneratedAt: result.generatedAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.projectProfiles.id, p.id));
+    regenerated++;
+  }
+  if (regenerated > 0) {
+    void recordEvent(runId, userId, "scan", `Project embeddings refreshed for ${regenerated} project(s)`);
+  }
+  if (skippedNoSummary > 0) {
+    void recordEvent(runId, userId, "scan", `Project embeddings skipped for ${skippedNoSummary} project(s) (no summary or tags yet)`);
   }
 }
 

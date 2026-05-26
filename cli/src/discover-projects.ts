@@ -303,9 +303,17 @@ function readGitRemote(repoPath: string): string | null {
   } catch {
     return null;
   }
-  // Match both HTTPS (https://github.com/owner/name[.git]) and SSH
-  // (git@github.com:owner/name[.git]) formats.
-  const m = url.match(/github\.com[:/]([^/]+)\/([^/?#]+?)(?:\.git)?$/i);
+  // Match three URL shapes that all resolve to GitHub:
+  //   1. HTTPS:                      https://github.com/owner/name[.git]
+  //   2. Standard SSH:               git@github.com:owner/name[.git]
+  //   3. SSH config alias for github: git@github-<alias>:owner/name[.git]
+  // Case (3) is a common multi-account-GitHub pattern (one ssh alias
+  // per identity, e.g. `github-personal`, `github-work`); the host
+  // portion is opaque to git, the ssh layer resolves it to github.com.
+  // Without this branch, those repos register as "non-GitHub" and get
+  // silently skipped — a confusing failure mode for users with that
+  // convention. Owner/name parsing is identical across all three shapes.
+  const m = url.match(/(?:github\.com|github-[a-z0-9_-]+)[:/]([^/]+)\/([^/?#]+?)(?:\.git)?$/i);
   if (!m) return null;
   return `${m[1]}/${m[2]}`;
 }

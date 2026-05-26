@@ -1,5 +1,7 @@
 import { db, schema } from "../db/client";
 import { errorMsg } from "../lib/error-msg";
+import { candidateEmbeddingText, embedBatch, serialiseEmbedding } from "../lib/embeddings";
+import { sql, eq, isNull, and, gte } from "drizzle-orm";
 import { hnFetcher } from "./hn";
 import { redditFetcher } from "./reddit";
 import { ghTrendingFetcher } from "./gh-trending";
@@ -149,5 +151,96 @@ async function runFetchersInner(userId: number, cfg: UserConfig, fetchers: Fetch
       }
     }
   }
+
+  // Semantic embeddings backfill. Done AFTER the insert (rather than
+  // pre-computing per `it`) so we don't pay for embeddings on
+  // duplicates that get dropped by ON CONFLICT. Failures here are
+  // logged but never poison the fetcher's success — the inventory
+  // query has a tag-intersection fallback when an embedding is missing.
+  try {
+    await backfillCandidateEmbeddings(userId, now);
+  } catch (e) {
+    console.warn(`[fetch] user=${userId} embedding backfill failed:`, errorMsg(e));
+  }
+
   return { inserted, total };
+}
+
+// Pull every candidate this user has that lacks an embedding (and is
+// recent enough to be worth ranking), embed in batches of ~100, and
+// write back. Bounded so a stuck/slow embedding API can't stall the
+// pipeline indefinitely.
+//
+// Why "recent enough": old candidates that have aged out of the
+// inventory-query window will never be returned anyway, so spending
+// embedding budget on them is wasted. The query keeps a 30-day
+// horizon — generous enough to cover any sane inventory query.
+const EMBED_BATCH_SIZE = 100;
+const EMBED_BATCH_CAP = 5; // max 5 batches × 100 = 500 candidates per fetcher run
+const EMBED_HORIZON_DAYS = 30;
+
+async function backfillCandidateEmbeddings(userId: number, asOf: Date): Promise<void> {
+  const horizon = new Date(asOf.getTime() - EMBED_HORIZON_DAYS * 24 * 3600 * 1000);
+  for (let batch = 0; batch < EMBED_BATCH_CAP; batch++) {
+    const pending = await db
+      .select()
+      .from(schema.candidates)
+      .where(and(
+        eq(schema.candidates.userId, userId),
+        isNull(schema.candidates.embedding),
+        gte(schema.candidates.fetchedAt, horizon),
+      ))
+      .orderBy(schema.candidates.id)
+      .limit(EMBED_BATCH_SIZE);
+    if (pending.length === 0) return;
+
+    const texts = pending.map((c) => candidateEmbeddingText({
+      title: c.title,
+      description: extractDescription(c.rawJson),
+      topics: c.topics ? safeParseStringArray(c.topics) : null,
+      repoShape: c.repoShape,
+      primaryLanguage: c.primaryLanguage,
+    }));
+    const results = await embedBatch(texts);
+    let writes = 0;
+    for (let i = 0; i < pending.length; i++) {
+      const r = results[i];
+      if (!r) continue;
+      await db
+        .update(schema.candidates)
+        .set({
+          embedding: serialiseEmbedding(r.vector),
+          embeddingContentHash: r.contentHash,
+          embeddingGeneratedAt: r.generatedAt,
+        })
+        .where(eq(schema.candidates.id, pending[i].id));
+      writes++;
+    }
+    console.log(`[embeddings] user=${userId} batch ${batch+1}/${EMBED_BATCH_CAP}: embedded ${writes}/${pending.length}`);
+    if (writes === 0) {
+      // All-failures in a batch means OPENAI_API_KEY is missing or
+      // the API is unhealthy — bail to avoid spinning.
+      return;
+    }
+    if (pending.length < EMBED_BATCH_SIZE) return; // last batch by virtue of size
+  }
+}
+
+function extractDescription(rawJson: string | null): string | null {
+  if (!rawJson) return null;
+  try {
+    const r = JSON.parse(rawJson) as { description?: string };
+    return r.description?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeParseStringArray(raw: string): string[] | null {
+  try {
+    const a = JSON.parse(raw);
+    return Array.isArray(a) ? a.filter((s): s is string => typeof s === "string") : null;
+  } catch {
+    return null;
+  }
 }

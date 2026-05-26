@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "1";
+export const INTEGRATION_VERSION = "4";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -51,15 +51,56 @@ so you can mention real matches without making the user ask.
 1. **Answer the user's actual ask first**, in full. The user didn't
    ask about Replen; whatever they asked is the priority.
 2. **Then**, on a new line separated by a blank line, append a single-
-   paragraph tail like:
+   paragraph tail. The default template:
    > _By the way — N new Replen matches landed for this repo. Top one:
    > \`owner/name\` (1-line reason). Want the full triage?_
-3. Cap the tail at 3 sentences. The user's task is the headline; Replen
+3. **Add an honest-quality caveat when the batch is weak.** Before
+   asking the user to commit to a triage, evaluate the candidates'
+   fit against **the project as a whole** — its tags, language,
+   topics, what it does end-to-end — NOT against the narrow topic of
+   the user's current question. If the user just asked about auth in
+   a Next.js + Drizzle + Leaflet + Tailwind app and the candidates
+   are good fits for the Leaflet or Drizzle side, mention them as
+   "useful for other parts of the project," not "none are auth-
+   related." The footnote is the agent's read on whether this batch
+   fits the project, not whether it fits the immediate question.
+
+   If the surfaced candidates are mostly language-only matches with
+   no topic / domain overlap with the project (e.g. 5 random Python
+   repos surfaced for a Python computer-vision project, none of
+   which are CV libraries; or 5 random TS repos for a Next.js+auth
+   app, none of which are web-framework / auth / DB libraries), say
+   so:
+   > _By the way — N new Replen matches landed for this repo, **though
+   > none look like a strong fit for what this project is** (mostly
+   > <what they actually are> like \`owner/name\` and \`owner/name\`,
+   > vs. your project's <one-line project description>). Want the
+   > full triage anyway?_
+   This sets honest expectations BEFORE the user commits 1-2 min to
+   triage. Calm cadence over hyped promises.
+4. Cap the tail at 3 sentences. The user's task is the headline; Replen
    is the footnote.
 
-**When to stay silent:** if \`replen_match\` returns \`hasNew: false\`,
-OR the user's first message is itself a Replen command
-(\`/replen-match\`, "what's new from replen?", etc.).
+**When to stay silent (don't append the footnote):**
+
+- \`replen_match\` returned \`hasNew: false\` — nothing to surface.
+- The user **explicitly typed** \`/replen-match\` — they're already
+  engaging with Replen directly; a footnote would be redundant.
+- The user **directly asked for Replen output**, e.g. "anything from
+  replen today?", "what's new from replen?", "show me my replen
+  matches". They're already pulling from Replen; just answer.
+
+**When to STILL append the footnote (don't be overcautious):**
+
+- The user asked about Replen's architecture, its tools, its skill,
+  its MCP, its install flow, or its code — these are normal codebase
+  questions that happen to be about a project named Replen. Answer
+  the question, then append the footnote.
+- The user mentioned Replen incidentally — same rule. Footnote stays.
+
+The silent rule only fires when the user is **directly asking for the
+output of Replen** (their matches / inventory / triage), not when
+they're asking about Replen as a software project.
 
 **Don't call \`replen_match\` again on subsequent turns** — once per
 session at start only. The user explicitly types \`/replen-match\` if

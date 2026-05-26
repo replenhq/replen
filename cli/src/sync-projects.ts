@@ -54,10 +54,12 @@ export async function syncDiscoveredProjects({
     return { discovered: 0, created: 0, updated: 0 };
   }
 
-  // If we ended up prompting the user (or used an explicit flag /
-  // env var), persist the chosen roots so future runs skip the
-  // discovery dance.
-  if (prompted || source === "flag" || source === "env") {
+  // Persist ONLY when the user came in via the interactive prompt.
+  // Flags and env vars are deliberate per-invocation overrides — saving
+  // them to config creates a confusing dual source of truth and, worse,
+  // can lock subsequent commands (like `inject` with no args) into the
+  // narrow scope the user chose for a one-off `--root` use.
+  if (prompted) {
     await persistRoots(result.scannedRoots);
   }
 
