@@ -63,15 +63,13 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 
 ## What it does
 
-1. **Scouts the OSS firehose.** Replen pulls candidates from gh-trending (per-language slices), gh-targeted (niche searches derived from your project's tags), ossinsight historical-walk-back, Threads, Reddit, HN — and applies a cheap eligibility filter (drop aggregators, drop archived deps, drop language-mismatched candidates, dedup across sources).
+1. **Scouts the OSS firehose.** Replen pulls candidates from gh-trending (per-language slices), gh-targeted (niche searches derived from your project's tags), ossinsight historical-walk-back, Threads, Reddit, HN — and applies a cheap eligibility filter (drop aggregators, drop archived deps, drop language-mismatched candidates, dedup across sources). Mechanical, no LLM.
 
-2. **Tells your AI tool when something landed.** A small daily check returns up to 5 candidates per project. When you next open Claude Code / Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message.
+2. **Tells your AI tool when something landed.** A small session-start check returns up to 5 candidates per project. When you next open Claude Code / Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message. Silent on the days nothing is queued.
 
-3. **The agent triages in-session.** Using your subscription tokens (no API key), your AI tool: WebFetches each candidate's README, greps your local source for related code, forms a verdict (adopt / port / skip) with score + effort estimate, and composes a writeup grounded in concrete file references in *your* repo. The hosted scorer can't do this — it doesn't have your code. The agent does, and writes honest verdicts including skips.
+3. **The agent triages in-session.** Using your subscription tokens (no API key needed), your AI tool: WebFetches each candidate's README, greps your local source for related code, forms a verdict (adopt / port / skip) with score + effort estimate, and composes a writeup grounded in concrete file references in *your* repo. All reasoning runs on your AI tool's subscription — Replen has no LLM provider on the server side, so there's nothing to bill and no API key to give us.
 
-4. **You act on the keepers.** Star / hide / handoff PR — captured in `/api/state` server-side; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
-
-5. **Hosted-tier (paid, optional, for non-CLI users).** Same pipeline, but Stage 3-4 LLM scoring runs on Replen's side with BYO API keys, and matches arrive via email digest + web dashboard instead of in-session. For PMs / designers / passive subscribers who don't live in a terminal.
+4. **You act on the keepers.** Star / hide / handoff PR — captured server-side via `replen_state`; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
 
 ## What a match looks like
 
@@ -89,88 +87,75 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 >
 > Do (1) first — single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
 
-The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move. Hosted-tier writeups follow the same shape but only reference public hints about your project (its declared tags, manifests), since the hosted scorer can't see your code.
+The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
 
 ## Numbers we run on
 
-Engineering numbers we measure, not marketing claims we promise:
+Engineering numbers we measure, not marketing claims we promise.
 
-**Skill-tier (default):**
-- **$0** inference cost on the Replen side — reasoning happens on your Claude Code / Codex subscription tokens. Your AI tool's normal rate limits apply.
-- **~5 s** for the daily `replen_check_new` call: list candidates, filter against `user_match_state`, return.
-- **~20-90 s** for in-session triage of one candidate — agent fetches the README, greps your code, writes the verdict. Multiple candidates run sequentially in the same conversation.
-
-**Hosted-tier (paid, optional):**
-- **~$0.09 / user / day** for the routine LLM pipeline on a cheap OpenAI-compatible model with prefix caching warm. Frontier models used only for high-sensitivity projects add ~$0.50-$2 on the days they fire. Hard cap default **$5 / user / day**, configurable on `/settings`.
-- **~1-15 s** to build a BM25 source index for a typical OSS repo (walk + tokenise + post-list). Cached per repo against `README sha`.
-- **~70 s** typical end-to-end for a per-user pipeline run with no source verification: fetch fan-out, triage, reason, write digest.
-
-Everything in this list is observable in the `digest_runs` table and the structured pipeline logs.
+- **$0 to use.** No Replen-side LLM call means nothing to bill. All reasoning runs in your Claude Code / Codex session on the subscription tokens you already pay for; your AI tool's normal rate limits apply.
+- **1-3 actionable matches per month per project.** The target cadence. Server-side eligibility filters prune 60-80% of the daily firehose; the per-project diversity cap (max 6 visible / project / window) prevents noisy weeks from drowning the signal.
+- **~50 ms** for the session-start `replen_check_new` ping: cursor-based, so it only sees what's new since the last call.
+- **~20-90 s** for in-session triage of one candidate — the agent fetches the README, greps your code, writes the verdict. Multiple candidates run sequentially in the same conversation.
 
 ## Workflow
-
-### Skill-tier (default)
 
 ```
 1. Server-side fetcher pulls candidates           → gh-trending, gh-targeted, ossinsight,
                                                     Threads, Reddit, HN; eligibility filter
-                                                    drops obvious junk
+                                                    drops aggregators / archived / dups
 2. You open Claude Code / Codex in a repo         → SessionStart hook + CLAUDE.md instruction
                                                     surfaces "N new matches" in opening context
 3. Your AI tool mentions them after your prompt   → "by the way, 2 new Replen matches landed..."
 4. You ask for triage                             → "show me the top one"
 5. Agent invokes the /replen-match skill          → WebFetches READMEs, greps your local code,
                                                     forms verdict (adopt/port/skip) with score
-6. You star, hide, or hand off                    → POST /api/state captures it; never re-surfaces
+6. You star, hide, or hand off                    → replen_state captures it server-side;
+                                                    agent never re-surfaces what you actioned
+7. Optional: open a handoff PR                    → markdown briefing in .replen/handoffs/;
+                                                    next agent reads it, proposes the diff
 ```
 
-### Hosted-tier (optional, paid)
-
-```
-1. Replen surfaces a match           → dashboard, in email, or via MCP tool
-2. You star it and action a PR       → click ★, or "use replen to handoff matchId 96"
-3. Replen opens a PR in your repo    → a markdown briefing in .replen/handoffs/
-4. Your agent picks it up            → Claude Code / Codex reads the briefing,
-                                       has full context, proposes the integration
-5. You review and merge              → Replen polls PR status, flips to integrated
-```
-
-In both tiers the briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Replen is research + dispatch; never the one writing code into your repo.
+The handoff briefing (committed to your repo, not ours) covers: why this OSS fits *your project specifically*, which files in your codebase to touch, suggested feature-flag rollout, integration risks, what to keep out of scope. Replen is research + dispatch; never the one writing code into your repo.
 
 Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-loop).
 
 ## Architecture
 
 ```
-─── INGESTION ────────────────────────────────────────────────
+─── INGESTION (server-side, mechanical, no LLM) ──────────────
   gh-trending (per-user lang slices) ─┐
   TikTok (curated + per-user handles) ├─┐
   Threads (via RSSHub sidecar)        │ │
   Reddit (curated + per-user subs)    │ ├─→  candidates  (sqlite)
-  HN (Algolia)                        │ │
-  /api/ingest  (bookmarklet / POST)   -─┘
+  HN (Algolia)                        │ │     + eligibility filter
+  ossinsight (24-month long-tail)     │ │     (drop archived /
+  /api/ingest (bookmarklet / POST)   -─┘      aggregator / dup)
                                         ↓
-─── ANALYSIS ─────────────────────────────────────────────────
-  per-user pipeline (run-once.ts)
-    ├─ resolve user config (decrypt secrets, merge sources)
-    ├─ cost guardrail (24h spend vs daily_cost_cap_usd)
-    ├─ skip already-actioned repos
+─── ELIGIBILITY + RANKING (mechanical) ───────────────────────
+    ├─ dedup across sources (gh-trending + Reddit often overlap)
     ├─ apply user_feedback weights to source ranking
-    ├─ scanRepo (GitHub API)  → safety + readme
-    ├─ triage (primary LLM)   → keep/skip decision
-    ├─ reason (primary or sensitive LLM by project sensitivity)
-    │                         → per-project relevance + writeup
-    └─ persist matches  (sqlite)
-
+    ├─ per-project diversity cap (max 6 visible / project / window)
+    └─ persist with discovery mode tag (scouted / discovered / re-checked)
+                                        ↓
 ─── DELIVERY ─────────────────────────────────────────────────
-  → email digest          (HTML via configured email provider, project-grouped)
-  → /api/mcp/* endpoints  (token-auth, JSON)
-  → high-relevance webhook (Slack/Discord/generic, optional)
-
-─── CLIENTS ──────────────────────────────────────────────────
-  - Web dashboard (Next.js, Firebase Auth)
-  - MCP server  (mcp/, stdio, six tools)
-  - Skill       (skills/, triage protocol playbook)
+  → @replen/mcp (stdio, 13 tools)
+       ↑    replen_check_new → "N new" surfaced in session
+       │    replen_match     → curated inventory scoped to open repo
+       │    replen_state     → star / hide / handoff captured
+       │
+  ┌────┴─────────────────────────────────────────────────────┐
+  │  /replen-match skill (Claude Code playbook)              │
+  │    - WebFetches each candidate's README                  │
+  │    - Greps the user's local code                         │
+  │    - Forms verdict (adopt / port / skip) + writeup       │
+  │    - All reasoning on user's subscription tokens         │
+  │    - Replen never sees source code                       │
+  └──────────────────────────────────────────────────────────┘
+  → SessionStart hook       (npx replen check-new --hook, ~50ms)
+  → handoff PR mechanism    (GitHub REST API, optional PAT)
+  → high-relevance webhook  (Slack / Discord, optional)
+  → Webapp                  (Next.js, Firebase Auth — settings + history viewer)
 ```
 
 ## Local dev
@@ -191,20 +176,19 @@ Required `.env` keys for local:
 
 | key | what for |
 |---|---|
-| `ENCRYPTION_KEY` | base64 32-byte key for at-rest secret encryption. Generate with `openssl rand -base64 32` |
+| `ENCRYPTION_KEY` | base64 32-byte key for at-rest secret encryption (used for the optional GitHub PAT). Generate with `openssl rand -base64 32` |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY_BASE64` | service account for Firebase Auth |
-| `LLM_PRIMARY_API_KEY` / `LLM_PRIMARY_BASE_URL` / `LLM_PRIMARY_MODEL` | primary LLM slot, OpenAI-compatible wire format. Works with DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter, local llama.cpp / ollama, anything that speaks the OpenAI chat API. Optional shared fallback when no per-user key is set |
-| `LLM_SENSITIVE_API_KEY` / `LLM_SENSITIVE_BASE_URL` / `LLM_SENSITIVE_MODEL` | optional second slot used only for projects flagged high-sensitivity. Defaults to Anthropic's `/v1/messages` wire format; set `LLM_SENSITIVE_WIRE_FORMAT=openai-compatible` to route through `/chat/completions` instead |
-| `GITHUB_TOKEN` | only used by tests; per-user PATs drive real runs |
+| `GITHUB_TOKEN` | only used by tests; user PATs (optional, for handoff PRs) drive real runs |
 | `SYNC_TOKEN` | random string, gates the laptop `/api/sync` CLI |
-| `EMAIL_PROVIDER` | `ses` (default, generic SMTP) or `resend`. SMTP uses `SES_SMTP_*` / `SMTP_*` env vars; Resend uses `RESEND_API_KEY`. `EMAIL_FROM_ADDRESS` is required either way |
+
+No LLM provider keys are required — reasoning happens client-side in the user's AI tool session, not on the server. See `.env.example` for legacy / opt-in extras (e.g. webhooks).
 
 ## Self-host
 
 Runs on any Linux server or your local machine: Node.js + sqlite. Two long-running processes:
 
-- `replen.service`: Next.js dashboard on `127.0.0.1:3030`
-- `replen-cron.service`: node-cron scheduler that wakes at your `cron_hour_utc` and runs the pipeline + nightly aging
+- `replen.service`: Next.js webapp (settings + history) on `127.0.0.1:3030`
+- `replen-cron.service`: node-cron scheduler that periodically fetches source feeds, applies the eligibility filter, and updates the candidate inventory. Mechanical work — no LLM calls.
 
 The included `scripts/deploy.sh` rsyncs the repo to a target host, installs systemd units, and reloads. It is one possible layout; you can swap in any process manager (PM2, supervisord, Docker, a launchd plist on macOS) and any reverse proxy (nginx, Caddy, Traefik) without touching the app. Front it with whatever TLS you already use.
 
@@ -230,36 +214,35 @@ The script excludes `.env`, `node_modules`, `.next`, `data`, and `.git` from rsy
 
 ## Surfaces
 
-### Web dashboard
+The product is the **skill + MCP**, running inside your Claude Code / Codex session. The webapp is a settings UI for configuring the skill/MCP and a history viewer for browsing what surfaced over time — optional, the skill works whether you ever sign in or not.
 
-| Route | Purpose |
-|---|---|
-| `/` | Today's matches, project-grouped, with star/hide/feedback/handoff actions |
-| `/starred` | All starred matches bucketed by handoff state (awaiting / open PR / integrated) |
-| `/integrated` | Wall of merged OSS; proof of what actually got shipped |
-| `/search` | Full-text across writeups, repo metadata, personal notes |
-| `/projects` | Per-project config: sensitivity, LLM provider override, GitHub repo binding |
-| `/sources` | Per-user source handles + curated source proposals |
-| `/runs` | Run history with cost cards (7d / 30d / avg per match / provider mix), per-source breakdown (candidates → matches → convert% + 👍/👎 net) |
-| `/settings` | Credentials, delivery prefs, daily cost cap, webhook, ingest token, bookmarklet + MCP install snippet, language re-detect, maintenance (archive old hidden) |
-| `/admin` | Review and approve curated source proposals queued up from any account on the instance |
+### Skill (`skills/replen-match/`)
 
-Keyboard shortcuts on `/`: `j/k` navigate matches, `s` star, `h` hide, `/` focus header search, `?` show hint.
+`/replen-match` is the Claude Code skill that runs in-session triage: list new candidates via the MCP, WebFetch each candidate's README, grep your local code, form a per-candidate verdict (adopt / port / skip) with a writeup grounded in real file paths in *your* repo. Invoke explicitly with `/replen-match`, or let the agent invoke it automatically when the SessionStart hook surfaces "N new matches." `npx replen` installs it into `~/.claude/skills/` for you.
+
+The MCP gives the agent **tools** (data access); the skill gives it a **playbook** (when to call what, in what order, how to write the verdict). Domain-volatility split per [LlamaIndex's skills-vs-MCP article](https://www.llamaindex.ai/blog/skills-vs-mcp-tools-for-agents-when-to-use-what).
 
 ### MCP server (`mcp/`)
 
-Self-contained npm package (`@replen/mcp`) that exposes six tools to Claude Code / Codex / any MCP host:
+Self-contained npm package (`@replen/mcp`) that exposes thirteen tools to Claude Code / Codex / any MCP host. Grouped by role:
 
-| Tool | Returns |
-|---|---|
-| `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
-| `replen_search` | Full-text search results |
-| `replen_starred` | Starred matches with handoff state |
-| `replen_analyze` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
-| `replen_handoff` | Opens a handoff PR for a starred match |
-| `replen_feedback` | Records good/bad/star/unstar/hide |
+| Role | Tool | Returns |
+|---|---|---|
+| **Triage flow** | `replen_check_new` | Have any new high/medium matches landed since last session? Cheap (~50ms). Bumps a cursor so the next call only sees what's new |
+| | `replen_match` | Today's curated inventory scoped to the open repo. Returns candidates + `whyShortlisted` line; the skill triages each against the local codebase |
+| | `replen_state` | Capture user actions: star / unstar / hide / handoff |
+| | `replen_record_triage` | Persist the agent's verdict (adopt / port / skip + score + effort) back to Replen |
+| **Inspection** | `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
+| | `replen_search` | Full-text search across writeups, repo metadata, notes |
+| | `replen_starred` | Starred matches with handoff state |
+| | `replen_analyze` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
+| **Actions** | `replen_handoff` | Opens a handoff PR for a starred match |
+| | `replen_feedback` | Records good / bad on a source (retrains source ranking) |
+| **Ingest control** | `replen_run` | Triggers a fresh server-side ingest run (source fetch + eligibility filter) without opening the dashboard |
+| | `replen_status` | Polls the current ingest run (in-flight or finished); reports candidate counts and any pause reason |
+| **Discovery** | `replen_help` | Tool-discovery list; useful when bootstrapping the connection |
 
-**Install:** `npx replen` (does the OAuth flow + wires this into Claude Code in one command; see Quickstart above).
+**Install:** `npx replen` (OAuth flow + wires this into Claude Code in one command; see Quickstart above).
 
 To install the MCP only (skip the auth flow), or to wire it into a host other than Claude Code, add the entry by hand:
 
@@ -280,11 +263,23 @@ To install the MCP only (skip the auth flow), or to wire it into a host other th
 
 Token from `/settings` → "Connect Claude Code".
 
-### Skill (`skills/replen-match/`)
+### Webapp (optional)
 
-The Claude Code skill that runs the skill-tier in-session triage protocol: list new candidates via the MCP, WebFetch each README, grep the user's local code, form a per-candidate verdict (adopt / port / skip) with a writeup grounded in real file paths. Invoke with `/replen-match` (or let the agent invoke it automatically when the SessionStart hook surfaces "N new matches"). `npx replen` installs it into `~/.claude/skills/` for you.
+Settings UI for the skill/MCP and a history viewer for past matches. Use it when you want to tweak per-project tags, browse what surfaced over the last month, or check on a handoff PR's status. Everything else surfaces in-session — you can ignore the webapp entirely if you live in Claude Code.
 
-The MCP gives the agent **tools** (data access); the skill gives it a **playbook** (when to call what, in what order). Domain-volatility split per [LlamaIndex's skills-vs-MCP article](https://www.llamaindex.ai/blog/skills-vs-mcp-tools-for-agents-when-to-use-what).
+| Route | Purpose |
+|---|---|
+| `/` | History view: past matches project-grouped, with star/hide/handoff state |
+| `/starred` | All starred matches bucketed by handoff state (awaiting / open PR / integrated) |
+| `/integrated` | Wall of merged OSS; proof of what actually got shipped |
+| `/search` | Full-text across writeups, repo metadata, personal notes |
+| `/projects` | Per-project settings: sensitivity, GitHub repo binding, per-project tags + filter-mode |
+| `/sources` | Per-user source handles + curated source proposals |
+| `/runs` | Ingest run history; per-source breakdown (candidates surfaced + 👍/👎 net) |
+| `/settings` | Ingest token, MCP install snippet, bookmarklet, webhook (optional), maintenance |
+| `/admin` | Review and approve curated source proposals queued up from any account on the instance |
+
+Keyboard shortcuts on `/`: `j/k` navigate matches, `s` star, `h` hide, `/` focus header search, `?` show hint.
 
 ## Sources
 
@@ -299,34 +294,19 @@ The MCP gives the agent **tools** (data access); the skill gives it a **playbook
 
 Source ranking (for tie-breaking when multiple sources surface the same repo): tiktok > threads > reddit > hn > gh-trending. Weights are scaled per-source by the user's 👍/👎 feedback ratio (smoothed, capped at [0.25, 2.0]), so chronically-bad sources sink in candidate ordering.
 
-## Pipeline (per user, per run)
+## Server-side pipeline (per user, per run)
 
-**Skill-tier** stops after step 2; analysis happens in the user's AI session instead.
-**Hosted-tier** runs the full pipeline:
+The server runs a small periodic job (cron, configurable interval) that maintains the candidate inventory. Mechanical work — no LLM calls anywhere on the server side.
 
-1. **Cost guardrail**: sum the last 24h of runs; if ≥ `daily_cost_cap_usd`, skip and record a `paused_reason='cost-cap'` row.
-2. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`. (Skill-tier stops here — apply eligibility filter and surface via `replen_check_new` MCP tool.)
-3. **runAnalysis** (hosted-tier only):
-   - Apply `user_feedback` weights to source ranking.
-   - Skip already-actioned repos (starred / hidden / integrated / has handoff PR).
-   - For each unique GitHub repo:
-     - `scanRepo`: metadata, README, contributor count, postinstall hooks, secret scan.
-     - `triage` (primary LLM slot): keep/skip JSON. Skip if not keep.
-     - `reasonAboutRepo` (primary or sensitive LLM slot, by project sensitivity): per-project relevance + writeup.
-   - Persist a `match` row per (repo, project) pair with a denormalised `source_kind`.
-4. **sendDigestEmail**: HTML email grouped by project, with TOC, colour-coded relevance chips, source attribution, click-through to dashboard.
-5. **sendHighRelevanceWebhook** (optional): POST to Slack/Discord/generic if any `relevance=high` matches.
+1. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`.
+2. **eligibility filter**: drop aggregators, archived deps, language mismatches, cross-source duplicates. Tags candidates at insert with language + topics + repo-shape.
+3. **rank**: apply `user_feedback` weights to source ranking (per-source 👍/👎 smoothed).
+4. **diversity cap**: enforce per-project visible cap (default 6 / project / window) so noisy weeks don't drown the signal.
+5. **sendHighRelevanceWebhook** (optional): POST to Slack/Discord/generic if any new `relevance=high` matches.
 
-Encrypted at rest: PATs, LLM keys, and email-provider creds are stored as AES-256-GCM ciphertext keyed off `ENCRYPTION_KEY` (per-account DEK envelope). Decrypted only in memory during a run.
+The agent's verdicts (adopt / port / skip) come in later, via `replen_record_triage` from your AI tool's in-session triage. They're persisted alongside the candidates for browsing on the webapp.
 
-## Costs
-
-- **LLM:** depends entirely on the providers you wire up. A typical run on a cheap OpenAI-compatible model lands around $0.10 to $0.30/day after prefix-caching kicks in; a frontier model used only for high-sensitivity projects adds ~$0.50 to $2/run on the days it fires.
-- **Email:** depends on provider. Both built-in adapters (generic SMTP/SES, Resend) have generous free tiers.
-- **Server:** flat, whatever you already pay. Sqlite + Node makes this cheap to run on a small VM or even a Raspberry Pi.
-- **MCP / bookmarklet:** no marginal cost; they just query the same DB.
-
-Default daily LLM cap is **$5/user**; configurable on `/settings`.
+Encrypted at rest (AES-256-GCM, per-account DEK envelope, keyed off `ENCRYPTION_KEY`): the optional user PAT used for handoff PRs, and the optional webhook URL. No LLM keys are stored because none are needed.
 
 ## Repository layout
 

@@ -31,8 +31,7 @@
 // --yes skips the prompt (CI / scripted use). Non-TTY also skips
 // (e.g. when invoked from a hook).
 
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -77,33 +76,23 @@ export type InjectOutcome = {
   declined: boolean; // user said no at the consent prompt
 };
 
-const SCAN_ROOTS = ["github", "code", "projects"]; // under ~/
-
-// Find candidate project directories: immediate children of SCAN_ROOTS
-// that are git repos. We don't recurse — most users keep one level of
-// nesting under their org-or-user-named root.
-function discoverRepos(): string[] {
-  const out: string[] = [];
-  const home = homedir();
-  for (const root of SCAN_ROOTS) {
-    const rootPath = join(home, root);
-    if (!existsSync(rootPath)) continue;
-    let entries: string[];
-    try { entries = readdirSync(rootPath); } catch { continue; }
-    for (const name of entries) {
-      // Skip dotfiles + obvious non-repos.
-      if (name.startsWith(".") || name === "node_modules") continue;
-      const path = join(rootPath, name);
-      try {
-        if (!statSync(path).isDirectory()) continue;
-        if (!existsSync(join(path, ".git"))) continue;
-        out.push(path);
-      } catch {
-        // permission / symlink errors — skip silently
-      }
-    }
-  }
-  return out;
+// Find candidate project directories using the same layered discovery
+// as `npx replen sync-projects` — explicit --root flag → REPLEN_PROJECT_ROOTS
+// → saved config → cwd walk-up → ~/.claude.json mining → hardcoded
+// ~/github,~/code,~/projects → interactive prompt. Then recursively
+// walk each root for git repos (depth-capped, exclusions applied,
+// stops at .git boundaries).
+//
+// Filters to repos with a GitHub remote so we don't inject into local-
+// only repos that Replen can't match against anyway — the injected
+// instruction tells the agent to call `replen_match`, which is a no-op
+// without a registered project.
+async function discoverRepos(explicitRoots: string[]): Promise<string[]> {
+  // Reuse sync-projects' resolveAndWalk via the previewDiscovery helper
+  // so inject and sync-projects find the exact same set of repos.
+  const { previewDiscovery } = await import("./sync-projects.js");
+  const result = await previewDiscovery(explicitRoots);
+  return result.projects.map((p) => p.localPath);
 }
 
 type FileAction = "created" | "appended" | "alreadyCurrent" | "versionUpdated";
@@ -234,8 +223,8 @@ async function promptYes(question: string): Promise<boolean> {
   });
 }
 
-export async function injectInstructions(opts: { yes?: boolean } = {}): Promise<InjectOutcome> {
-  const repos = discoverRepos();
+export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: string[] } = {}): Promise<InjectOutcome> {
+  const repos = await discoverRepos(opts.explicitRoots ?? []);
   const outcome: InjectOutcome = {
     scanned: repos.length,
     created: 0,
@@ -246,13 +235,13 @@ export async function injectInstructions(opts: { yes?: boolean } = {}): Promise<
     declined: false,
   };
   if (repos.length === 0) {
-    console.log("  · no git repos found under ~/github/, ~/code/, or ~/projects/ — skipping CLAUDE.md inject");
+    console.log("  · no git repos with GitHub remotes found — skipping CLAUDE.md inject. Pass --root <path> if your code lives somewhere non-conventional.");
     return outcome;
   }
   // First-run consent. Shows the count + an example path so the user
   // knows the blast radius. --yes (or non-TTY) bypasses.
   if (!opts.yes) {
-    console.log(`\n  Found ${repos.length} git repo(s) under ~/github/, ~/code/, ~/projects/.`);
+    console.log(`\n  Found ${repos.length} git repo(s) with GitHub remotes.`);
     console.log(`  Append a "## Replen integration" section to each CLAUDE.md so Claude Code`);
     console.log(`  surfaces today's matches at session start. Idempotent; edit freely above`);
     console.log(`  the section. First 3:`);

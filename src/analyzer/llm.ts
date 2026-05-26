@@ -256,6 +256,14 @@ export function hasAnthropicKey(): boolean {
     ?? readRunOrEnv("anthropicApiKey", "ANTHROPIC_API_KEY"));
 }
 
+// Cheap check before invoking the primary-slot LLM. Skill-tier self-host
+// users without LLM keys configured should hit this and skip Stage 1/2
+// rather than letting every per-project call throw the same error.
+export function hasPrimaryKey(): boolean {
+  return !!(readRunOrEnv("llmPrimaryApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY")
+    ?? readRunOrEnv("deepseekApiKey", "DEEPSEEK_API_KEY"));
+}
+
 // Primary slot (OpenAI-compatible /chat/completions wire format).
 // Works with DeepSeek, OpenAI, Groq, Together, Fireworks, OpenRouter,
 // local llama.cpp / ollama servers, anything that speaks OpenAI's chat API.

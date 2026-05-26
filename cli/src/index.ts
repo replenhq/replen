@@ -19,8 +19,9 @@ Usage:
                              so the agent auto-surfaces matches on session
                              start. Idempotent. Asks for consent unless -y.
   npx replen sync-projects   Re-scan local repos for new GitHub remotes
-                             and register them with Replen. Run after
-                             cloning a new repo.
+       [--root PATH ...]     and register them with Replen. Run after
+                             cloning a new repo, or pass --root to point
+                             at a non-conventional layout.
   npx replen logout          Forget saved auth
   npx replen --help          This help
 
@@ -48,6 +49,14 @@ Every data command accepts --json to dump raw JSON for scripting / jq.
 
 Env:
   REPLEN_BASE             Override dashboard URL (default https://app.replen.dev)
+  REPLEN_PROJECT_ROOTS    Colon-separated list of dirs to scan for git repos.
+                          Overrides auto-detection. e.g. ~/work:~/src
+
+Project discovery (when run without --root and REPLEN_PROJECT_ROOTS unset):
+  1. Walks up from the current dir to find a git repo, suggests its parent
+  2. Reads ~/.claude.json for tracked Claude Code project paths
+  3. Falls back to ~/github, ~/code, ~/projects, ~/dev, ~/src, ~/work
+  4. Prompts you interactively if none of the above turn up anything
 
 Learn more: https://replen.dev
 `;
@@ -109,7 +118,8 @@ async function main() {
   if (cmd === "inject") {
     const { injectInstructions, summariseOutcome } = await import("./inject-instruction.js");
     const yes = argv.includes("--yes") || argv.includes("-y");
-    const outcome = await injectInstructions({ yes });
+    const explicitRoots = collectRootFlags(argv);
+    const outcome = await injectInstructions({ yes, explicitRoots });
     const summary = summariseOutcome(outcome);
     if (summary) console.log(summary);
     return;
@@ -121,8 +131,9 @@ async function main() {
       console.error("Not signed in. Run `npx replen` first.");
       process.exit(1);
     }
+    const explicitRoots = collectRootFlags(argv);
     const { syncDiscoveredProjects } = await import("./sync-projects.js");
-    await syncDiscoveredProjects({ token: cfg.token, base: cfg.base });
+    await syncDiscoveredProjects({ token: cfg.token, base: cfg.base, explicitRoots });
     return;
   }
 
@@ -151,6 +162,24 @@ async function main() {
   console.error(`Unknown command: ${cmd}\n`);
   console.error(HELP);
   process.exit(1);
+}
+
+/**
+ * Parse one or more `--root <path>` (or `--root=<path>`) flags out of
+ * the argv tail. Doesn't validate the path — discover-roots.ts handles
+ * existence + stat checks downstream.
+ */
+function collectRootFlags(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--root" && argv[i + 1]) {
+      out.push(argv[++i]);
+    } else if (arg.startsWith("--root=")) {
+      out.push(arg.slice("--root=".length));
+    }
+  }
+  return out;
 }
 
 main().catch((e) => {

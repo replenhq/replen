@@ -6,7 +6,7 @@ import { discoverProjectsForUser, parseShapeJson, upsertProjects } from "../proj
 import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
-import { beginUsageTracking, endUsageTracking, LlmQuotaError } from "../analyzer/llm";
+import { beginUsageTracking, endUsageTracking, hasPrimaryKey, LlmQuotaError } from "../analyzer/llm";
 import { generateProjectSummary, needsRegeneration, PROMPT_VERSION, type ProjectSummary } from "../projects/summarize";
 import { assessDocSparsity } from "../projects/self-improvement";
 import {
@@ -375,6 +375,15 @@ async function loadProjectsForUser(runId: number, userId: number, cfg: UserConfi
 // projects. Errors per-project are swallowed; one bad project doesn't kill
 // the whole refresh.
 async function refreshStaleProjectSummaries(runId: number, userId: number): Promise<void> {
+  if (!hasPrimaryKey()) {
+    void recordEvent(
+      runId,
+      userId,
+      "scan",
+      "Stage 1 (project summaries) skipped: no LLM_PRIMARY_API_KEY configured. Active scouting will be disabled; discovered-pool matches only. Set LLM_PRIMARY_API_KEY to enable.",
+    );
+    return;
+  }
   const projects = await db
     .select()
     .from(schema.projectProfiles)
@@ -454,6 +463,13 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
 // persists. Records a "scan" event per regen and a "match" event count
 // summary at the end. Capped concurrency 3 (same as summary refresh).
 async function refreshStaleSearchVectors(runId: number, userId: number): Promise<void> {
+  if (!hasPrimaryKey()) {
+    // No event recorded here — refreshStaleProjectSummaries already emitted
+    // the user-facing "Stage 1 skipped" message. This call is a silent no-op
+    // because without Stage 1 summaries there's nothing to generate vectors
+    // from anyway.
+    return;
+  }
   const projects = await db
     .select()
     .from(schema.projectProfiles)
@@ -535,6 +551,13 @@ async function refreshStaleSearchVectors(runId: number, userId: number): Promise
 async function refreshStaleActivity(runId: number, userId: number, cfg: UserConfig): Promise<void> {
   if (!cfg.githubToken) {
     void recordEvent(runId, userId, "scan", "Activity refresh skipped: no GitHub PAT on /settings");
+    return;
+  }
+  if (!hasPrimaryKey()) {
+    // Activity probing is cheap (GitHub API only), but the LLM summarisation
+    // step that turns the raw signal into "currently working on X" requires
+    // the primary slot. Without a key, skip silently — the Stage 1 skip
+    // event already explained the situation to the user.
     return;
   }
   const projects = await db

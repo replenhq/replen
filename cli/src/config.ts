@@ -9,6 +9,12 @@ export type Config = {
   token: string;
   base: string;
   savedAt: string;
+  /**
+   * Project roots discovered (or explicitly chosen) on first install.
+   * Persisted so future `npx replen sync-projects` runs skip the
+   * inference dance. Empty / absent = use auto-detect each time.
+   */
+  projectRoots?: string[];
 };
 
 export async function readConfig(): Promise<Config | null> {

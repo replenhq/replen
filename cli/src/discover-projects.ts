@@ -1,9 +1,12 @@
 // Local-filesystem project discovery for day-1 onboarding.
 //
-// Walks the user's conventional repo roots (~/github/, ~/code/,
-// ~/projects/) for git repos, then for each one extracts:
+// Recursively walks a list of root dirs (provided by discover-roots.ts),
+// finds every git repo, and for each one extracts:
 //   - The repo's `owner/name` from `git remote get-url origin`
-//   - A slug (from the directory basename, normalised)
+//   - A slug derived from the GITHUB repo name (so a local folder named
+//     "drone" whose remote is acme/acme registers with slug "acme",
+//     matching what shows on GitHub). Falls back to dirname for repos
+//     without a GitHub remote.
 //   - A name (from package.json's `name` field if present, else slug)
 //   - Auto-suggested tags from the project's manifests
 //   - The primary language (best-effort, from manifest type)
@@ -11,33 +14,81 @@
 // Output is shaped for POST /api/projects/bulk on the server. No
 // network or LLM calls — pure local filesystem.
 //
-// Why local-FS instead of asking GitHub via PAT: skill-mode's whole
-// pitch is "no API keys to share with us." Auto-detect via GitHub
-// API requires a PAT; auto-detect via local git remotes requires
-// nothing the user doesn't already have. PAT becomes optional, only
-// needed if/when the user wants server-side handoff PRs.
+// Why local-FS instead of asking GitHub via PAT: the whole pitch is
+// "no API keys to share with us." Auto-detect via GitHub API requires
+// a PAT; auto-detect via local git remotes requires nothing the user
+// doesn't already have. PAT becomes optional, only needed if/when the
+// user wants server-side handoff PRs.
 
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { type Dirent, readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { homedir } from "node:os";
 import { join, basename } from "node:path";
 
 export type DiscoveredProject = {
   /** Absolute filesystem path on the user's machine */
   localPath: string;
-  /** URL-safe identifier (from directory basename, lowercased) */
+  /** URL-safe identifier — GitHub repo name when remote present, else dirname */
   slug: string;
   /** Human-readable name (from package.json if present, else slug) */
   name: string;
-  /** owner/name extracted from git remote */
-  githubFullName: string;
+  /** owner/name extracted from git remote; null if no GitHub remote */
+  githubFullName: string | null;
   /** Auto-detected tags — language, framework, key deps, topics */
   tags: string[];
   /** Best-effort detected primary language */
   primaryLanguage: string | null;
 };
 
-const SCAN_ROOTS = ["github", "code", "projects"]; // immediate children of ~
+export type DiscoveryResult = {
+  /** Projects with a GitHub remote — eligible for registration */
+  projects: DiscoveredProject[];
+  /** Repos found locally but skipped because they have no GitHub remote */
+  nonGithubSkipped: number;
+  /** Actual root dirs that were walked (after dedup) */
+  scannedRoots: string[];
+};
+
+// Hard maximum directory depth to walk from each root. depth=0 is the
+// root itself, depth=1 its immediate children, etc. 4 covers the
+// "workspace dir with sibling repos" pattern (e.g. ~/projects/drone/
+// containing ~/projects/drone/flight-controller/.git, where the
+// flight-controller dir is at depth 2 from ~/projects).
+const MAX_DEPTH = 4;
+
+// Directory names to skip outright during the walk. Mix of: build
+// artifacts that pollute repo-counting, package caches that can be
+// huge, and macOS / Linux home subdirs that never contain user code.
+const EXCLUDE_NAMES = new Set<string>([
+  "node_modules",
+  ".next",
+  "dist",
+  "build",
+  "target",
+  "vendor",
+  ".cache",
+  ".npm",
+  ".yarn",
+  ".pnpm-store",
+  ".turbo",
+  ".terraform",
+  ".venv",
+  "venv",
+  "__pycache__",
+  // macOS system / media dirs
+  "Library",
+  "Applications",
+  "System",
+  "Pictures",
+  "Movies",
+  "Music",
+  "Downloads",
+  "Public",
+  "Desktop",
+  // Linux equivalents
+  ".local",
+  ".config",
+  "snap",
+]);
 
 // Manifest-derived tag mappings. Each pattern matches a dep name (or
 // a substring) and yields one or more tags. Ordered by specificity:
@@ -103,35 +154,134 @@ const DEP_TO_TAGS: Array<{ match: RegExp; tags: string[] }> = [
   { match: /^scikit-learn$/, tags: ["ml"] },
 ];
 
-export function discoverProjects(): DiscoveredProject[] {
-  const out: DiscoveredProject[] = [];
-  const home = homedir();
-  for (const root of SCAN_ROOTS) {
-    const rootPath = join(home, root);
-    if (!existsSync(rootPath)) continue;
-    let entries: string[];
-    try { entries = readdirSync(rootPath); } catch { continue; }
-    for (const dirName of entries) {
-      if (dirName.startsWith(".") || dirName === "node_modules") continue;
-      const localPath = join(rootPath, dirName);
-      try {
-        if (!statSync(localPath).isDirectory()) continue;
-        if (!existsSync(join(localPath, ".git"))) continue;
-      } catch { continue; }
+/**
+ * Walk the given roots recursively (depth-capped, excluded dirs skipped)
+ * and return every git repo found, partitioned by whether it has a
+ * GitHub origin remote. Repos without a GitHub remote are counted but
+ * not registered — they're surfaced to the user as transparency rather
+ * than silently dropped.
+ *
+ * Deduplicates by absolute `localPath` (so overlapping roots like
+ * `~/projects` and `~/projects/drone` don't double-register the inner
+ * repos) and by `githubFullName` (so cloning the same repo to two
+ * paths doesn't create two project rows).
+ *
+ * Slug = the local directory basename (normalised). When two repos in
+ * the discovery result would share a slug (e.g. `flight-controller`
+ * under both `~/projects/drone/` and `~/work/sandbox/`), the second+
+ * gets `-<owner>` appended to disambiguate. Keeps slugs short for the
+ * common case while preventing server-side `uniq_profile_user_slug`
+ * collisions.
+ *
+ * Identity is `githubFullName` on the server side; slug is just the
+ * URL-safe display label. So a local `~/projects/drone/` whose remote
+ * is `acme/acme` keeps slug `drone` (matching how you think of it
+ * locally) while still registering correctly against `acme/acme` on
+ * the dashboard.
+ */
+export function discoverProjects(roots: string[]): DiscoveryResult {
+  const seenPaths = new Set<string>();
+  const seenGithub = new Set<string>();
+  const projects: DiscoveredProject[] = [];
+  let nonGithubSkipped = 0;
+  const scannedRoots = Array.from(new Set(roots.filter(existsAndIsDir)));
 
-      const githubFullName = readGitRemote(localPath);
-      if (!githubFullName) continue; // No GitHub remote → skip; can't register
+  for (const root of scannedRoots) {
+    for (const repoPath of walkForGitRepos(root, 0)) {
+      if (seenPaths.has(repoPath)) continue;
+      seenPaths.add(repoPath);
 
-      const { name, tags, primaryLanguage } = extractMetadata(localPath, dirName);
-      const slug = normaliseSlug(dirName);
-      out.push({ localPath, slug, name, githubFullName, tags, primaryLanguage });
+      const githubFullName = readGitRemote(repoPath);
+      const dirName = basename(repoPath);
+
+      if (!githubFullName) {
+        nonGithubSkipped++;
+        continue;
+      }
+      if (seenGithub.has(githubFullName)) continue;
+      seenGithub.add(githubFullName);
+
+      const { name, tags, primaryLanguage } = extractMetadata(repoPath, dirName);
+      projects.push({
+        localPath: repoPath,
+        slug: normaliseSlug(dirName),
+        name,
+        githubFullName,
+        tags,
+        primaryLanguage,
+      });
     }
   }
-  return out;
+
+  // In-discovery slug disambiguation. Same-name dirs under different
+  // parents (e.g. `~/projects/drone/flight-controller` +
+  // `~/work/flight-controller`) would otherwise collide on the server's
+  // `uniq_profile_user_slug` index. Suffix the second+ occurrence with
+  // the GitHub owner so it remains unique per user.
+  disambiguateSlugs(projects);
+
+  return { projects, nonGithubSkipped, scannedRoots };
 }
 
-function normaliseSlug(dirName: string): string {
-  return dirName
+function disambiguateSlugs(projects: DiscoveredProject[]): void {
+  const counts = new Map<string, number>();
+  for (const p of projects) counts.set(p.slug, (counts.get(p.slug) ?? 0) + 1);
+  const used = new Set<string>();
+  for (const p of projects) {
+    if ((counts.get(p.slug) ?? 0) <= 1 && !used.has(p.slug)) {
+      used.add(p.slug);
+      continue;
+    }
+    const owner = (p.githubFullName ?? "").split("/")[0] ?? "";
+    let candidate = normaliseSlug(`${p.slug}-${owner}`);
+    let n = 2;
+    while (used.has(candidate)) {
+      candidate = normaliseSlug(`${p.slug}-${owner}-${n++}`);
+    }
+    p.slug = candidate;
+    used.add(candidate);
+  }
+}
+
+/**
+ * Generator: yields the absolute path of every git repo found under
+ * `dir`, up to `MAX_DEPTH`. Stops recursing into a directory once a
+ * `.git/` is found there (treats it as a repo boundary — submodules
+ * and nested-clone edge cases aren't worth complicating the walker).
+ */
+function* walkForGitRepos(dir: string, depth: number): Generator<string> {
+  if (depth > MAX_DEPTH) return;
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  // Is this dir itself a repo? Yield + stop recursing.
+  if (entries.some((e) => e.name === ".git" && (e.isDirectory() || e.isSymbolicLink()))) {
+    yield dir;
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (entry.name.startsWith(".")) continue;
+    if (EXCLUDE_NAMES.has(entry.name)) continue;
+    yield* walkForGitRepos(join(dir, entry.name), depth + 1);
+  }
+}
+
+function existsAndIsDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function normaliseSlug(name: string): string {
+  return name
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, "-")
     .replace(/^-+|-+$/g, "")
