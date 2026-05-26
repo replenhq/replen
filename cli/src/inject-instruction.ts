@@ -292,7 +292,7 @@ export function summariseOutcome(o: InjectOutcome): string {
     return lines.join("\n");
   }
   const parts: string[] = [];
-  if (o.created > 0) parts.push(`${o.created} CLAUDE.md created`);
+  if (o.created > 0) parts.push(`${o.created} file${o.created === 1 ? "" : "s"} created`);
   if (o.appended > 0) parts.push(`${o.appended} appended`);
   if (o.versionUpdated > 0) parts.push(`${o.versionUpdated} updated to v${INTEGRATION_VERSION}`);
   if (o.alreadyCurrent > 0) parts.push(`${o.alreadyCurrent} already current`);

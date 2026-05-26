@@ -2,11 +2,10 @@ import "./globals.css";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { db, schema } from "@/db/client";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
-import { NavLink } from "@/components/NavLink";
 import { UserMenu } from "@/components/UserMenu";
 import { getDemoUser, isDemoUser } from "@/lib/auth/demo-mode";
 
@@ -73,32 +72,25 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     : await getCurrentUser().catch(() => null);
   const isActive = user?.status === "active";
 
-  // Per-user header counters: starred matches in the DB, plus how many
-  // of those don't yet have a handoff PR, plus integrated total. Single
-  // round-trip, cheap. Only meaningful for active users.
+  // Header counter: starred entries from user_match_state (the skill-tier
+  // canonical store). Plus how many don't yet have a handoff PR. Single
+  // round-trip, index-only scan via idx_user_match_state_user_status.
   let starredCount = 0;
   let starredAwaitingHandoff = 0;
-  let integratedCount = 0;
   if (user && isActive) {
     const counts = await db
       .select({
         total: sql<number>`count(*)`,
-        awaiting: sql<number>`sum(case when ${schema.matches.handoffPrUrl} is null then 1 else 0 end)`,
+        awaiting: sql<number>`sum(case when ${schema.userMatchState.handoffPrUrl} is null then 1 else 0 end)`,
       })
-      .from(schema.matches)
+      .from(schema.userMatchState)
       .where(and(
-        eq(schema.matches.userId, user.id),
-        inArray(schema.matches.userStatus, ["starred", "bookmarked"]),
+        eq(schema.userMatchState.userId, user.id),
+        eq(schema.userMatchState.status, "starred"),
       ))
       .get();
     starredCount = Number(counts?.total ?? 0);
     starredAwaitingHandoff = Number(counts?.awaiting ?? 0);
-    const intRow = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(schema.matches)
-      .where(and(eq(schema.matches.userId, user.id), eq(schema.matches.handoffPrStatus, "merged")))
-      .get();
-    integratedCount = Number(intRow?.c ?? 0);
   }
 
   // demoMode tracks the URL (via the middleware header), not the resolved
@@ -139,11 +131,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href={homeHref} style={{ background: "transparent", marginRight: 14, padding: 0 }}>
               <Wordmark />
             </a>
-            <NavLink href={homeHref} style={{ marginRight: 14 }}>Feed</NavLink>
-            <form className="search" action={`${navPrefix}/search`} method="get" role="search">
-              <Icon name="search" size={14} />
-              <input name="q" placeholder="search…" aria-label="Search" />
-            </form>
             {starredCount > 0 && (
               <a className="counter" href={`${navPrefix}/starred`} title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
                 <Icon name="star-fill" size={13} />
@@ -155,12 +142,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     <Icon name="arrow-right" size={11} />
                   </>
                 )}
-              </a>
-            )}
-            {integratedCount > 0 && (
-              <a className="counter" href={`${navPrefix}/integrated`} title={`${integratedCount} integrated OSS packages`}>
-                <Icon name="check" size={13} />
-                {integratedCount}
               </a>
             )}
             <div className="spacer" />

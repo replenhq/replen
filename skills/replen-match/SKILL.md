@@ -128,6 +128,32 @@ mismatch, security flag. Empty list is fine; don't manufacture.
 No marketing voice. No hype. The user is a working engineer; talk to
 them like a peer. Concrete > clever.
 
+#### 3d. Record the verdict
+
+**After each candidate's writeup**, call the `replen_record_triage` MCP
+tool with the structured verdict so it surfaces on the user's Activity
+feed at the dashboard. Use the same `sessionId` (any opaque string,
+e.g. timestamp `2026-05-26T10-32`) across every call in this session
+so the feed can cluster them as one triage run.
+
+```
+mcp__replen__replen_record_triage(
+  repo="owner/name",
+  project="tech-news-site",      // slug, from scopedTo
+  verdict="adopt",               // adopt|port|skip|defer
+  score=87,                      // 0-100
+  effortBand="quick",            // quick|moderate|deep
+  oneLine="Drops in for lib/social/imageRenderer.ts — 30 min.",
+  writeup="<full markdown body of the writeup you just composed>",
+  sessionId="2026-05-26T10-32"
+)
+```
+
+This call is what makes the agent's work visible. Without it, the user
+only sees their own actions (star / hide) — they can't see "the agent
+considered 5 candidates this morning and skipped 4 of them, here's
+why." Record one event per candidate, including skips.
+
 ### Step 4 — Present + capture actions
 
 After all writeups, summarise:

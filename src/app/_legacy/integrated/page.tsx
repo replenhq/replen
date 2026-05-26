@@ -1,7 +1,7 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/current-user";
-import { refreshHandoffStatuses } from "../actions";
+import { refreshHandoffStatuses } from "../../actions";
 import { SkillTierBanner, fetchSubscriptionTier, fetchSkillState } from "@/components/SkillTierBanner";
 import { formatTimestampToMinute } from "@/lib/format-date";
 

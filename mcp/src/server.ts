@@ -52,8 +52,9 @@ const TOOLS: Tool[] = [
         "Replen MCP — available tools:",
         "",
         "  Skill-mode (current — in-session matching with subscription tokens):",
-        "    replen_match     Pulls today's candidate inventory scoped to the cwd repo so YOU triage each one against the local codebase. Returns candidates + metadata. You produce the writeups; no API key used.",
-        "    replen_state     Record a user action (starred / hidden / handed_off / surfaced) on a candidate.",
+        "    replen_match            Pulls today's candidate inventory scoped to the cwd repo so YOU triage each one against the local codebase. Returns candidates + metadata. You produce the writeups; no API key used.",
+        "    replen_record_triage    Record your per-candidate verdict (adopt / port / skip / defer) after you triage one in replen_match. Powers the Activity feed.",
+        "    replen_state            Record a user action (starred / hidden / handed_off / surfaced) on a candidate.",
         "    replen_check_new Session-start check: is there anything new + actionable? Cheap, terse, silent when nothing's new.",
         "",
         "  Legacy hosted-tier (still works for users in subscription_tier='hosted'; in skill-mode these return empty/stale data):",
@@ -143,6 +144,49 @@ const TOOLS: Tool[] = [
         throw new Error("must specify repo (owner/name) or repoId");
       }
       const data = await apiPost(cfg, "/api/state", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
+    name: "replen_record_triage",
+    description:
+      "Record your per-candidate triage decision back to Replen. Call ONCE per candidate during the replen_match loop, AFTER you've formed your verdict but BEFORE / alongside presenting the writeup to the user. " +
+      "Captures the agent's view of each candidate (adopt / port / skip / defer) with score + effort + reasoning. Distinct from replen_state, which captures the USER's action (star / hide / handoff). Both surface on the Activity feed at the user's dashboard. " +
+      "Append-only: re-calling for the same repo creates another event row, useful if you re-evaluate later. " +
+      "Voice: oneLine should be 1 sentence the user might read in a feed (\"Drops in for annotations.py — 30 min\"). writeup is the full reasoning (up to 16 KB).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name of the candidate repo" },
+        repoId: { type: "number", description: "Alternative to repo — repoId from replen_match output" },
+        project: { type: "string", description: "Project slug this verdict was made against. Omit for global verdicts." },
+        projectId: { type: "number", description: "Alternative to project — project profile id." },
+        verdict: { type: "string", enum: ["adopt", "port", "skip", "defer"], description: "Your structured call. adopt = drop-in fit; port = idea worth copying, runtime mismatched; skip = worse than current or wrong fit; defer = revisit later." },
+        score: { type: "number", minimum: 0, maximum: 100, description: "Agent-assigned relevance score 0-100. Optional." },
+        effortBand: { type: "string", enum: ["quick", "moderate", "deep"], description: "quick (<1d), moderate (1-3d), deep (1+w). Optional." },
+        oneLine: { type: "string", maxLength: 280, description: "1-sentence summary for the Activity feed." },
+        writeup: { type: "string", description: "Optional full reasoning. Up to 16 KB. No user source code." },
+        sessionId: { type: "string", description: "Opaque per-Claude-Code-session id to cluster events. Use the same value across all replen_record_triage calls in one session." },
+      },
+      required: ["verdict"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        repoId: z.number().int().positive().optional(),
+        project: z.string().optional(),
+        projectId: z.number().int().positive().nullable().optional(),
+        verdict: z.enum(["adopt", "port", "skip", "defer"]),
+        score: z.number().min(0).max(100).optional(),
+        effortBand: z.enum(["quick", "moderate", "deep"]).optional(),
+        oneLine: z.string().max(280).optional(),
+        writeup: z.string().max(16 * 1024).optional(),
+        sessionId: z.string().max(128).optional(),
+      }).parse(args);
+      if (!parsed.repo && parsed.repoId === undefined) {
+        throw new Error("must specify repo (owner/name) or repoId");
+      }
+      const data = await apiPost(cfg, "/api/triage", parsed);
       return JSON.stringify(data, null, 2);
     },
   },

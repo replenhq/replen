@@ -3,9 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icons";
 
-// Avatar button + dropdown holding the secondary nav (settings, projects,
-// sources, activity, admin, sign out). Replaces the email-in-nav pattern
-// with the GitHub/Linear/Notion-style avatar menu.
+// Avatar button + dropdown holding the secondary nav (settings, starred,
+// sign out). GitHub/Linear/Notion-style avatar menu.
 export function UserMenu({ email, isAdmin, demoMode }: { email: string; isAdmin: boolean; demoMode?: boolean }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -51,20 +50,9 @@ export function UserMenu({ email, isAdmin, demoMode }: { email: string; isAdmin:
           <a className="dropdown-item" href={`${navPrefix}/settings`} role="menuitem">
             <Icon name="settings" size={16} /> Settings
           </a>
-          <a className="dropdown-item" href={`${navPrefix}/projects`} role="menuitem">
-            <Icon name="folder" size={16} /> Projects
+          <a className="dropdown-item" href={`${navPrefix}/starred`} role="menuitem">
+            <Icon name="star-fill" size={16} /> Starred
           </a>
-          <a className="dropdown-item" href={`${navPrefix}/sources`} role="menuitem">
-            <Icon name="database" size={16} /> Sources
-          </a>
-          <a className="dropdown-item" href={`${navPrefix}/runs`} role="menuitem">
-            <Icon name="activity" size={16} /> Activity
-          </a>
-          {isAdmin && (
-            <a className="dropdown-item" href="/admin" role="menuitem">
-              <Icon name="shield" size={16} /> Admin
-            </a>
-          )}
           <hr className="dropdown-divider" />
           {demoMode ? (
             // Demo: replace Sign out with a Back-to-main CTA. Demo visitors

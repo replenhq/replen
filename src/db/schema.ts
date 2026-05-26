@@ -360,6 +360,57 @@ export const userMatchState = sqliteTable(
   })
 );
 
+// Append-only event log of agent-side triage decisions. Each row =
+// "the agent considered candidate X for project Y, verdict was Z,
+// here's a one-line summary." Posted by the /replen-match skill via
+// the replen_record_triage MCP tool. Distinct from user_match_state
+// (which is the user's monotonic action state) — this is the agent's
+// running journal, multi-event by design.
+//
+// Why a separate table:
+//   - user_match_state is unique on (user, repo, project); triage_events
+//     allows multiple rows so the agent can re-evaluate the same
+//     candidate in different sessions.
+//   - Verdicts ('adopt' / 'port' / 'skip' / 'defer') are the agent's
+//     view; user actions ('starred' / 'hidden' / 'handed_off') are the
+//     user's view. They can disagree (agent said adopt, user starred
+//     anyway; agent said skip, user starred). Both are interesting.
+//   - The Activity feed on / merges both streams ordered by timestamp.
+export const triageEvents = sqliteTable(
+  "triage_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    repoId: integer("repo_id").notNull().references(() => repos.id, { onDelete: "cascade" }),
+    projectId: integer("project_id").references(() => projectProfiles.id, { onDelete: "set null" }),
+    // 'adopt' | 'port' | 'skip' | 'defer'. The agent's structured call
+    // on whether this candidate belongs in the user's stack.
+    verdict: text("verdict").notNull(),
+    // 0-100, agent-assigned. Nullable so the skill can record a
+    // "considered but no score" event.
+    score: integer("score"),
+    // 'quick' (<1d) | 'moderate' (1-3d) | 'deep' (1+w). Nullable.
+    effortBand: text("effort_band"),
+    // Short summary the agent wrote for the user. Like a commit subject.
+    oneLine: text("one_line"),
+    // Optional full reasoning. Can be 0-5KB. Replen stores this server-
+    // side because it's the agent's *output about a public repo* — no
+    // user source code in it. Useful for the Activity feed to show
+    // "click to see why".
+    writeup: text("writeup"),
+    // Groups events from the same Claude Code session. Lets the
+    // Activity feed cluster "agent triaged 5 candidates Tuesday" as
+    // one collapsible block. CLI-assigned, opaque to the server.
+    sessionId: text("session_id"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserCreated: index("idx_triage_events_user_created").on(t.userId, t.createdAt),
+    idxUserRepo: index("idx_triage_events_user_repo").on(t.userId, t.repoId),
+    idxSession: index("idx_triage_events_session").on(t.userId, t.sessionId),
+  })
+);
+
 export const matches = sqliteTable(
   "matches",
   {
