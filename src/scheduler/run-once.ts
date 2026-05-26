@@ -176,6 +176,22 @@ async function executePipeline(
     const fetched = await runFetchers(userId, cfg);
     candidatesFound = fetched.inserted;
     void recordEvent(runId, userId, "fetch_done", `Fetched ${fetched.inserted} new candidates (${fetched.total} total seen)`);
+
+    // Skill-tier short-circuit: stages 3-5 (analysis, prune, digest,
+    // synthesis) run in the user's Claude Code / Codex session via
+    // /replen-match, using subscription tokens. The server side stops
+    // at the candidate inventory + eligibility filter. Hosted-tier
+    // users keep the full pipeline.
+    if ((settings?.subscriptionTier ?? "skill") === "skill") {
+      void recordEvent(
+        runId,
+        userId,
+        "scan",
+        "Skill tier: stages 3-5 run in-session via /replen-match. Candidate inventory ready.",
+      );
+      return;
+    }
+
     const analysis = await runAnalysis(runId, userId, cfg);
     reposAnalyzed = analysis.reposAnalyzed;
     matchesCreated = analysis.matchesCreated;
