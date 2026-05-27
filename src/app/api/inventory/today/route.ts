@@ -333,6 +333,21 @@ export async function GET(req: Request) {
       projectMatch: scopedProject?.slug ?? null,
     }));
 
+  // Pre-formatted user-facing footnote string. Built server-side so the
+  // agent doesn't have to derive it from the JSON (which has historically
+  // been the unreliable bit — agents inconsistently formatted or skipped
+  // it). The MCP server surfaces this directly under a USER-FACING
+  // MESSAGE block in its tool response, with the tool description
+  // instructing the agent to relay it verbatim.
+  let displayText: string | null = null;
+  if (candidatesOut.length > 0 && scopedProject) {
+    const top = candidatesOut[0];
+    const simMatch = top.whyShortlisted.match(/semantic similarity:\s*(\d+)%/);
+    const simStr = simMatch ? ` (~${simMatch[1]}% match)` : "";
+    const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
+    displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
+  }
+
   return NextResponse.json(
     {
       filterMode,
@@ -342,6 +357,7 @@ export async function GET(req: Request) {
       afterEligibility,
       afterFilter,
       returned: candidatesOut.length,
+      displayText,
       candidates: candidatesOut,
     },
     { headers: corsHeaders },

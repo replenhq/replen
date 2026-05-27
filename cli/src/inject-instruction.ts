@@ -35,16 +35,66 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "4";
+export const INTEGRATION_VERSION = "7";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
 const SECTION_BODY = `<!-- replen-integration: v${INTEGRATION_VERSION} -->
 
-On your **very first response** of each session, silently call the
-\`replen_match\` MCP tool (or invoke the \`/replen-match\` skill). It
-returns today's curated OSS candidate inventory scoped to this repo
-so you can mention real matches without making the user ask.
+On your **very first response** of each session:
+
+1. **Skip the whole flow** if the user's first message is a trivial
+   greeting / pleasantry with no task ("hi", "hey", "yo", "morning",
+   "ok", "thanks"). Just answer naturally and move on — adding any
+   Replen probe to a 2s greeting is hostile UX.
+
+2. **Otherwise**, silently call \`replen_match\` (or invoke the
+   \`/replen-match\` skill) WITHOUT passing a repo argument — let
+   it default to the cwd repo's owner/name. Returns candidates with
+   metadata + \`whyShortlisted\` lines + cosine similarity scores.
+   Single round-trip, fast DB query, no LLM cost on the Replen side.
+
+3. **If \`replen_match\` returns a non-empty \`candidates\` array,
+   you MUST append the footnote.** This is non-negotiable — the
+   whole point of the integration is that you tell the user when
+   inventory exists for their project. If candidates are off-topic
+   or weak fit, that goes INSIDE the footnote ("though none look
+   like a strong fit…"), not as a reason to suppress it. Letting
+   the user decide whether to triage is core to the calm-cadence
+   contract.
+
+4. **Only if \`replen_match\` returns an empty \`candidates\` array
+   do you stay silent.** No footnote, no apology. Calm cadence.
+
+**Do NOT use \`replen_check_new\` for the conversational footnote.**
+That tool is cursor-based and meant for SessionStart shell hooks —
+calling it from the agent will silently bump the cursor and prevent
+future surfacing of perfectly relevant candidates the user hasn't
+seen. \`replen_match\` queries inventory state directly, doesn't
+touch any cursor, and is the right primitive for "should I surface
+something to the user right now?"
+
+**Concrete examples — what right looks like:**
+
+✗ WRONG (silently dropping the footnote because matches felt weak):
+  > [detailed answer to user's question]
+  > [end of response, no footnote]
+
+✓ RIGHT (caveat included, footnote still present):
+  > [detailed answer to user's question]
+  >
+  > _By the way — 5 new Replen matches landed for this repo, though
+  > none look like a strong fit for what this project is (mostly
+  > general AI tooling like \`owner/foo\` and \`owner/bar\`, vs.
+  > your <one-line project description>). Want the full triage
+  > anyway?_
+
+✓ RIGHT (when matches are strong):
+  > [detailed answer to user's question]
+  >
+  > _By the way — 5 new Replen matches landed for this repo. Top
+  > one: \`owner/repo\` (~58% semantic match — one-line reason).
+  > Want the full triage?_
 
 **Response shape — ORDER MATTERS:**
 

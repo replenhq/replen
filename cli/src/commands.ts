@@ -279,6 +279,29 @@ export async function runCheckNew(argv: string[]): Promise<void> {
       // correct response (calm-cadence principle).
       const scope = r.scopedTo ? ` for ${r.scopedTo}` : "";
       console.log(`No new actionable matches${scope} since you last engaged.`);
+      return;
+    }
+    // Hook mode + hasNew=false: fall back to inventory state. check-new
+    // is cursor-based and goes silent the moment ANY prior call (including
+    // our own validation probes or a previous session) bumped the cursor
+    // past existing matches. That's right behaviour for "did anything
+    // change?", wrong for "should I tell the agent there's a queue worth
+    // surfacing?" — the user might never have seen these candidates.
+    //
+    // Resolve the cwd's GitHub remote, query the inventory scoped to it,
+    // and print a one-line status if anything's there. Output goes
+    // verbatim into the agent's opening context via Claude Code's
+    // SessionStart-hook stdout injection.
+    const cwdRepo = await detectCwdRepo();
+    if (!cwdRepo) return; // not in a git repo, or no GitHub remote — silent
+    try {
+      const inv = await fetchInventoryStatus(cfg, cwdRepo);
+      if (inv && inv.count > 0) {
+        const top = inv.topRepo ? ` Top: ${inv.topRepo}${inv.topSimilarity ? ` (~${inv.topSimilarity}% match)` : ""}.` : "";
+        console.log(`Replen has ${inv.count} candidate${inv.count === 1 ? "" : "s"} queued for ${cwdRepo}.${top} Run /replen-match for full triage.`);
+      }
+    } catch {
+      // Inventory query failed — silent, never disrupt a session.
     }
     return;
   }
@@ -454,4 +477,74 @@ function handleApiError(e: unknown): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// Resolve the cwd's git origin remote into a GitHub owner/name, if the
+// remote is a GitHub URL (HTTPS, standard SSH, or a multi-account SSH
+// alias like github-personal). Returns null if not in a git repo or the
+// remote isn't GitHub. Used by the SessionStart hook to scope inventory
+// queries to the project the user just opened Claude Code in.
+async function detectCwdRepo(): Promise<string | null> {
+  try {
+    const { execSync } = await import("node:child_process");
+    const url = execSync("git remote get-url origin", {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 1500,
+    }).trim();
+    const m = url.match(/(?:github\.com|github-[a-z0-9_-]+)[:/]([^/]+)\/([^/?#]+?)(?:\.git)?$/i);
+    if (!m) return null;
+    return `${m[1]}/${m[2]}`;
+  } catch {
+    return null;
+  }
+}
+
+// Query the inventory for the cwd's repo and return a compact status
+// suitable for the hook one-liner. We deliberately don't pull the full
+// candidate writeups here — the hook output goes into the agent's
+// opening context, and a flood of detail there would crowd out the
+// user's actual task. Just enough to tell the agent "there's queue
+// worth surfacing; the user can ask for the triage."
+type InventoryHookStatus = {
+  count: number;
+  topRepo: string | null;
+  topSimilarity: number | null;
+};
+async function fetchInventoryStatus(
+  cfg: { token: string; base: string },
+  repo: string,
+): Promise<InventoryHookStatus | null> {
+  // Hook mode is on the session-open critical path; cap latency hard.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const url = new URL(cfg.base + "/api/inventory/today");
+    url.searchParams.set("repo", repo);
+    url.searchParams.set("limit", "5");
+    url.searchParams.set("days", "14");
+    const res = await fetch(url, {
+      headers: { "x-digest-token": cfg.token, accept: "application/json" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      candidates?: Array<{ repo?: string; whyShortlisted?: string }>;
+    };
+    const cands = data.candidates ?? [];
+    if (cands.length === 0) return null;
+    const top = cands[0];
+    // Pull the cosine % out of whyShortlisted if present
+    // (format: "...; semantic similarity: 58%").
+    const simMatch = top.whyShortlisted?.match(/semantic similarity:\s*(\d+)%/);
+    return {
+      count: cands.length,
+      topRepo: top.repo ?? null,
+      topSimilarity: simMatch ? Number(simMatch[1]) : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

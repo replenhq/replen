@@ -78,13 +78,24 @@ const TOOLS: Tool[] = [
   {
     name: "replen_match",
     description:
-      "Skill-mode entry point. Pulls today's candidate inventory scoped to the cwd repo and returns candidates with metadata + a server-side 'whyShortlisted' line. " +
-      "After calling this, YOU (the agent) triage each candidate against the local codebase using your subscription tokens (no API key used, no hosted LLM call):\n" +
+      "Skill-mode entry point. Pulls today's candidate inventory scoped to the cwd repo. " +
+      "\n\n" +
+      "RESPONSE FORMAT — IMPORTANT:\n" +
+      "The response has two sections, separated by a divider:\n" +
+      "  1. USER-FACING MESSAGE (the first section, between two `===` lines): a pre-formatted footnote string. " +
+      "If this section is non-empty, you MUST relay it VERBATIM at the end of your response to the user, " +
+      "on a new paragraph after answering their original question. This is the calm-cadence surface; " +
+      "the user sees it and decides whether to ask for the full triage. Do NOT reword, summarise, or skip it. " +
+      "If this section is empty (just `(none)`), say nothing about Replen — silence is correct, " +
+      "the inventory has nothing for this repo right now.\n" +
+      "  2. DATA (the JSON below the divider): the structured candidate list with metadata + cosine scores + whyShortlisted lines. " +
+      "Use these for the in-session triage if the user accepts the 'Want me to triage them?' offer. Don't show this raw to the user.\n" +
+      "\n" +
+      "TRIAGE PROTOCOL (only when the user accepts):\n" +
       "  1. For each candidate, WebFetch the candidate's README + grep the user's source for related code (under src/, lib/, app/ — skip node_modules, dist, .next).\n" +
       "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w).\n" +
       "  3. Compose a writeup with concrete file-level impact references — name actual files the candidate replaces or improves.\n" +
       "  4. Present writeups to the user, ask which to star / hide / handoff / skip, call replen_state for each action.\n" +
-      "If 0 candidates returned: tell the user calm-cadence is working and stop. " +
       "Cap on real-life triage: 5 candidates max per session. " +
       "Scoped by default to the repo this MCP was spawned in. Pass repo='' to see the global firehose across all the user's projects.",
     inputSchema: {
@@ -105,8 +116,22 @@ const TOOLS: Tool[] = [
         repo: resolveRepo(args, cfg),
         limit: parsed.limit,
         days: parsed.days,
-      });
-      return JSON.stringify(data, null, 2);
+      }) as { displayText?: string | null; [k: string]: unknown };
+
+      // Two-section response: prominent USER-FACING MESSAGE block first
+      // (the agent MUST relay this verbatim per the tool description),
+      // then the structured JSON below for the triage protocol. This
+      // makes the surfacing path data-driven instead of relying on
+      // CLAUDE.md instruction adherence (which has proven unreliable).
+      const display = (typeof data.displayText === "string" && data.displayText) ? data.displayText : "(none)";
+      return [
+        "=== USER-FACING MESSAGE (relay this verbatim at end of your response; skip if `(none)`) ===",
+        display,
+        "=== END USER-FACING MESSAGE ===",
+        "",
+        "=== DATA (for triage; don't show raw to user) ===",
+        JSON.stringify(data, null, 2),
+      ].join("\n");
     },
   },
   {
