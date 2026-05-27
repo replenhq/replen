@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "7";
+export const INTEGRATION_VERSION = "8";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -43,119 +43,57 @@ const SECTION_BODY = `<!-- replen-integration: v${INTEGRATION_VERSION} -->
 
 On your **very first response** of each session:
 
-1. **Skip the whole flow** if the user's first message is a trivial
-   greeting / pleasantry with no task ("hi", "hey", "yo", "morning",
-   "ok", "thanks"). Just answer naturally and move on — adding any
-   Replen probe to a 2s greeting is hostile UX.
+1. **Skip the whole flow ONLY if** the user's first message is a
+   pure trivial greeting with no content ("hi", "hey", "yo",
+   "morning", "ok", "thanks"). One- or two-word pleasantries only.
+   Statements, questions, vague intent, clarifying conversation —
+   none of these qualify; the footnote should fire for all of them.
 
-2. **Otherwise**, silently call \`replen_match\` (or invoke the
-   \`/replen-match\` skill) WITHOUT passing a repo argument — let
-   it default to the cwd repo's owner/name. Returns candidates with
-   metadata + \`whyShortlisted\` lines + cosine similarity scores.
-   Single round-trip, fast DB query, no LLM cost on the Replen side.
+2. **Otherwise**, silently call \`replen_match\` WITHOUT passing
+   a repo argument (let it default to the cwd repo). The response
+   has two sections separated by \`===\` dividers:
+     - USER-FACING MESSAGE: a pre-formatted footnote string
+     - DATA: the structured candidate JSON for triage
 
-3. **If \`replen_match\` returns a non-empty \`candidates\` array,
-   you MUST append the footnote.** This is non-negotiable — the
-   whole point of the integration is that you tell the user when
-   inventory exists for their project. If candidates are off-topic
-   or weak fit, that goes INSIDE the footnote ("though none look
-   like a strong fit…"), not as a reason to suppress it. Letting
-   the user decide whether to triage is core to the calm-cadence
-   contract.
+3. **If the USER-FACING MESSAGE block is non-empty (not \`(none)\`),
+   relay it VERBATIM at the end of your response.** Drop it in as
+   a new paragraph after answering / asking / replying. Do NOT:
+   - rewrite it
+   - add a caveat ("though these don\'t look like a strong fit…")
+   - narrow it to the user\'s current question topic
+   - shorten it
+   - decide it\'s "not worth surfacing"
 
-4. **Only if \`replen_match\` returns an empty \`candidates\` array
-   do you stay silent.** No footnote, no apology. Calm cadence.
+   The string was built server-side specifically to be the message
+   the user sees. The judgment about whether the matches fit is the
+   USER\'s, made on the triage offer — not yours. Server-side we
+   already encoded "Want me to triage them?" as the call to action;
+   the user accepts or declines.
+
+4. **If the USER-FACING MESSAGE block is \`(none)\`**, stay
+   silent. No mention of Replen.
+
+5. **Fire on every first response that isn\'t a pure trivial
+   greeting** — including responses where you ask clarifying
+   questions, restate the user\'s intent, or acknowledge them. The
+   footnote goes at the end of your message regardless of message
+   shape.
+
+**Additional silent cases** (besides \`(none)\` USER-FACING MESSAGE):
+- The user explicitly typed \`/replen-match\` — redundant.
+- The user directly asked for Replen output ("anything from replen
+  today?", "what\'s new from replen?"). Just answer.
 
 **Do NOT use \`replen_check_new\` for the conversational footnote.**
-That tool is cursor-based and meant for SessionStart shell hooks —
-calling it from the agent will silently bump the cursor and prevent
-future surfacing of perfectly relevant candidates the user hasn't
-seen. \`replen_match\` queries inventory state directly, doesn't
-touch any cursor, and is the right primitive for "should I surface
-something to the user right now?"
+That tool is cursor-based and meant for SessionStart shell hooks.
+\`replen_match\` queries inventory state directly and is the right
+primitive here.
 
-**Concrete examples — what right looks like:**
-
-✗ WRONG (silently dropping the footnote because matches felt weak):
-  > [detailed answer to user's question]
-  > [end of response, no footnote]
-
-✓ RIGHT (caveat included, footnote still present):
-  > [detailed answer to user's question]
-  >
-  > _By the way — 5 new Replen matches landed for this repo, though
-  > none look like a strong fit for what this project is (mostly
-  > general AI tooling like \`owner/foo\` and \`owner/bar\`, vs.
-  > your <one-line project description>). Want the full triage
-  > anyway?_
-
-✓ RIGHT (when matches are strong):
-  > [detailed answer to user's question]
-  >
-  > _By the way — 5 new Replen matches landed for this repo. Top
-  > one: \`owner/repo\` (~58% semantic match — one-line reason).
-  > Want the full triage?_
-
-**Response shape — ORDER MATTERS:**
-
-1. **Answer the user's actual ask first**, in full. The user didn't
-   ask about Replen; whatever they asked is the priority.
-2. **Then**, on a new line separated by a blank line, append a single-
-   paragraph tail. The default template:
-   > _By the way — N new Replen matches landed for this repo. Top one:
-   > \`owner/name\` (1-line reason). Want the full triage?_
-3. **Add an honest-quality caveat when the batch is weak.** Before
-   asking the user to commit to a triage, evaluate the candidates'
-   fit against **the project as a whole** — its tags, language,
-   topics, what it does end-to-end — NOT against the narrow topic of
-   the user's current question. If the user just asked about auth in
-   a Next.js + Drizzle + Leaflet + Tailwind app and the candidates
-   are good fits for the Leaflet or Drizzle side, mention them as
-   "useful for other parts of the project," not "none are auth-
-   related." The footnote is the agent's read on whether this batch
-   fits the project, not whether it fits the immediate question.
-
-   If the surfaced candidates are mostly language-only matches with
-   no topic / domain overlap with the project (e.g. 5 random Python
-   repos surfaced for a Python computer-vision project, none of
-   which are CV libraries; or 5 random TS repos for a Next.js+auth
-   app, none of which are web-framework / auth / DB libraries), say
-   so:
-   > _By the way — N new Replen matches landed for this repo, **though
-   > none look like a strong fit for what this project is** (mostly
-   > <what they actually are> like \`owner/name\` and \`owner/name\`,
-   > vs. your project's <one-line project description>). Want the
-   > full triage anyway?_
-   This sets honest expectations BEFORE the user commits 1-2 min to
-   triage. Calm cadence over hyped promises.
-4. Cap the tail at 3 sentences. The user's task is the headline; Replen
-   is the footnote.
-
-**When to stay silent (don't append the footnote):**
-
-- \`replen_match\` returned \`hasNew: false\` — nothing to surface.
-- The user **explicitly typed** \`/replen-match\` — they're already
-  engaging with Replen directly; a footnote would be redundant.
-- The user **directly asked for Replen output**, e.g. "anything from
-  replen today?", "what's new from replen?", "show me my replen
-  matches". They're already pulling from Replen; just answer.
-
-**When to STILL append the footnote (don't be overcautious):**
-
-- The user asked about Replen's architecture, its tools, its skill,
-  its MCP, its install flow, or its code — these are normal codebase
-  questions that happen to be about a project named Replen. Answer
-  the question, then append the footnote.
-- The user mentioned Replen incidentally — same rule. Footnote stays.
-
-The silent rule only fires when the user is **directly asking for the
-output of Replen** (their matches / inventory / triage), not when
-they're asking about Replen as a software project.
-
-**Don't call \`replen_match\` again on subsequent turns** — once per
-session at start only. The user explicitly types \`/replen-match\` if
-they want a fresh triage mid-session.
+**Don\'t call \`replen_match\` again on subsequent turns** — once
+per session at start only. The user explicitly types
+\`/replen-match\` if they want a fresh triage mid-session.
 `;
+
 
 export type InjectOutcome = {
   scanned: number;
