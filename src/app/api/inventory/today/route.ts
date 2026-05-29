@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
@@ -62,14 +62,20 @@ export async function GET(req: Request) {
         sql`LOWER(${schema.projectProfiles.githubFullName}) = ${repoFilter}`,
       ))
       .get();
-    if (p) {
+    if (p && p.active && p.included) {
       scopedProjectId = p.id;
       scopedProject = p;
     } else {
-      // The cwd's repo isn't a known project. Stay silent on the inventory
-      // — surfacing matches for unrelated projects when the agent opens in
-      // /tmp or someone's dotfiles is noise. The caller can pass repo=''
-      // explicitly to override.
+      // Stay silent on the inventory in two cases:
+      //   - the cwd's repo isn't a known project (surfacing matches for
+      //     unrelated projects when the agent opens in /tmp or someone's
+      //     dotfiles is noise), or
+      //   - it IS a known project but the user excluded/deactivated it on
+      //     /projects. An excluded project has no fresh embedding/search
+      //     vectors, so any matches would be stale tag-only noise. Honour the
+      //     user's "don't watch this repo" choice instead of leaking matches.
+      // The caller can pass repo='' explicitly to override and see the
+      // global firehose.
       return NextResponse.json(
         {
           filterMode,
@@ -79,7 +85,10 @@ export async function GET(req: Request) {
           afterEligibility: 0,
           afterFilter: 0,
           candidates: [],
-          note: "repo not in your project list; pass repo='' for the global firehose",
+          displayText: null,
+          note: p
+            ? "project is excluded from matching on /projects; pass repo='' for the global firehose"
+            : "repo not in your project list; pass repo='' for the global firehose",
         },
         { headers: corsHeaders },
       );
@@ -130,16 +139,37 @@ export async function GET(req: Request) {
 
   const totalConsidered = cands.length;
 
-  // Excluded set: repos the user has already engaged with (starred /
-  // hidden / handed_off). Surfacing these again would be noise.
+  // Excluded set. A repo is suppressed for one of two reasons:
+  //   1. Terminal action — starred / hidden / handed_off: never re-surface.
+  //   2. Cool-off — a 'surfaced' repo the user hasn't acted on, shown either
+  //      too recently (within the cool-off window) or too many times total.
+  //      Without this the inventory re-serves the same candidates every
+  //      session until they're starred/hidden, so repeat users see the same
+  //      footnote daily. The skill records 'surfaced' (with an incrementing
+  //      count) via /api/state for every candidate it presents.
+  const COOLOFF_HOURS = Math.max(0, parseInt(process.env.REPLEN_RESURFACE_COOLOFF_HOURS ?? "48", 10) || 48);
+  const MAX_SURFACES = Math.max(1, parseInt(process.env.REPLEN_RESURFACE_MAX ?? "3", 10) || 3);
+  const cooloffSince = new Date(Date.now() - COOLOFF_HOURS * 3600 * 1000);
+
   const stateRows = await db
-    .select({ repoId: schema.userMatchState.repoId })
+    .select({
+      repoId: schema.userMatchState.repoId,
+      status: schema.userMatchState.status,
+      surfacedAt: schema.userMatchState.surfacedAt,
+      surfacedCount: schema.userMatchState.surfacedCount,
+    })
     .from(schema.userMatchState)
-    .where(and(
-      eq(schema.userMatchState.userId, auth.userId),
-      inArray(schema.userMatchState.status, ["starred", "hidden", "handed_off"]),
-    ));
-  const excludedRepoIds = new Set(stateRows.map((r) => r.repoId));
+    .where(eq(schema.userMatchState.userId, auth.userId));
+  const excludedRepoIds = new Set<number>();
+  for (const r of stateRows) {
+    if (r.status === "starred" || r.status === "hidden" || r.status === "handed_off") {
+      excludedRepoIds.add(r.repoId);
+    } else if (r.status === "surfaced") {
+      const tooMany = r.surfacedCount >= MAX_SURFACES;
+      const tooRecent = r.surfacedAt != null && r.surfacedAt > cooloffSince;
+      if (tooMany || tooRecent) excludedRepoIds.add(r.repoId);
+    }
+  }
 
   // Apply eligibility filter (cheap, deterministic). Reuses the same
   // structural rules the hosted pipeline runs at Stage 2.

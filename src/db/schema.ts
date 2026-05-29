@@ -375,7 +375,16 @@ export const userMatchState = sqliteTable(
     // against this repo). Lifecycle is monotonic except hidden which
     // can be cleared by user action in /settings.
     status: text("status").notNull(),
+    // For 'surfaced' rows this is the MOST-RECENT surfacing time (bumped on
+    // each re-surface), so the inventory can apply a cool-off window. For
+    // terminal statuses (starred/hidden/handed_off) it's effectively the
+    // last time we touched the row. Indexed for recency ordering.
     surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+    // How many times the inventory has surfaced this repo to the user without
+    // them acting on it. Drives the "shown N times → cool off / stop" rule so
+    // repeat users don't see the same footnote candidate every session.
+    // Incremented on each 'surfaced' record; left as-is on terminal actions.
+    surfacedCount: integer("surfaced_count").notNull().default(0),
     actionAt: integer("action_at", { mode: "timestamp" }),
     handoffPrUrl: text("handoff_pr_url"),
     userNote: text("user_note"),

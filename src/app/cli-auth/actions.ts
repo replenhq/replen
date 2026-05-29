@@ -62,7 +62,12 @@ export async function authorizeCli(port: number, state: string): Promise<Authori
     });
   }
 
-  const base = process.env.PUBLIC_BASE_URL || "https://app.replen.dev";
+  // The CLI talks to the public API origin, which is NOT necessarily
+  // PUBLIC_BASE_URL — in prod that points at a Cloudflare-gated marketing host
+  // (skill.replen.dev) the CLI can't reach. Resolve the CLI's base independently
+  // and default to the public app origin so a missing env can't hand the CLI a
+  // host it can't call. Matches the CLI's own default (cli/src/init.ts).
+  const base = process.env.CLI_PUBLIC_BASE_URL || "https://app.replen.dev";
   const code = issueCliAuthCode(u.id, token, base, state);
   const cb = new URL(`http://127.0.0.1:${port}/callback`);
   cb.searchParams.set("code", code);

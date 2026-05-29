@@ -114,12 +114,21 @@ export async function POST(req: Request) {
     ))
     .get();
 
+  const isSurfaced = body.status === "surfaced";
   if (existing) {
     await db
       .update(schema.userMatchState)
       .set({
         status: body.status,
-        actionAt: now,
+        // 'surfaced' is a re-show, not a user action: bump the surfacing
+        // recency + count (drives the cool-off window) and leave actionAt
+        // untouched. Terminal statuses (star/hide/handoff) stamp actionAt.
+        ...(isSurfaced
+          ? {
+              surfacedAt: now,
+              surfacedCount: sql`${schema.userMatchState.surfacedCount} + 1`,
+            }
+          : { actionAt: now }),
         ...(body.handoffPrUrl !== undefined ? { handoffPrUrl: body.handoffPrUrl } : {}),
         ...(body.userNote !== undefined ? { userNote: body.userNote } : {}),
       })
@@ -131,7 +140,8 @@ export async function POST(req: Request) {
       projectId,
       status: body.status,
       surfacedAt: now,
-      actionAt: body.status === "surfaced" ? null : now,
+      surfacedCount: isSurfaced ? 1 : 0,
+      actionAt: isSurfaced ? null : now,
       handoffPrUrl: body.handoffPrUrl ?? null,
       userNote: body.userNote ?? null,
     });
