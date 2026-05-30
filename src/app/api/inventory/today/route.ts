@@ -416,15 +416,21 @@ export async function GET(req: Request) {
   });
   const afterFilter = filtered.length;
 
-  // Join repos for richer metadata; resolve once per repo via single IN-query.
-  const repoIds = [...new Set(filtered.map((c) => c.githubUrl ? null : null).filter(Boolean))];
-  void repoIds; // not used yet — candidate.githubUrl already carries owner/name, but joining repos
-  // would give us stars/license/topics from the canonical record. Defer until repos table is
-  // consistently populated for every candidate (today only some sources populate it).
+  // Feed candidates (Pattern A stack-watch / Pattern B spec-watch) carry their
+  // own display data and must NOT be dropped for lacking a `repos` row — their
+  // repo may have never been a candidate before (a vendor release / spec
+  // change), and chrome-status items have no GitHub repo at all. In skill tier
+  // the hosted analysis pipeline (which upserts `repos`) never runs, so we
+  // can't assume a row exists. Normal candidates still go through the repos
+  // join for canonical metadata (stars/license/etc.); feed candidates are
+  // hydrated directly from the candidate row below.
+  const isFeedSource = (src: string) => src.startsWith("stack-watch:") || src.startsWith("spec-watch:");
+  const normalFiltered = filtered.filter((c) => !isFeedSource(c.source));
+  const feedFiltered = filtered.filter((c) => isFeedSource(c.source));
 
   // Apply excluded-repo filter via the candidates' resolved owner/name → repo lookup.
   // For now: do a per-candidate lookup against the repos table for the rich fields.
-  const ownerNamePairs = filtered
+  const ownerNamePairs = normalFiltered
     .map((c) => {
       const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
       return on ? { ...c, owner: on.owner, name: on.name } : null;
@@ -461,8 +467,9 @@ export async function GET(req: Request) {
   // the two streams merge and sort together.
   type OutEntry = {
     candidateId: number | null;
-    repoId: number;
+    repoId: number | null;
     repo: string;
+    title: string;
     url: string | null;
     description: string | null;
     stars: number | null;
@@ -485,6 +492,7 @@ export async function GET(req: Request) {
     candidateId: c.id as number | null,
     repoId: r!.id,
     repo: `${r!.owner}/${r!.name}`,
+    title: `${r!.owner}/${r!.name}`,
     url: r!.url,
     description: r!.description,
     stars: r!.stars,
@@ -502,6 +510,50 @@ export async function GET(req: Request) {
     projectMatch: scopedProject?.slug ?? null,
   }));
 
+  // Feed candidates (Pattern A / B), hydrated directly from the candidate row.
+  // We still best-effort resolve a repoId when the item has a GitHub repo (for
+  // state-keying + exclusion), but never DROP on a missing one.
+  const feedOut: OutEntry[] = [];
+  const feedSeen = new Set<string>();
+  for (const c of feedFiltered) {
+    const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
+    let repoId: number | null = null;
+    if (on) {
+      const r = await db
+        .select({ id: schema.repos.id })
+        .from(schema.repos)
+        .where(and(eq(schema.repos.owner, on.owner), eq(schema.repos.name, on.name)))
+        .get();
+      repoId = r?.id ?? null;
+    }
+    if (repoId !== null && excludedRepoIds.has(repoId)) continue;
+    const dedupKey = repoId !== null ? `r:${repoId}` : `${c.source}:${c.sourceItemId}`;
+    if (feedSeen.has(dedupKey)) continue;
+    feedSeen.add(dedupKey);
+    const raw = safeParseRaw(c.rawJson);
+    feedOut.push({
+      candidateId: c.id,
+      repoId,
+      repo: on ? `${on.owner}/${on.name}` : (asString(raw?.specName) ?? asString(raw?.vendor) ?? c.source),
+      title: asString(c.title) ?? (on ? `${on.owner}/${on.name}` : c.source),
+      url: c.url,
+      description: asString(raw?.notes) ?? asString(raw?.summary) ?? null,
+      stars: null,
+      language: null,
+      license: null,
+      topics: c.topics ? safeParseJsonArray(c.topics) : [],
+      repoShape: null,
+      source: c.source,
+      postedAt: c.postedAt?.toISOString() ?? null,
+      pushedAt: null,
+      whyShortlisted: c.whyShortlisted,
+      cosine: c.cosine as number | null,
+      promoted: false,
+      dependencyMatch: c.depMatch,
+      projectMatch: scopedProject?.slug ?? null,
+    });
+  }
+
   // Similar-project promotions (L4b cross-user learning loop): repos that
   // earned a positive verdict from users whose project is embedding-similar to
   // this one, even though they're not in this user's own pool. Only on the
@@ -510,7 +562,7 @@ export async function GET(req: Request) {
   let promotedOut: OutEntry[] = [];
   if (scopedProject && projectEmbedding) {
     const alreadyHave = new Set<number>(excludedRepoIds);
-    for (const o of ownOut) alreadyHave.add(o.repoId);
+    for (const o of [...ownOut, ...feedOut]) if (o.repoId !== null) alreadyHave.add(o.repoId);
     const promos = await findSimilarProjectPromotions({
       userId: auth.userId,
       projectEmbedding,
@@ -520,6 +572,7 @@ export async function GET(req: Request) {
       candidateId: p.candidateId,
       repoId: p.repoId,
       repo: p.repo,
+      title: p.repo,
       url: p.url,
       description: p.description,
       stars: p.stars,
@@ -538,17 +591,19 @@ export async function GET(req: Request) {
     }));
   }
 
-  // Merge own + promoted, rank: dependency matches (Pattern A — "a thing you
-  // depend on just shipped") first, then by cosine desc (own entries without a
-  // cosine sink to the bottom but keep their relevance order via stable sort),
-  // dedup by repoId (own precedence — it's already first), cap to limit.
+  // Merge own + feed (Pattern A/B) + promoted, rank: dependency / standard
+  // stake matches first ("a thing you depend on / a standard you implement just
+  // changed"), then by cosine desc (entries without a cosine sink to the bottom
+  // but keep their relevance order via stable sort). Dedup by repoId; repo-less
+  // feed items (chrome-status) are inherently unique and always pass. Cap to limit.
   const mergedSeen = new Set<number>();
-  const candidatesOut = [...ownOut, ...promotedOut]
+  const candidatesOut = [...ownOut, ...feedOut, ...promotedOut]
     .sort((a, b) => {
       if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
       return (b.cosine ?? -1) - (a.cosine ?? -1);
     })
     .filter((e) => {
+      if (e.repoId === null) return true;
       if (mergedSeen.has(e.repoId)) return false;
       mergedSeen.add(e.repoId);
       return true;
@@ -565,8 +620,12 @@ export async function GET(req: Request) {
   if (candidatesOut.length > 0 && scopedProject) {
     const top = candidatesOut[0];
     if (top.dependencyMatch) {
-      // Pattern A lead: a vendor the project depends on just shipped.
-      displayText = `By the way — a dependency you use just shipped: \`${top.repo}\` (${top.repo.split("/")[1]}). ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+      // Pattern A/B lead: a vendor the project depends on shipped, or a
+      // standard the project implements changed.
+      const lead = top.source.startsWith("spec-watch:")
+        ? `a standard your code implements just changed — ${top.title}`
+        : `a dependency you use just shipped — ${top.title}`;
+      displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else {
       const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
       const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
@@ -609,4 +668,20 @@ function safeParseJsonArray(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+// Parse a candidate's raw_json blob (feed candidates stash their display data
+// there). Returns a plain record or null; callers pull fields defensively.
+function safeParseRaw(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" ? (o as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
 }

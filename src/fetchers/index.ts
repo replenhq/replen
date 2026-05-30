@@ -10,6 +10,7 @@ import { ghSearchFetcher } from "./gh-search";
 import { ghSearchRecentFetcher } from "./gh-search-recent";
 import { ghTargetedSearchFetcher } from "./gh-targeted-search";
 import { stackWatchFetcher } from "./stack-watch";
+import { specWatchFetcher } from "./spec-watch";
 import { historicalSearchFetcher } from "./historical-search";
 import { threadsFetcher } from "./threads";
 import { tiktokFetcher } from "./tiktok";
@@ -39,7 +40,7 @@ const DISCOVERED_FETCHERS: Fetcher[] = [
 // vectors yet, this yields zero results on the first run — that's fine,
 // the discovered pool already gave them something to look at, and the
 // second run (next cron tick or manual trigger) gets scouted matches.
-const SCOUTED_FETCHERS: Fetcher[] = [ghTargetedSearchFetcher, stackWatchFetcher];
+const SCOUTED_FETCHERS: Fetcher[] = [ghTargetedSearchFetcher, stackWatchFetcher, specWatchFetcher];
 
 // All fetchers — kept for backwards compat with any caller that wants
 // "run everything" semantics. New code should prefer the split functions
