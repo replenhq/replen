@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../mcp/_auth";
+import { recomputeRepoQuality } from "@/lib/repo-quality";
 
 // Append-only triage-decision log. The /replen-match skill posts here
 // after each per-candidate verdict so the Activity feed on / can show
@@ -145,6 +146,16 @@ export async function POST(req: Request) {
     })
     .returning({ id: schema.triageEvents.id })
     .get();
+
+  // Refresh the cross-user quality aggregate for this repo (L4 learning loop).
+  // Best-effort: the triage is already durably recorded, so a recompute
+  // failure must not fail the request — the next triage (or the backfill CLI)
+  // will reconcile it.
+  try {
+    await recomputeRepoQuality(repoId!);
+  } catch (e) {
+    console.warn(`[triage] repo_quality recompute failed for repo ${repoId}:`, e);
+  }
 
   return NextResponse.json(
     { ok: true, eventId: inserted?.id, repoId, projectId, verdict: body.verdict },

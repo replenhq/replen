@@ -447,6 +447,46 @@ export const triageEvents = sqliteTable(
   })
 );
 
+// Cross-user, cross-tenant quality aggregate for a candidate repo. One row
+// per repo, materialised from triage_events across ALL users (each user
+// counted ONCE by their LATEST verdict on the repo, so a single user
+// re-evaluating doesn't inflate the signal). Recomputed on every triage
+// write (see src/lib/repo-quality.ts) and backfillable via
+// src/cli/backfill-repo-quality.ts.
+//
+// Powers the learning loop in the inventory endpoint:
+//   - global demote: a repo whose latest-verdict skip ratio is high across
+//     enough distinct users is suppressed for EVERYONE — many people judged
+//     it rubbish, so stop surfacing it.
+//   - similar-project promote: a repo with positive verdicts (adopt/port)
+//     becomes eligible to surface to a DIFFERENT user whose project is
+//     embedding-similar to one the repo scored well for.
+//
+// Privacy: this is an aggregate of derived signals (verdict tallies, avg
+// score). It never stores or exposes another user's identity, project, or
+// writeup — only the public repo and how it fared in aggregate.
+export const repoQuality = sqliteTable(
+  "repo_quality",
+  {
+    repoId: integer("repo_id").primaryKey().references(() => repos.id, { onDelete: "cascade" }),
+    // Per-user LATEST-verdict tallies (each distinct user contributes 1).
+    adoptUsers: integer("adopt_users").notNull().default(0),
+    portUsers: integer("port_users").notNull().default(0),
+    skipUsers: integer("skip_users").notNull().default(0),
+    deferUsers: integer("defer_users").notNull().default(0),
+    // Distinct users who have ever triaged this repo (= sum of the four).
+    totalUsers: integer("total_users").notNull().default(0),
+    // Mean agent score across the latest-verdict events that carried a score.
+    avgScore: real("avg_score"),
+    lastTriagedAt: integer("last_triaged_at", { mode: "timestamp" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxSkip: index("idx_repo_quality_skip").on(t.skipUsers, t.totalUsers),
+    idxPositive: index("idx_repo_quality_positive").on(t.adoptUsers, t.portUsers),
+  })
+);
+
 export const matches = sqliteTable(
   "matches",
   {

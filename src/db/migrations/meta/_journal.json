@@ -295,6 +295,13 @@
       "when": 1779834205651,
       "tag": "0041_surfaced_count",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1779837805651,
+      "tag": "0042_repo_quality",
+      "breakpoints": true
     }
   ]
 }

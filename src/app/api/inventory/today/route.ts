@@ -5,6 +5,7 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding } from "@/lib/embeddings";
+import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 
 // Skill-mode inventory endpoint.
 //
@@ -223,6 +224,25 @@ export async function GET(req: Request) {
   }
   for (const [repoId, v] of latestVerdictByRepo) {
     if (v.verdict === "skip") excludedRepoIds.add(repoId);
+  }
+
+  // Global demote (cross-user learning loop). A repo that enough DISTINCT
+  // users have judged rubbish — latest-verdict skip ratio over threshold — is
+  // suppressed for everyone, not just the users who skipped it. This is how
+  // one user's "this is rubbish" protects the next user from the same noise.
+  // Bounded read: only repos with at least the minimum number of triagers can
+  // possibly qualify.
+  const { minUsers: demoteMinUsers } = globalDemoteThresholds();
+  const demoteRows = await db
+    .select({
+      repoId: schema.repoQuality.repoId,
+      skipUsers: schema.repoQuality.skipUsers,
+      totalUsers: schema.repoQuality.totalUsers,
+    })
+    .from(schema.repoQuality)
+    .where(gte(schema.repoQuality.totalUsers, demoteMinUsers));
+  for (const q of demoteRows) {
+    if (isGloballyDemoted(q)) excludedRepoIds.add(q.repoId);
   }
 
   // Apply eligibility filter (cheap, deterministic). Reuses the same

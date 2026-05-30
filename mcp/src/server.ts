@@ -103,18 +103,21 @@ const TOOLS: Tool[] = [
       properties: {
         repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
         limit: { type: "number", minimum: 1, maximum: 20, default: 5, description: "Max candidates to return. Default 5." },
-        days: { type: "number", minimum: 1, maximum: 14, default: 2, description: "Days of inventory to consider. Default 2." },
+        days: { type: "number", minimum: 1, maximum: 365, description: "Days of inventory to consider. OMIT to let the server pick the right window automatically — a wide first-run window (months) for a brand-new user, then ~a week for established users. Only pass this to force a specific window." },
       },
     },
     handler: async (cfg, args) => {
       const parsed = z.object({
         repo: z.string().optional(),
         limit: z.number().int().min(1).max(20).default(5),
-        days: z.number().int().min(1).max(14).default(2),
+        days: z.number().int().min(1).max(365).optional(),
       }).parse(args);
       const data = await apiGet(cfg, "/api/inventory/today", {
         repo: resolveRepo(args, cfg),
         limit: parsed.limit,
+        // Omitted when the caller didn't pass days → server applies its
+        // adaptive lookback (first-run months, then ~week). apiGet drops
+        // undefined query params.
         days: parsed.days,
       }) as { displayText?: string | null; [k: string]: unknown };
 
