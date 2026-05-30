@@ -370,15 +370,26 @@ export async function GET(req: Request) {
       }
     }
 
-    // Pattern A — stack-watch dependency match. If this is a vendor-release
-    // candidate AND the vendor's package is in the scoped project's deps, it's
-    // a true dependency match: surface it no matter what cosine says.
+    // Stake match (Patterns A/B/C). A feed candidate whose tagged package
+    // signals are in the scoped project's deps is a TRUE stake — a dependency
+    // you use shipped (A), a standard you implement changed (B), or an upstream
+    // you build on looks risky (C). Surface it no matter what cosine says.
     let depMatch = false;
-    if (scopedProject && scopedProjectDeps.size > 0 && c.source.startsWith("stack-watch:")) {
+    const stakeKind =
+      c.source.startsWith("stack-watch:") ? "stack" :
+      c.source.startsWith("spec-watch:") ? "spec" :
+      c.source.startsWith("health-watch:") ? "health" : null;
+    if (scopedProject && scopedProjectDeps.size > 0 && stakeKind) {
       let candTopics: string[] = [];
       try { candTopics = c.topics ? JSON.parse(c.topics) : []; } catch { /* ignore */ }
       depMatch = candTopics.some((t) => typeof t === "string" && scopedProjectDeps.has(t.toLowerCase()));
-      if (depMatch) reasons.unshift(`you depend on this — new ${c.title}`);
+      if (depMatch) {
+        reasons.unshift(
+          stakeKind === "spec" ? `a standard your code implements changed — ${c.title}` :
+          stakeKind === "health" ? `an upstream you depend on needs attention — ${c.title}` :
+          `you depend on this — new ${c.title}`,
+        );
+      }
     }
 
     // Relevance floor: drop candidates that don't clear the bar so weak
@@ -424,7 +435,8 @@ export async function GET(req: Request) {
   // can't assume a row exists. Normal candidates still go through the repos
   // join for canonical metadata (stars/license/etc.); feed candidates are
   // hydrated directly from the candidate row below.
-  const isFeedSource = (src: string) => src.startsWith("stack-watch:") || src.startsWith("spec-watch:");
+  const isFeedSource = (src: string) =>
+    src.startsWith("stack-watch:") || src.startsWith("spec-watch:") || src.startsWith("health-watch:");
   const normalFiltered = filtered.filter((c) => !isFeedSource(c.source));
   const feedFiltered = filtered.filter((c) => isFeedSource(c.source));
 
@@ -624,6 +636,8 @@ export async function GET(req: Request) {
       // standard the project implements changed.
       const lead = top.source.startsWith("spec-watch:")
         ? `a standard your code implements just changed — ${top.title}`
+        : top.source.startsWith("health-watch:")
+        ? `an upstream you depend on needs attention — ${top.title}`
         : `a dependency you use just shipped — ${top.title}`;
       displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else {

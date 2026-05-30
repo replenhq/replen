@@ -134,10 +134,16 @@ export function checkEligibility(
   //    flags together is when we drop.
   //
   //    EXEMPT feed candidates (Pattern A "stack-watch" releases, Pattern B
-  //    "spec-watch" standard changes): these are recent BY DEFINITION and carry
-  //    no star score — freshness is the SIGNAL, not a red flag. They earn their
-  //    place via a project stake match (dependency / standard), not stars.
-  const isFeedCandidate = c.source.startsWith("stack-watch:") || c.source.startsWith("spec-watch:");
+  //    "spec-watch" standard changes, Pattern C "health-watch" upstream-health
+  //    alerts): these are recent BY DEFINITION and carry no star score —
+  //    freshness is the SIGNAL, not a red flag. They earn their place via a
+  //    project stake match, not stars. (A dep-health alert is, by definition,
+  //    about an UNmaintained repo — the freshness floor would wrongly drop the
+  //    very thing it's warning about.)
+  const isFeedCandidate =
+    c.source.startsWith("stack-watch:") ||
+    c.source.startsWith("spec-watch:") ||
+    c.source.startsWith("health-watch:");
   if (!isFeedCandidate && c.postedAt && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
     const ageDays = (Date.now() - c.postedAt.getTime()) / (24 * 3600 * 1000);
     if (ageDays < FRESHNESS_FLOOR_DAYS) {
