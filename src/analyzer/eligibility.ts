@@ -132,7 +132,13 @@ export function checkEligibility(
   //    fine — a 60-day-old project with 20 stars is "small but real," a
   //    20-day-old project with 200 stars is "spike but real". Both red
   //    flags together is when we drop.
-  if (c.postedAt && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
+  //
+  //    EXEMPT release/changelog feeds (Pattern A "stack-watch"): a vendor
+  //    release is recent by definition and carries no star score — freshness
+  //    is the SIGNAL there, not a red flag. These candidates earn their place
+  //    via dependency match, not stars.
+  const isReleaseFeed = c.source.startsWith("stack-watch:");
+  if (!isReleaseFeed && c.postedAt && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
     const ageDays = (Date.now() - c.postedAt.getTime()) / (24 * 3600 * 1000);
     if (ageDays < FRESHNESS_FLOOR_DAYS) {
       return { eligible: false, reason: `too fresh (${Math.round(ageDays)}d old, <${FRESHNESS_FLOOR_STARS}★)` };

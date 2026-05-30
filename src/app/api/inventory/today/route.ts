@@ -6,6 +6,8 @@ import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding } from "@/lib/embeddings";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
+import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
+import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 
 // Skill-mode inventory endpoint.
 //
@@ -309,10 +311,18 @@ export async function GET(req: Request) {
   const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.4")));
   const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
 
+  // Pattern A — "watch your stack". A release from a vendor the SCOPED project
+  // actually depends on is the strongest possible signal ("a thing you depend
+  // on just shipped"): it bypasses the relevance floor and sorts above semantic
+  // matches. We intersect each stack-watch candidate's tagged package names
+  // (carried in its topics) with this project's parsed dependencies.
+  const scopedProjectDeps = parseTechSummaryDeps(scopedProject?.techSummary ?? null);
+
   type ScoredRow = CandidateRow & {
     whyShortlisted: string;
     relevance: number;        // tag-overlap fallback score
     cosine: number | null;    // semantic similarity (null when unavailable)
+    depMatch: boolean;        // Pattern A: release of a vendor this project depends on
   };
   const filtered: ScoredRow[] = [];
   for (const c of eligible) {
@@ -360,9 +370,21 @@ export async function GET(req: Request) {
       }
     }
 
+    // Pattern A — stack-watch dependency match. If this is a vendor-release
+    // candidate AND the vendor's package is in the scoped project's deps, it's
+    // a true dependency match: surface it no matter what cosine says.
+    let depMatch = false;
+    if (scopedProject && scopedProjectDeps.size > 0 && c.source.startsWith("stack-watch:")) {
+      let candTopics: string[] = [];
+      try { candTopics = c.topics ? JSON.parse(c.topics) : []; } catch { /* ignore */ }
+      depMatch = candTopics.some((t) => typeof t === "string" && scopedProjectDeps.has(t.toLowerCase()));
+      if (depMatch) reasons.unshift(`you depend on this — new ${c.title}`);
+    }
+
     // Relevance floor: drop candidates that don't clear the bar so weak
-    // matches never reach the user (and an all-weak result stays silent).
-    if (applyFloor) {
+    // matches never reach the user (and an all-weak result stays silent). A
+    // dependency match is exempt — it's the strongest signal we have.
+    if (applyFloor && !depMatch) {
       const clears = cosine !== null ? cosine >= MIN_COSINE : relevance > 0;
       if (!clears) continue;
     }
@@ -372,6 +394,7 @@ export async function GET(req: Request) {
       whyShortlisted: reasons.join("; ") || "candidate eligible",
       relevance,
       cosine,
+      depMatch,
     });
   }
 
@@ -434,26 +457,103 @@ export async function GET(req: Request) {
     return true;
   });
 
-  // Build the response.
-  const candidatesOut = dedup
-    .slice(0, limit)
-    .map(({ c, r }) => ({
-      candidateId: c.id,
-      repoId: r!.id,
-      repo: `${r!.owner}/${r!.name}`,
-      url: r!.url,
-      description: r!.description,
-      stars: r!.stars,
-      language: r!.primaryLanguage,
-      license: r!.license,
-      topics: c.topics ? safeParseJsonArray(c.topics) : [],
-      repoShape: c.repoShape,
-      source: c.source,
-      postedAt: c.postedAt?.toISOString() ?? null,
-      pushedAt: r!.pushedAt?.toISOString() ?? null,
-      whyShortlisted: c.whyShortlisted,
+  // Unified output shape for own-pool candidates AND cross-user promotions, so
+  // the two streams merge and sort together.
+  type OutEntry = {
+    candidateId: number | null;
+    repoId: number;
+    repo: string;
+    url: string | null;
+    description: string | null;
+    stars: number | null;
+    language: string | null;
+    license: string | null;
+    topics: string[];
+    repoShape: string | null;
+    source: string;
+    postedAt: string | null;
+    pushedAt: string | null;
+    whyShortlisted: string;
+    cosine: number | null;
+    promoted: boolean;
+    dependencyMatch: boolean;
+    projectMatch: string | null;
+  };
+
+  // Normalised own-pool entries (this user's candidates), full list pre-merge.
+  const ownOut: OutEntry[] = dedup.map(({ c, r }) => ({
+    candidateId: c.id as number | null,
+    repoId: r!.id,
+    repo: `${r!.owner}/${r!.name}`,
+    url: r!.url,
+    description: r!.description,
+    stars: r!.stars,
+    language: r!.primaryLanguage,
+    license: r!.license,
+    topics: c.topics ? safeParseJsonArray(c.topics) : [],
+    repoShape: c.repoShape as string | null,
+    source: c.source,
+    postedAt: c.postedAt?.toISOString() ?? null,
+    pushedAt: r!.pushedAt?.toISOString() ?? null,
+    whyShortlisted: c.whyShortlisted,
+    cosine: c.cosine as number | null,
+    promoted: false,
+    dependencyMatch: c.depMatch,
+    projectMatch: scopedProject?.slug ?? null,
+  }));
+
+  // Similar-project promotions (L4b cross-user learning loop): repos that
+  // earned a positive verdict from users whose project is embedding-similar to
+  // this one, even though they're not in this user's own pool. Only on the
+  // scoped-project path with an embedding (the signal is project-to-project
+  // similarity). Excludes anything already surfaced or excluded for this user.
+  let promotedOut: OutEntry[] = [];
+  if (scopedProject && projectEmbedding) {
+    const alreadyHave = new Set<number>(excludedRepoIds);
+    for (const o of ownOut) alreadyHave.add(o.repoId);
+    const promos = await findSimilarProjectPromotions({
+      userId: auth.userId,
+      projectEmbedding,
+      excludeRepoIds: alreadyHave,
+    });
+    promotedOut = promos.map((p) => ({
+      candidateId: p.candidateId,
+      repoId: p.repoId,
+      repo: p.repo,
+      url: p.url,
+      description: p.description,
+      stars: p.stars,
+      language: p.language,
+      license: p.license,
+      topics: p.topics,
+      repoShape: p.repoShape,
+      source: p.source,
+      postedAt: p.postedAt,
+      pushedAt: p.pushedAt,
+      whyShortlisted: p.whyShortlisted,
+      cosine: p.cosine as number | null,
+      promoted: true,
+      dependencyMatch: false,
       projectMatch: scopedProject?.slug ?? null,
     }));
+  }
+
+  // Merge own + promoted, rank: dependency matches (Pattern A — "a thing you
+  // depend on just shipped") first, then by cosine desc (own entries without a
+  // cosine sink to the bottom but keep their relevance order via stable sort),
+  // dedup by repoId (own precedence — it's already first), cap to limit.
+  const mergedSeen = new Set<number>();
+  const candidatesOut = [...ownOut, ...promotedOut]
+    .sort((a, b) => {
+      if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
+      return (b.cosine ?? -1) - (a.cosine ?? -1);
+    })
+    .filter((e) => {
+      if (mergedSeen.has(e.repoId)) return false;
+      mergedSeen.add(e.repoId);
+      return true;
+    })
+    .slice(0, limit);
 
   // Pre-formatted user-facing footnote string. Built server-side so the
   // agent doesn't have to derive it from the JSON (which has historically
@@ -464,10 +564,14 @@ export async function GET(req: Request) {
   let displayText: string | null = null;
   if (candidatesOut.length > 0 && scopedProject) {
     const top = candidatesOut[0];
-    const simMatch = top.whyShortlisted.match(/semantic similarity:\s*(\d+)%/);
-    const simStr = simMatch ? ` (~${simMatch[1]}% match)` : "";
-    const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
-    displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
+    if (top.dependencyMatch) {
+      // Pattern A lead: a vendor the project depends on just shipped.
+      displayText = `By the way — a dependency you use just shipped: \`${top.repo}\` (${top.repo.split("/")[1]}). ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+    } else {
+      const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
+      const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
+      displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
+    }
   }
 
   return NextResponse.json(

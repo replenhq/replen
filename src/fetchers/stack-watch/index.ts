@@ -1,0 +1,126 @@
+// Pattern A — "watch your stack" fetcher.
+//
+// A scouted, per-user fetcher: it reads the user's included projects, parses
+// their dependencies, matches them against the vendor registry, and emits the
+// recent GitHub Releases of every vendor the user actually depends on. Those
+// releases become candidates in the normal inventory — but because they're
+// driven by real dependency usage (not the OSS firehose), they carry a strong
+// "you depend on this" signal that the inventory route honours (it bypasses
+// the cosine relevance floor for a candidate whose vendor is in the scoped
+// project's deps — see src/app/api/inventory/today/route.ts).
+//
+// Source dependency-free by design: GitHub Releases only in v1. Pure-SaaS
+// changelogs (Stripe/Linear/Notion) need an RSS/HTML adapter and are a
+// follow-on, not a stub here.
+
+import type { Fetcher, FetchedCandidate } from "../types";
+import { db, schema } from "../../db/client";
+import { and, eq } from "drizzle-orm";
+import { readRunOrEnv } from "../../analyzer/run-context";
+import { vendorsForDeps, parseTechSummaryDeps, type StackVendor } from "./registry";
+
+const RELEASE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_STACK_WINDOW_DAYS ?? "90", 10) || 90);
+const MAX_RELEASES_PER_VENDOR = Math.max(1, parseInt(process.env.REPLEN_STACK_MAX_PER_VENDOR ?? "3", 10) || 3);
+
+type GhRelease = {
+  id: number;
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  html_url: string;
+  published_at: string | null;
+  draft: boolean;
+  prerelease: boolean;
+};
+
+export const stackWatchFetcher: Fetcher = {
+  name: "stack-watch",
+  async run(ctx) {
+    if (!ctx?.userId) return [];
+    const userId = ctx.userId;
+
+    const projects = await db
+      .select({
+        slug: schema.projectProfiles.slug,
+        techSummary: schema.projectProfiles.techSummary,
+      })
+      .from(schema.projectProfiles)
+      .where(and(
+        eq(schema.projectProfiles.userId, userId),
+        eq(schema.projectProfiles.included, true),
+        eq(schema.projectProfiles.active, true),
+      ));
+
+    // Union the vendors used across all of the user's projects.
+    const vendors = new Map<string, StackVendor>();
+    for (const p of projects) {
+      for (const v of vendorsForDeps(parseTechSummaryDeps(p.techSummary))) {
+        vendors.set(v.id, v);
+      }
+    }
+    if (vendors.size === 0) return [];
+
+    const ghToken = readRunOrEnv("githubToken", "GITHUB_TOKEN");
+    const sinceMs = Date.now() - RELEASE_WINDOW_DAYS * 24 * 3600 * 1000;
+
+    const out: FetchedCandidate[] = [];
+    for (const v of vendors.values()) {
+      let releases: GhRelease[];
+      try {
+        releases = await fetchReleases(v.githubRepo, ghToken);
+      } catch (e) {
+        console.warn(`[stack-watch] user=${userId} ${v.id} (${v.githubRepo}) releases failed: ${(e as Error).message}`);
+        continue;
+      }
+      let kept = 0;
+      for (const r of releases) {
+        if (r.draft) continue;
+        const pub = r.published_at ? Date.parse(r.published_at) : NaN;
+        if (!Number.isFinite(pub) || pub < sinceMs) continue;
+        const body = (r.body ?? "").trim();
+        out.push({
+          source: `stack-watch:${v.id}`,
+          sourceItemId: String(r.id),
+          title: `${v.name} ${r.tag_name}${r.prerelease ? " (pre-release)" : ""}`,
+          url: r.html_url,
+          githubUrl: `https://github.com/${v.githubRepo}`,
+          author: v.name,
+          score: null,
+          postedAt: new Date(pub),
+          raw: {
+            kind: "stack-watch",
+            vendorId: v.id,
+            vendor: v.name,
+            // The packages that tie this release to a project's manifest — the
+            // route intersects these with the scoped project's deps to decide
+            // it's a true dependency match.
+            depNames: v.depNames,
+            githubRepo: v.githubRepo,
+            tag: r.tag_name,
+            releaseName: r.name,
+            notes: body.slice(0, 4000),
+          },
+          primaryLanguage: null,
+          // Tag so the inventory's tag filter and the route's dep-match path
+          // can recognise stack-watch candidates.
+          topics: ["stack-watch", v.id, ...v.depNames.map((d) => d.toLowerCase())],
+        });
+        if (++kept >= MAX_RELEASES_PER_VENDOR) break;
+      }
+    }
+    console.log(`[stack-watch] user=${userId} ${vendors.size} vendor(s) in stack → ${out.length} release candidate(s)`);
+    return out;
+  },
+};
+
+async function fetchReleases(repo: string, token: string | undefined): Promise<GhRelease[]> {
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github+json",
+    "user-agent": "replen/stack-watch",
+    "x-github-api-version": "2022-11-28",
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=10`, { headers });
+  if (!res.ok) throw new Error(`GET releases ${repo} → ${res.status}`);
+  return (await res.json()) as GhRelease[];
+}
