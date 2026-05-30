@@ -41,9 +41,37 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const days = Math.min(Math.max(parseInt(url.searchParams.get("days") ?? "2", 10) || 2, 1), 30);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "20", 10) || 20, 1), 50);
   const repoFilter = url.searchParams.get("repo")?.trim().toLowerCase() || null;
+
+  // Adaptive lookback window. An explicit ?days= wins (clamped 1..365).
+  // Otherwise the window adapts to the user's history: a brand-new user (no
+  // prior match-state at all) gets a wide FIRST-RUN window so their very
+  // first match has months of inventory to pull from — the good per-project
+  // `gh-targeted:*` candidates are often days-to-weeks old and a 2-day
+  // window amputates them, making the matcher look empty/broken. Established
+  // users get a steady ~week so the footnote stays "what's new" rather than
+  // re-litigating old candidates. Both are env-tunable.
+  const FIRSTRUN_DAYS = Math.min(365, Math.max(1, parseInt(process.env.REPLEN_FIRSTRUN_DAYS ?? "180", 10) || 180));
+  const STEADY_DAYS = Math.min(90, Math.max(1, parseInt(process.env.REPLEN_STEADY_DAYS ?? "7", 10) || 7));
+  const explicitDays = url.searchParams.get("days");
+  let days: number;
+  let windowReason: string;
+  if (explicitDays !== null && explicitDays.trim() !== "") {
+    days = Math.min(365, Math.max(1, parseInt(explicitDays, 10) || STEADY_DAYS));
+    windowReason = "explicit";
+  } else {
+    // First-run detection is user-level: "have we ever served this user any
+    // inventory they engaged with?" One indexed existence check.
+    const prior = await db
+      .select({ id: schema.userMatchState.id })
+      .from(schema.userMatchState)
+      .where(eq(schema.userMatchState.userId, auth.userId))
+      .limit(1);
+    const firstRun = prior.length === 0;
+    days = firstRun ? FIRSTRUN_DAYS : STEADY_DAYS;
+    windowReason = firstRun ? "first-run" : "steady";
+  }
 
   const filterMode = (auth.settings.filterMode ?? "tags") as "zero-knowledge" | "tags" | "fingerprint";
 
@@ -171,6 +199,32 @@ export async function GET(req: Request) {
     }
   }
 
+  // Per-user triage suppression. When the in-session agent (Claude / Codex /
+  // Gemini) triaged a repo and its verdict was 'skip' ("worse than what they
+  // have, or wrong fit"), honour that like a soft hide — don't re-surface it
+  // to this user. We use the LATEST verdict per repo so a later re-evaluation
+  // to 'adopt' / 'port' / 'defer' un-sticks it. This is the AGENT's judgement
+  // (triage_events), distinct from the USER's action (user_match_state) — but
+  // for surfacing purposes a confident "skip" is signal enough to stop
+  // pestering this user with the same repo.
+  const triageRows = await db
+    .select({
+      repoId: schema.triageEvents.repoId,
+      verdict: schema.triageEvents.verdict,
+      createdAt: schema.triageEvents.createdAt,
+    })
+    .from(schema.triageEvents)
+    .where(eq(schema.triageEvents.userId, auth.userId));
+  const latestVerdictByRepo = new Map<number, { verdict: string; at: number }>();
+  for (const t of triageRows) {
+    const at = t.createdAt ? t.createdAt.getTime() : 0;
+    const prev = latestVerdictByRepo.get(t.repoId);
+    if (!prev || at >= prev.at) latestVerdictByRepo.set(t.repoId, { verdict: t.verdict, at });
+  }
+  for (const [repoId, v] of latestVerdictByRepo) {
+    if (v.verdict === "skip") excludedRepoIds.add(repoId);
+  }
+
   // Apply eligibility filter (cheap, deterministic). Reuses the same
   // structural rules the hosted pipeline runs at Stage 2.
   const eligibilityCtx = {
@@ -224,6 +278,17 @@ export async function GET(req: Request) {
     ? parseStoredEmbedding(scopedProject.embedding ?? null)
     : null;
 
+  // Relevance floor — "silence beats a weak match". A candidate must clear a
+  // quality bar to be surfaced at all; if NONE do, the response is empty and
+  // the footnote stays silent — better than interrupting with a 20%-cosine
+  // macOS menu-bar app for a news site. The bar: when a cosine exists,
+  // require it >= REPLEN_MIN_COSINE; otherwise a real tag/language hit
+  // (relevance > 0) is the signal. Applied only on the scoped-project path
+  // (where the footnote fires); zero-knowledge mode and the explicit global
+  // firehose (repo='') opt out — there the user has asked to see everything.
+  const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.4")));
+  const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
+
   type ScoredRow = CandidateRow & {
     whyShortlisted: string;
     relevance: number;        // tag-overlap fallback score
@@ -273,6 +338,13 @@ export async function GET(req: Request) {
           reasons.push(`semantic similarity: ${(sim * 100).toFixed(0)}%`);
         }
       }
+    }
+
+    // Relevance floor: drop candidates that don't clear the bar so weak
+    // matches never reach the user (and an all-weak result stays silent).
+    if (applyFloor) {
+      const clears = cosine !== null ? cosine >= MIN_COSINE : relevance > 0;
+      if (!clears) continue;
     }
 
     filtered.push({
@@ -383,6 +455,8 @@ export async function GET(req: Request) {
       filterMode,
       scopedTo: scopedProject ? `${scopedProject.slug} (${scopedProject.githubFullName})` : null,
       days,
+      windowReason,
+      minCosine: applyFloor ? MIN_COSINE : null,
       totalConsidered,
       afterEligibility,
       afterFilter,
