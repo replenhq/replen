@@ -85,7 +85,8 @@ export async function GET(req: Request) {
   let scopedProjectId: number | null = null;
   let scopedProject: typeof schema.projectProfiles.$inferSelect | null = null;
   if (repoFilter) {
-    const p = await db
+    // 1. Exact owner/name match.
+    let p = await db
       .select()
       .from(schema.projectProfiles)
       .where(and(
@@ -93,6 +94,32 @@ export async function GET(req: Request) {
         sql`LOWER(${schema.projectProfiles.githubFullName}) = ${repoFilter}`,
       ))
       .get();
+
+    // 2. Owner-tolerant fallback. Repos move orgs (e.g. nsokin → nsokin) and
+    //    the registered owner drifts from the local remote, so the MCP-detected
+    //    owner/name stops matching. When the exact match misses, match by repo
+    //    NAME alone — but only when it unambiguously identifies a project,
+    //    preferring an active+included+embedded row. This avoids a wrong match
+    //    when two genuinely-different repos share a name across owners.
+    if (!p && repoFilter.includes("/")) {
+      const namePart = repoFilter.slice(repoFilter.indexOf("/") + 1);
+      const byName = await db
+        .select()
+        .from(schema.projectProfiles)
+        .where(and(
+          eq(schema.projectProfiles.userId, auth.userId),
+          sql`LOWER(substr(${schema.projectProfiles.githubFullName}, instr(${schema.projectProfiles.githubFullName}, '/') + 1)) = ${namePart}`,
+        ));
+      if (byName.length > 0) {
+        byName.sort((a, b) =>
+          (Number(!!(b.active && b.included)) - Number(!!(a.active && a.included))) ||
+          (Number(b.embedding != null) - Number(a.embedding != null)) ||
+          ((b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0)),
+        );
+        p = byName[0];
+      }
+    }
+
     if (p && p.active && p.included) {
       scopedProjectId = p.id;
       scopedProject = p;

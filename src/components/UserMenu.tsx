@@ -47,6 +47,9 @@ export function UserMenu({ email, isAdmin, demoMode }: { email: string; isAdmin:
             <span className="avatar" aria-hidden="true">{initial}</span>
             <span className="dropdown-email">{email}</span>
           </div>
+          <a className="dropdown-item" href={`${navPrefix}/projects`} role="menuitem">
+            <Icon name="folder" size={16} /> Projects
+          </a>
           <a className="dropdown-item" href={`${navPrefix}/settings`} role="menuitem">
             <Icon name="settings" size={16} /> Settings
           </a>

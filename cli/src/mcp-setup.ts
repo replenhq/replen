@@ -29,8 +29,27 @@ import { installSkills } from "./skill-install.js";
 const SERVER_NAME = "replen";
 
 const CLAUDE_CONFIG = join(homedir(), ".claude.json");
+const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const GEMINI_CONFIG = join(homedir(), ".gemini", "settings.json");
+
+// Read/triage replen MCP tools that are safe to auto-allow so the proactive
+// footnote (replen_match) and in-session triage don't trigger a permission
+// prompt every session. Deliberately EXCLUDES replen_run / replen_handoff /
+// replen_feedback — those trigger pipeline runs / open PRs and should keep
+// prompting for explicit consent.
+const REPLEN_AUTO_ALLOW = [
+  "mcp__replen__replen_match",
+  "mcp__replen__replen_check_new",
+  "mcp__replen__replen_analyze",
+  "mcp__replen__replen_state",
+  "mcp__replen__replen_record_triage",
+  "mcp__replen__replen_today",
+  "mcp__replen__replen_search",
+  "mcp__replen__replen_starred",
+  "mcp__replen__replen_status",
+  "mcp__replen__replen_help",
+];
 
 // ============================================================================
 // Public entry point
@@ -97,10 +116,36 @@ function setupClaude(token: string, base: string): HostSetupResult {
     );
 
     writeJsonAtomic(path, { ...config, mcpServers, hooks });
+
+    // Auto-allow the read/triage tools so the proactive footnote doesn't
+    // prompt every session. Best-effort: a failure here mustn't fail MCP setup.
+    try {
+      allowlistClaudeTools();
+    } catch (e) {
+      console.warn(`  ⚠ Claude Code allowlist skipped — ${(e as Error).message}`);
+    }
+
     return { ok: true, label: "Claude Code", path, action: existed ? "updated" : "added" };
   } catch (e) {
     return { ok: false, label: "Claude Code", path, error: (e as Error).message };
   }
+}
+
+// Merge the replen read/triage tools into Claude Code's permission allowlist
+// (~/.claude/settings.json → permissions.allow) so the proactive footnote +
+// in-session triage run without a per-session permission prompt. Non-
+// destructive: preserves existing allow entries and every other setting.
+function allowlistClaudeTools(): void {
+  const path = CLAUDE_SETTINGS;
+  mkdirSync(dirname(path), { recursive: true });
+  const config = existsSync(path) ? readJson(path) : {};
+  const permissions = (config.permissions as Record<string, unknown> | undefined) ?? {};
+  const existingAllow = Array.isArray(permissions.allow) ? (permissions.allow as string[]) : [];
+  const allow = Array.from(new Set([...existingAllow, ...REPLEN_AUTO_ALLOW]));
+  if (allow.length === existingAllow.length) return; // already fully allowlisted
+  backupIfExists(path);
+  writeJsonAtomic(path, { ...config, permissions: { ...permissions, allow } });
+  console.log(`  ✓ Claude Code: allowlisted replen read tools (no more per-session prompts)`);
 }
 
 function setupGemini(token: string, base: string): HostSetupResult {
