@@ -327,7 +327,7 @@ export async function runCheckNew(argv: string[]): Promise<void> {
       const inv = await fetchInventoryStatus(cfg, cwdRepo);
       if (inv && inv.count > 0) {
         const top = inv.topRepo ? ` Top: ${inv.topRepo}${inv.topSimilarity ? ` (~${inv.topSimilarity}% match)` : ""}.` : "";
-        console.log(`Replen has ${inv.count} candidate${inv.count === 1 ? "" : "s"} queued for ${cwdRepo}.${top} Run /replen-match for full triage.`);
+        console.log(`Replen has ${inv.count} candidate${inv.count === 1 ? "" : "s"} queued for ${cwdRepo}.${top} Run /replen for full triage.`);
       }
     } catch {
       // Inventory query failed — silent, never disrupt a session.

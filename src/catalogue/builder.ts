@@ -13,11 +13,17 @@ import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
 import { embed, embedBatch, candidateEmbeddingText, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
 import { inferRepoShape } from "../fetchers/repo-shape";
+import { looksLikeHype } from "./derive-capabilities";
+import { classifyRepos, KEEP_KINDS, type RepoKind } from "./classify";
 import { readRunOrEnv } from "../analyzer/run-context";
 
 const MIN_STARS = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_MIN_STARS ?? "80", 10) || 80);
 const PER_CAPABILITY = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_PER_CAPABILITY ?? "8", 10) || 8);
-const REFRESH_DAYS = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_REFRESH_DAYS ?? "14", 10) || 14);
+// Allow 0 (force re-search every label) — a plain `|| 14` would coerce 0→14.
+const REFRESH_DAYS = (() => {
+  const v = parseInt(process.env.REPLEN_CATALOGUE_REFRESH_DAYS ?? "14", 10);
+  return Number.isFinite(v) && v >= 0 ? v : 14;
+})();
 const MAX_SEARCHES_PER_RUN = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_MAX_SEARCHES ?? "8", 10) || 8);
 
 // Labels that make poor GitHub queries (too generic / would match everything).
@@ -38,7 +44,7 @@ function usableLabel(label: string): boolean {
 type RepoHit = {
   fullName: string; owner: string; name: string; description: string | null;
   url: string; topics: string[]; stars: number | null; language: string | null;
-  shape: string; pushedAt: Date | null;
+  shape: string; pushedAt: Date | null; createdAt: Date | null;
 };
 
 /**
@@ -70,8 +76,12 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
   }
   if (toRefresh.length === 0) return { searched: 0, upserted: 0 };
 
+  // Stay under GitHub's search secondary rate limit (~30/min) on big backfills.
+  const SEARCH_DELAY_MS = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_SEARCH_DELAY_MS ?? "1500", 10) || 1500);
   let upserted = 0;
-  for (const label of toRefresh) {
+  for (let i = 0; i < toRefresh.length; i++) {
+    const label = toRefresh[i];
+    if (i > 0 && SEARCH_DELAY_MS > 0) await new Promise((r) => setTimeout(r, SEARCH_DELAY_MS));
     let hits: RepoHit[] = [];
     try {
       hits = await searchGithub(label, ghToken);
@@ -79,12 +89,17 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
       console.warn(`[catalogue] search "${label}" failed:`, (e as Error).message);
     }
     if (hits.length > 0) {
-      const vecs = await embedBatch(hits.map((h) =>
-        candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language }),
-      ));
-      for (let i = 0; i < hits.length; i++) {
-        await upsertRepo(hits[i], label, vecs[i]?.vector ?? null);
-        upserted++;
+      // Library-vs-hype: keep only adoptable repos (library/framework/app).
+      const kinds = await classifyRepos(hits.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
+      const keep = hits.map((h, i) => ({ h, kind: kinds[i] })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
+      if (keep.length > 0) {
+        const vecs = await embedBatch(keep.map(({ h }) =>
+          candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language }),
+        ));
+        for (let i = 0; i < keep.length; i++) {
+          await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind);
+          upserted++;
+        }
       }
     }
     const now = new Date();
@@ -108,7 +123,7 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
   return { searched: toRefresh.length, upserted };
 }
 
-async function upsertRepo(h: RepoHit, label: string, vector: number[] | null): Promise<void> {
+async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind): Promise<void> {
   const now = new Date();
   const existing = await db.select().from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
   if (existing) {
@@ -118,7 +133,8 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null): P
     if (!caps.map((c) => c.toLowerCase()).includes(label)) caps.push(label);
     await db.update(schema.catalogueRepos).set({
       description: h.description, url: h.url, topics: JSON.stringify(h.topics), stars: h.stars,
-      primaryLanguage: h.language, repoShape: h.shape, pushedAt: h.pushedAt,
+      primaryLanguage: h.language, repoShape: h.shape, pushedAt: h.pushedAt, createdAt: h.createdAt,
+      kind: kind === "unknown" ? existing.kind : kind,
       // Re-embed only when we have a fresh vector; keep the old one otherwise.
       embedding: vector ? serialiseEmbedding(vector) : existing.embedding,
       capabilities: JSON.stringify(caps.slice(0, 20)), lastSeen: now, updatedAt: now,
@@ -127,7 +143,7 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null): P
     await db.insert(schema.catalogueRepos).values({
       fullName: h.fullName, owner: h.owner, name: h.name, description: h.description, url: h.url,
       topics: JSON.stringify(h.topics), stars: h.stars, primaryLanguage: h.language, repoShape: h.shape,
-      license: null, pushedAt: h.pushedAt, embedding: vector ? serialiseEmbedding(vector) : null,
+      license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, embedding: vector ? serialiseEmbedding(vector) : null,
       capabilities: JSON.stringify([label]), firstSeen: now, lastSeen: now, updatedAt: now,
     });
   }
@@ -163,12 +179,14 @@ async function searchGithub(label: string, token: string | undefined): Promise<R
     // deep-learning libraries as tutorials via the "learning" keyword, so
     // filtering it would drop genuine libs like opencv.)
     if (shape === "aggregator" || shape === "template") continue;
+    if (looksLikeHype(name, description)) continue; // skills/awesome/roadmap hype, not a library
     out.push({
       fullName, owner, name, description,
       url: `https://github.com/${fullName}`,
       topics, stars, language,
       shape,
       pushedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
+      createdAt: item.created_at ? new Date(String(item.created_at)) : null,
     });
   }
   return out;

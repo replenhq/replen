@@ -4,7 +4,7 @@
 //
 //   - Claude Code  → ~/.claude.json          (JSON, mcpServers object,
 //                                              + SessionStart hook,
-//                                              + /replen-match skill)
+//                                              + /replen skill)
 //   - Codex        → ~/.codex/config.toml    (TOML, [mcp_servers.replen]
 //                                              table; AGENTS.md inject
 //                                              provides session-start

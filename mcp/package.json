@@ -1,7 +1,7 @@
 {
   "name": "@replen/mcp",
-  "version": "1.0.4",
-  "description": "MCP server for replen — exposes the candidate inventory + per-user state + in-session triage capture as tools your AI coding host (Claude Code, Codex, Cursor) can call. Pairs with the /replen-match skill.",
+  "version": "1.0.5",
+  "description": "MCP server for replen — surfaces suggestions for your repo (libraries, dependency releases, security advisories) as tools your AI coding host (Claude Code, Codex, Cursor) can call. Pairs with the /replen skill.",
   "type": "module",
   "bin": {
     "replen-mcp": "dist/cli.js"

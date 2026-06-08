@@ -1,5 +1,5 @@
-// Install the bundled `replen-match` skill into Claude Code's
-// ~/.claude/skills/ tree so users can invoke it via `/replen-match`
+// Install the bundled `replen` skill into Claude Code's
+// ~/.claude/skills/ tree so users can invoke it via `/replen`
 // (or by saying "use replen / triage today / what's new from replen").
 //
 // Idempotent: re-running setup overwrites the skill in place. The
@@ -7,7 +7,7 @@
 // shouldn't be hand-editing the installed copy because it'll be
 // clobbered on next `npx replen mcp setup`.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,17 +26,22 @@ const CLAUDE_SKILLS_ROOT = join(homedir(), ".claude", "skills");
 
 type SkillSpec = {
   name: string;
-  // Relative path under bundled skills root (e.g. "replen-match/SKILL.md")
+  // Relative path under bundled skills root (e.g. "replen/SKILL.md")
   // and under ~/.claude/skills/ (mirrored).
   files: string[];
 };
 
 const SKILLS: SkillSpec[] = [
   {
-    name: "replen-match",
-    files: ["replen-match/SKILL.md"],
+    name: "replen",
+    files: ["replen/SKILL.md"],
   },
 ];
+
+// Old skill name, removed on setup so the renamed `/replen` is the single
+// source of truth (a stale `/replen-match` copy would otherwise linger and
+// show a duplicate command).
+const LEGACY_SKILL_DIRS = ["replen-match"];
 
 export function installSkills(): void {
   if (!existsSync(BUNDLED_SKILLS_ROOT)) {
@@ -48,6 +53,13 @@ export function installSkills(): void {
     return;
   }
   mkdirSync(CLAUDE_SKILLS_ROOT, { recursive: true });
+  // Migrate: drop the pre-rename /replen-match skill so it doesn't linger.
+  for (const old of LEGACY_SKILL_DIRS) {
+    const oldFile = join(CLAUDE_SKILLS_ROOT, old, "SKILL.md");
+    if (existsSync(oldFile)) {
+      try { rmSync(join(CLAUDE_SKILLS_ROOT, old), { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
   let installed = 0;
   for (const skill of SKILLS) {
     for (const rel of skill.files) {

@@ -833,8 +833,17 @@ export const catalogueRepos = sqliteTable(
     repoShape: text("repo_shape"), // 'lib' | 'app' | ... (for competitor suppression)
     license: text("license"),
     pushedAt: integer("pushed_at", { mode: "timestamp" }),
+    // Repo age — drives the recency/trending boost: a recently-created repo that
+    // fills a capability you have is the "rising gem" signal (the thing you'd
+    // catch on a creator's feed before it's canonical), so it ranks UP rather
+    // than getting buried under the all-time star leader.
+    createdAt: integer("created_at", { mode: "timestamp" }),
     embedding: text("embedding"), // serialised vector (matched against project facets)
     capabilities: text("capabilities"), // JSON string[] — capability labels that sourced this repo
+    // library | framework | app | experiment | content | unknown (classify.ts).
+    // Only library/framework/app are kept; experiment/content (viral hype,
+    // curated lists, "skills" repos) are filtered out — viral != adoptable.
+    kind: text("kind"),
     firstSeen: integer("first_seen", { mode: "timestamp" }).notNull(),
     lastSeen: integer("last_seen", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),

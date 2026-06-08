@@ -8,6 +8,7 @@
 import { db, schema } from "../db/client";
 import { desc, isNotNull } from "drizzle-orm";
 import { cosineSimilarity, parseStoredEmbedding, type FacetEmbedding } from "../lib/embeddings";
+import { KEEP_KINDS, RISING_KINDS, type RepoKind } from "./classify";
 
 export type CatalogueMatch = {
   fullName: string;
@@ -22,7 +23,26 @@ export type CatalogueMatch = {
   repoShape: string | null;
   cosine: number;
   matchedFacet: string | null;
+  ageDays: number | null;   // repo age; null when unknown
+  rising: boolean;          // recent + relevant → "rising in your space"
 };
+
+// Recency/trending boost. A recently-CREATED repo that's relevant is the
+// "rising gem" signal — the thing you'd catch on a creator's feed before it's
+// canonical. It gets a bonus added to its ranking score (not its cosine — the
+// relevance floor still applies), so a fresh newcomer ranks alongside/above the
+// all-time star leader instead of being buried under it. Linear decay over the
+// window. "rising" flags repos young enough to call out as discoveries.
+const RECENCY_MONTHS = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_RECENCY_MONTHS ?? "12", 10) || 12);
+const RECENCY_MAX_BOOST = Math.max(0, parseFloat(process.env.REPLEN_CATALOGUE_RECENCY_BOOST ?? "0.08"));
+const RISING_MONTHS = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_RISING_MONTHS ?? "9", 10) || 9);
+
+function recencyBoost(ageDays: number | null): number {
+  if (ageDays == null || ageDays < 0) return 0;
+  const windowDays = RECENCY_MONTHS * 30;
+  if (ageDays >= windowDays) return 0;
+  return RECENCY_MAX_BOOST * (1 - ageDays / windowDays);
+}
 
 // Upper bound on how many catalogue rows we cosine per request. The catalogue
 // starts small; ordering by stars means the cap keeps the canonical libraries
@@ -72,18 +92,30 @@ export async function catalogueMatches(opts: {
     // centroid) without leading on a specific capability is a competitor.
     if (r.repoShape === "app" && Number.isFinite(centroidCos) && centroidCos >= competitorCentroid && !facetLeads) continue;
 
+    // Library-vs-hype: skip viral experiments + curated content outright (a
+    // classified row that isn't adoptable). Unclassified (null) is allowed.
+    const kind = (r.kind ?? "unknown") as RepoKind;
+    if (r.kind && !KEEP_KINDS.has(kind)) continue;
+
     const matchedFacet = bestFacetLabel !== null && Number.isFinite(bestFacet) && bestFacet >= cVal ? bestFacetLabel : null;
     let topics: string[] = [];
     try { topics = r.topics ? JSON.parse(r.topics) : []; } catch { /* ignore */ }
 
+    const ageDays = r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null;
+    // Recency only elevates genuine libraries/frameworks — a fresh app is more
+    // likely a competitor, and content/experiments are already excluded.
+    const recencyEligible = RISING_KINDS.has(kind);
     out.push({
       fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
       topics, repoShape: r.repoShape, cosine, matchedFacet,
+      ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
     });
   }
 
-  out.sort((a, b) => b.cosine - a.cosine);
+  // Rank by relevance + recency: a fresh, relevant newcomer ranks alongside or
+  // above the all-time leader instead of being buried under it.
+  out.sort((a, b) => (b.cosine + (b.rising ? recencyBoost(b.ageDays) : 0)) - (a.cosine + (a.rising ? recencyBoost(a.ageDays) : 0)));
   return out.slice(0, limit);
 }
 
@@ -159,6 +191,8 @@ export async function adjacentMatches(opts: {
         fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
         url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
         topics, repoShape: r.repoShape, cosine: a.cos, matchedFacet: null,
+        ageDays: r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null,
+        rising: false,
         adjacentTo: a.nearest, adjacentCapability: a.label,
       });
       break;

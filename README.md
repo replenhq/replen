@@ -25,13 +25,13 @@
 
 ---
 
-**Your AI coding tools, with awareness of everything your code depends on, implements, and builds on.**
+**Your AI coding tools, aware of everything your code depends on, implements, and builds on.**
 
-Claude Code, Codex, Cursor already know your code. Replen tells them what's happening *outside* it — a drop-in OSS library, a new release in a dependency you use, a standard you implement changing, an upstream you build on going dark. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
+Claude Code, Codex, and Cursor already understand your code. Replen understands what it *does* — it maps each project to its technical capabilities (computer vision, geospatial, market-making, whatever you're building) and watches the wider ecosystem for things that fit: a library that fills a capability you have, a new release in a dependency you use, a security advisory in your stack, a standard you implement changing, an upstream going dark.
 
-1–3 actionable matches per month, by design. Most days, nothing — that's the point. When something real lands, your AI tool mentions it the next time you open it: "by the way, 2 new Replen matches landed for this repo. Top one: kvnang/workers-og — could simplify lib/social/imageRenderer.ts. Want the full triage?"
+**The matching is the product.** Anyone can list trending repos — that part is commodity. Replen scores every candidate against *your* capabilities, and against a cross-user capability graph that gets sharper with every project it sees. The judgment call happens inside your AI tool's session, against your real code; your code never leaves your machine.
 
-What we provide: the OSS candidate inventory (gh-trending, gh-targeted, Threads, Reddit, HN, ossinsight historical), a tiny per-user state store, the plumbing into Claude Code / Codex. What your AI tool provides: judgment against your actual code, in your session, on your subscription.
+1–3 useful suggestions a month, by design. Most days, nothing — that's the point. When something real lands, your AI tool mentions it next time you open the repo: *"by the way — `opencv/opencv` could help with your computer-vision pipeline. Want the full review?"*
 
 ## Quickstart
 
@@ -63,7 +63,7 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 
 ## What it does
 
-1. **Scouts the OSS firehose.** Replen pulls candidates from gh-trending (per-language slices), gh-targeted (niche searches derived from your project's tags), ossinsight historical-walk-back, Threads, Reddit, HN — and applies a cheap eligibility filter (drop aggregators, drop archived deps, drop language-mismatched candidates, dedup across sources). Mechanical, no LLM.
+1. **Understands what your code does, then matches by capability.** Replen extracts each project's technical capabilities from its docs and dependencies — computer vision, geospatial, market-making, realtime streaming — and scores candidates against *those*, not a generic trending list. Candidates come from a shared, capability-indexed library catalogue plus targeted search; the matching is what makes a suggestion fit your repo. Mechanical and cheap — no per-candidate LLM.
 
 2. **Tells your AI tool when something landed.** A small session-start check returns up to 5 candidates per project. When you next open Claude Code / Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message. Silent on the days nothing is queued.
 
@@ -73,9 +73,12 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 
 ## What Replen watches
 
-Replen began by matching new **OSS repos** to your code. It now watches four lenses — everything your code depends on, implements, or builds on. Each surfaces the same calm way: quietly, in your AI tool's next reply, only when there's something real.
+Replen began by matching new OSS repos to your code. It now watches five lenses — everything your code depends on, implements, or builds on — each scored against your project's *capabilities*, not a keyword list. They surface the same calm way: quietly, in your AI tool's next reply, only when there's something real.
 
-- **🔭 What's out there — OSS repos.** New and trending open-source projects scored against your repo: a library that replaces 200 lines you maintain, a pattern worth porting, a dependency that's gone stale. *(The original lens — see the example below.)*
+- **🔭 Libraries that fit a capability you have.** Open-source projects scored against what your repo actually does — a CV library for your vision pipeline, a backtesting framework for your trading bot, a library that replaces 200 lines you maintain. Drawn from a cross-user capability catalogue that sharpens with every project. *(See the example below.)*
+
+- **🔒 Security in your stack — known advisories.** A new CVE in a dependency you use, mapped from your manifest to the OSS advisory database, gated to what you'd actually act on.
+  > *By the way — a security advisory affects a dependency you use: `drizzle-orm` (CVE-2026-39356, HIGH — SQL injection).*
 
 - **📦 Your stack — dependency releases.** When a vendor you actually depend on ships, you hear about it — `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
   > *By the way — a dependency you use just shipped: OpenAI SDK v6.39.0.*

@@ -80,7 +80,7 @@ On your **very first response** of each session:
    shape.
 
 **Additional silent cases** (besides \`(none)\` USER-FACING MESSAGE):
-- The user explicitly typed \`/replen-match\` — redundant.
+- The user explicitly typed \`/replen\` — redundant.
 - The user directly asked for Replen output ("anything from replen
   today?", "what\'s new from replen?"). Just answer.
 
@@ -91,7 +91,7 @@ primitive here.
 
 **Don\'t call \`replen_match\` again on subsequent turns** — once
 per session at start only. The user explicitly types
-\`/replen-match\` if they want a fresh triage mid-session.
+\`/replen\` if they want a fresh triage mid-session.
 `;
 
 

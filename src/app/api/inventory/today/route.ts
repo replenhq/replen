@@ -372,8 +372,14 @@ export async function GET(req: Request) {
   // project doesn't have but is NEAR (band [ADJ_LO, ADJ_HI]), labelled
   // exploratory. Only when the direct results are sparse (< ADJ_SHOW_BELOW) and
   // capped at ADJ_MAX, so it stays a "you might also explore" nudge, not noise.
-  const ADJ_LO = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_LO ?? "0.45")));
-  const ADJ_HI = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_HI ?? "0.62")));
+  // Band tuned on real data: the floor (0.58) drops cross-domain embedding
+  // noise (e.g. "technical analysis" sitting spuriously near "computer
+  // vision"); the ceiling (0.85) is high on purpose — a close-but-distinct
+  // neighbour like "object detection" for a CV project (~0.79) is exactly what
+  // we want to surface, not exclude. "Already have it" is enforced by label
+  // (ownedCapabilities), not by cosine being too high.
+  const ADJ_LO = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_LO ?? "0.58")));
+  const ADJ_HI = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_HI ?? "0.85")));
   const ADJ_MAX = Math.max(0, parseInt(process.env.REPLEN_ADJ_MAX ?? "2", 10) || 2);
   const ADJ_SHOW_BELOW = Math.max(0, parseInt(process.env.REPLEN_ADJ_SHOW_BELOW ?? "4", 10) || 4);
 
@@ -783,9 +789,13 @@ export async function GET(req: Request) {
         source: "catalogue",
         postedAt: null,
         pushedAt: null,
-        whyShortlisted: m.matchedFacet
-          ? `catalogue: fits your ${m.matchedFacet} capability (${(m.cosine * 100).toFixed(0)}%)`
-          : `catalogue: semantic match (${(m.cosine * 100).toFixed(0)}%)`,
+        whyShortlisted: (() => {
+          const ageMo = m.ageDays != null ? Math.round(m.ageDays / 30) : null;
+          const fit = m.matchedFacet ? `fits your ${m.matchedFacet} capability` : "semantic match";
+          const pct = `${(m.cosine * 100).toFixed(0)}%`;
+          if (m.rising && ageMo != null) return `rising — ${fit}, ${ageMo}mo old (${pct})`;
+          return `catalogue: ${fit} (${pct})`;
+        })(),
         cosine: m.cosine,
         matchedFacet: m.matchedFacet,
         promoted: false,

@@ -1,6 +1,6 @@
 ---
-name: replen-match
-description: Triage today's Replen candidates against the open codebase, in-session, using subscription tokens. Pulls the day's inventory from Replen, reads the user's local source, produces per-candidate writeups with verdict + effort + concrete file-level impact, then captures star/hide/handoff actions back to Replen. Invoke with `/replen-match` or by saying "run replen on this repo" / "what's new from replen?".
+name: replen
+description: Review Replen's suggestions for the current repo against your code. Replen surfaces libraries, dependency releases, and security advisories relevant to what you're building; this reads the codebase, gives each one a clear verdict and effort estimate with the specific files it affects, and records what you decide. Invoke with `/replen` or by saying "what's new from Replen?".
 ---
 
 # Replen Match — in-session candidate triage
@@ -128,32 +128,6 @@ mismatch, security flag. Empty list is fine; don't manufacture.
 No marketing voice. No hype. The user is a working engineer; talk to
 them like a peer. Concrete > clever.
 
-#### 3d. Record the verdict
-
-**After each candidate's writeup**, call the `replen_record_triage` MCP
-tool with the structured verdict so it surfaces on the user's Activity
-feed at the dashboard. Use the same `sessionId` (any opaque string,
-e.g. timestamp `2026-05-26T10-32`) across every call in this session
-so the feed can cluster them as one triage run.
-
-```
-mcp__replen__replen_record_triage(
-  repo="owner/name",
-  project="tech-news-site",      // slug, from scopedTo
-  verdict="adopt",               // adopt|port|skip|defer
-  score=87,                      // 0-100
-  effortBand="quick",            // quick|moderate|deep
-  oneLine="Drops in for lib/social/imageRenderer.ts — 30 min.",
-  writeup="<full markdown body of the writeup you just composed>",
-  sessionId="2026-05-26T10-32"
-)
-```
-
-This call is what makes the agent's work visible. Without it, the user
-only sees their own actions (star / hide) — they can't see "the agent
-considered 5 candidates this morning and skipped 4 of them, here's
-why." Record one event per candidate, including skips.
-
 ### Step 4 — Present + capture actions
 
 After all writeups, summarise:
@@ -207,11 +181,72 @@ fresh candidate shows up at session start via the hook).
 **Inventory call returns 401.** User's token expired or got rotated.
 Tell them to run `npx replen` to re-auth.
 
-**Inventory returns `scopedTo: null` with a `note` about "repo not in
-your project list"**. The cwd isn't a known project. Ask the user:
-"This repo isn't in your Replen projects yet. Add it via /projects?"
-Then either stop or re-run with `?repo=` (empty) to see the global
-firehose.
+**The project isn't scoped — `scopedTo: null`, a `note` about "repo not in
+your project list", OR the cwd has no git remote.** Replen can only match
+against a repo it has registered, and it scopes by the git remote. When it's
+unscoped you'll get the global trending firehose — which is noise for this
+codebase. **Do NOT triage the firehose** (manufacturing reasons to care about
+random trending repos is exactly what this skill must not do).
+
+Instead, **offer to onboard the project.** Lead with ONE line, not the whole
+checklist: *"This project isn't set up with Replen yet, so I can only see the
+global firehose (not matches for your code). Want me to scope it — init git,
+create the repo, write the docs, and add tags? Then Replen can surface things
+that actually fit."* If the user agrees, run this checklist:
+
+1. **Git + GitHub.** If there's no git repo, `git init`. Create the GitHub
+   repo using the user's existing `gh` auth — ask for owner/name or suggest a
+   sensible default from the folder name, and confirm public vs private:
+   `gh repo create <owner>/<name> --private --source=. --remote=origin --push`.
+   If a repo exists locally but has no remote, just add + push the remote.
+2. **Docs Replen can read.** Replen's scorer reads your `README.md` +
+   `CLAUDE.md` to understand the project — that's the difference between
+   useful matches and noise. Write a concrete `README.md` (what it is, stack,
+   domain) if missing, and a `CLAUDE.md` optimised for Replen (run the
+   `/replen-project-init` protocol, or draft the seven sections directly:
+   what it is · stack · niche/domain · active areas · constraints/non-goals ·
+   anti-patterns · integration preferences). Use the project's real domain
+   vocabulary, not abstractions.
+3. **Register + tag + set capabilities.** Register the repo: `npx replen
+   sync-projects` (scans the local repos and pushes them to Replen). Then, from
+   the code you just read:
+   - **Set domain tags** with `replen_set_tags` — broad domain labels (e.g. for
+     a Python CCXT market-making engine:
+     `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
+   - **Set technical capabilities** with `replen_set_capabilities` — short,
+     GitHub-searchable tech terms for what the project DOES at the tech level.
+     Aim for **8-15** and be **SPECIFIC** — specific capabilities match far
+     better than broad ones. Break a broad capability into the concrete
+     techniques the code actually uses: not just `"web scraping"` but
+     `["web scraping","headless browser","cloudflare bypass","proxy rotation",
+     "session handling","rate limiting"]`; not just `"trading"` but
+     `["crypto exchange","market data","backtesting","technical analysis",
+     "order management","websockets"]`. Derive them from the actual
+     imports/deps and code, not guesses. This is the highest-leverage step:
+     the server builds the project's facet vectors from these IMMEDIATELY (no
+     waiting for a scheduled run), and they drive faceted matching against the
+     shared library catalogue.
+
+   **Do NOT tell the user to set tags/capabilities on the web** — that's the
+   sticky step this replaces; set them with the tools. (They can fine-tune later
+   at app.replen.dev/projects.) These matter most right after onboarding — they
+   give a fresh project working query vectors before any server-side inference.
+4. **Embed it now (don't wait for the daily run).** A freshly-registered
+   project has no embedding yet, so matching falls back to language/tags only
+   (noise) until the next scheduled run. Trigger an immediate run with the
+   `replen_run` tool — it builds the project's summary + embedding + initial
+   candidates from the README/CLAUDE.md you just pushed. It's async: poll
+   `replen_status` until the phase reports inventory ready (~1–3 min). Tell the
+   user it's processing.
+5. **Re-run.** Once the run finishes, call `replen_match` again — now scoped
+   AND embedded, matching against the real code (a dev-tool that only shared the
+   project's language now scores low on cosine and gets floored out).
+
+Note on recording actions: always use the MCP tools — `replen_state` (star /
+hide / handoff), `replen_record_triage` (your verdict), `replen_set_tags` — for
+any write back to Replen. Don't hand-roll `curl` to the API for these; the MCP
+path is the intended mechanism and avoids tripping host permission classifiers
+on the candidate repo name in a curl payload.
 
 **Candidate's README is unreachable (WebFetch 404)**. Note it in the
 writeup (`Caveats: README unreachable; verdict based on description

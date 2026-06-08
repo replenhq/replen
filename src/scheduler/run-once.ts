@@ -15,6 +15,7 @@ import {
 } from "../lib/embeddings";
 import { facetInputsFor, embedFacets } from "../projects/facets";
 import { refreshCatalogue } from "../catalogue/builder";
+import { SEED_CAPABILITIES, isSeedCapability } from "../catalogue/seed-capabilities";
 import { createHash } from "node:crypto";
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -716,31 +717,59 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
 // .git/ in the projects-mirror so the local probe always returned
 // empty. GitHub API works wherever the pipeline runs.
 //
-// Phase 5 — warm the shared capability catalogue. Gathers the union of this
-// user's project capabilityTags and asks the builder to refresh the stalest
-// ones (budget-bounded GitHub searches). The catalogue is cross-user, so this
-// also serves every other user whose project shares a capability.
+// Phase 5 — warm the shared capability catalogue, with PRIVACY guarantees.
+//
+// The catalogue is cross-user, so what enters it must never leak one user's
+// project vocabulary. Two rules:
+//   1. A curated, generic seed vocabulary (SEED_CAPABILITIES) is always
+//      refreshed — baseline coverage built from NO user data.
+//   2. A capability derived from this user's projects only enters the shared
+//      catalogue (and becomes a GitHub search) if it's a seed capability OR at
+//      least REPLEN_CATALOGUE_MIN_USERS DISTINCT users independently have it
+//      (k-anonymity). A unique/proprietary term used by one project never
+//      crosses the threshold — it's never shared, never searched.
+//
+// Nothing user-identifying is ever written to the catalogue tables (no user_id,
+// no repo names, no code) — only public OSS metadata + generic capability terms.
 async function refreshCatalogueStep(runId: number, userId: number): Promise<void> {
-  const projects = await db
-    .select({ summaryJson: schema.projectProfiles.summaryJson })
+  const K = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2);
+
+  // One pass over ALL active projects: count DISTINCT users per capability
+  // (k-anonymity), and collect this user's own capability labels.
+  const all = await db
+    .select({ uid: schema.projectProfiles.userId, summaryJson: schema.projectProfiles.summaryJson })
     .from(schema.projectProfiles)
-    .where(and(
-      eq(schema.projectProfiles.userId, userId),
-      eq(schema.projectProfiles.active, true),
-      eq(schema.projectProfiles.included, true),
-    ));
-  const labels = new Set<string>();
-  for (const p of projects) {
-    if (!p.summaryJson) continue;
-    try {
-      const s = JSON.parse(p.summaryJson) as ProjectSummary;
-      for (const t of s.capabilityTags ?? []) if (typeof t === "string") labels.add(t);
-    } catch { /* ignore */ }
+    .where(and(eq(schema.projectProfiles.active, true), eq(schema.projectProfiles.included, true)));
+  const usersByLabel = new Map<string, Set<number>>();
+  const myLabels: string[] = [];
+  const mySeen = new Set<string>();
+  for (const p of all) {
+    if (!p.summaryJson || p.uid == null) continue;
+    const uid = p.uid;
+    let caps: string[] = [];
+    try { caps = (JSON.parse(p.summaryJson) as ProjectSummary).capabilityTags ?? []; } catch { continue; }
+    for (const c of caps) {
+      if (typeof c !== "string") continue;
+      const k = c.toLowerCase();
+      let s = usersByLabel.get(k);
+      if (!s) { s = new Set(); usersByLabel.set(k, s); }
+      s.add(uid);
+      if (uid === userId && !mySeen.has(k)) { mySeen.add(k); myLabels.push(c); }
+    }
   }
-  if (labels.size === 0) return;
-  const { searched, upserted } = await refreshCatalogue([...labels]);
+
+  // Shareable user labels: seed OR ≥K distinct users. Everything else stays
+  // private to this user's own matching (their facets) and is NOT searched.
+  const shareableMine = myLabels.filter(
+    (l) => isSeedCapability(l) || (usersByLabel.get(l.toLowerCase())?.size ?? 0) >= K,
+  );
+  const toRefresh = Array.from(new Set([...SEED_CAPABILITIES, ...shareableMine]));
+  const withheld = myLabels.length - shareableMine.length;
+
+  const { searched, upserted } = await refreshCatalogue(toRefresh);
   if (searched > 0) {
-    void recordEvent(runId, userId, "scan", `Capability catalogue: refreshed ${searched} capabilit${searched === 1 ? "y" : "ies"} → ${upserted} librar${upserted === 1 ? "y" : "ies"} indexed`);
+    const note = withheld > 0 ? ` (${withheld} project-specific capabilit${withheld === 1 ? "y" : "ies"} kept private)` : "";
+    void recordEvent(runId, userId, "scan", `Capability catalogue: refreshed ${searched} capabilit${searched === 1 ? "y" : "ies"} → ${upserted} librar${upserted === 1 ? "y" : "ies"} indexed${note}`);
   }
 }
 

@@ -23,7 +23,11 @@ type Input = {
   topics?: string[] | null;
 };
 
-const TUTORIAL_HITS = /\b(tutorial|course|exercises|learn(?:ing)?|cheat[-\s]?sheet|study[-\s]?guide|handbook|primer|workshop|bootcamp)\b/i;
+// Note: bare "learn"/"learning" is deliberately NOT here — it false-positives
+// on "deep-learning" / "machine-learning" / "reinforcement-learning", which
+// tags real ML libraries (opencv, pytorch/vision) as tutorials. Tutorials
+// reliably carry one of the stronger words below.
+const TUTORIAL_HITS = /\b(tutorials?|course|exercises|cheat[-\s]?sheet|study[-\s]?guide|handbook|workshop|bootcamp)\b/i;
 const TEMPLATE_HITS = /\b(template|starter|boilerplate|scaffold|seed[-\s]?project|skeleton)\b/i;
 const FRAMEWORK_HITS = /\b(framework|opinionated|full[-\s]?stack)\b/i;
 const APP_HITS = /\b(self[-\s]?host(?:ed)?|deploy(?:able)?|dashboard|admin\s+panel)\b/i;
@@ -59,7 +63,7 @@ export function inferRepoShape(input: Input): RepoShape {
   // Tutorials masquerade as libraries because they sometimes have
   // package.json / pyproject.toml. Keyword check is more reliable.
   if (TUTORIAL_HITS.test(name) || TUTORIAL_HITS.test(description)) return "tutorial";
-  if (topics.some((t) => /(tutorial|course|cheatsheet|study-guide|learn)/.test(t))) return "tutorial";
+  if (topics.some((t) => /(tutorial|course|cheatsheet|study-guide)/.test(t))) return "tutorial";
 
   // Templates / starters / boilerplates.
   if (TEMPLATE_HITS.test(name) || TEMPLATE_HITS.test(description)) return "template";

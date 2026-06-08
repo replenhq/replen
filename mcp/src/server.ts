@@ -78,7 +78,7 @@ const TOOLS: Tool[] = [
   {
     name: "replen_match",
     description:
-      "Skill-mode entry point. Pulls today's candidate inventory scoped to the cwd repo. " +
+      "Review Replen's suggestions for the current repo. Pulls the candidate inventory scoped to the cwd repo so you can triage each one against the local code. " +
       "\n\n" +
       "RESPONSE FORMAT — IMPORTANT:\n" +
       "The response has two sections, separated by a divider:\n" +
@@ -254,14 +254,15 @@ const TOOLS: Tool[] = [
     name: "replen_set_capabilities",
     description:
       "Set the TECHNICAL CAPABILITIES of a Replen project from what you read in its code. Use this during ONBOARDING " +
-      "to give the matcher its query vectors WITHOUT waiting for the server to infer them on the next scheduled run — " +
-      "matching works immediately. Capabilities are short, GitHub-searchable tech terms describing what the project " +
-      "DOES at the tech level (not its UI features, not its domain): e.g. for a defense CV pipeline " +
-      "[\"computer vision\",\"object detection\",\"satellite imagery\",\"geospatial mapping\"]; for a crypto bot " +
-      "[\"crypto exchange\",\"market data\",\"backtesting\",\"technical analysis\"]. DERIVE them from the actual " +
-      "imports/deps and code, not generic guesses. The server merges in dependency-derived capabilities and builds " +
-      "the facet vectors right away. Distinct from replen_set_tags (broad domain labels); capabilities drive faceted " +
-      "matching + the shared catalogue. Replaces the project's current capability set.",
+      "to give the matcher its query vectors WITHOUT waiting for the server to infer them — matching works immediately. " +
+      "Capabilities are short, GitHub-searchable tech terms for what the project DOES at the tech level (not UI features, " +
+      "not its domain). AIM FOR 8-15 AND BE SPECIFIC — specific capabilities match far better than broad ones. Break a " +
+      "broad capability into the concrete techniques the code actually uses: not just [\"web scraping\"] but " +
+      "[\"web scraping\",\"headless browser\",\"cloudflare bypass\",\"proxy rotation\",\"session handling\",\"rate limiting\"]; " +
+      "not just [\"trading\"] but [\"crypto exchange\",\"market data\",\"backtesting\",\"technical analysis\",\"order management\"]. " +
+      "DERIVE them from the actual imports/deps and code, not generic guesses. The server merges in dependency-derived " +
+      "capabilities and builds the facet vectors right away. Distinct from replen_set_tags (broad domain labels). " +
+      "Replaces the project's current capability set.",
     inputSchema: {
       type: "object",
       properties: {

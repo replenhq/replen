@@ -179,7 +179,7 @@ export async function runInit(): Promise<void> {
 
   console.log("");
   console.log("  All set. Restart Claude Code and try:");
-  console.log("    /replen-match       → triage today's candidates against this repo,");
+  console.log("    /replen       → triage today's candidates against this repo,");
   console.log("                         in-session, using your subscription tokens");
   console.log("    (no LLM API keys needed — the agent does the reasoning)");
   console.log("");

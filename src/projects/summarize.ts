@@ -16,7 +16,9 @@ import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 // markdown and will mis-rank.
 // "3" (Phase 2): adds capabilityTags — clean tech-capability terms that drive
 // facet matching + targeted search. Old summaries lack them and re-generate.
-export const PROMPT_VERSION = "3";
+// "4": more + more-SPECIFIC capabilityTags (8-15, sub-capabilities broken out)
+// for sharper matching. Old summaries regenerate.
+export const PROMPT_VERSION = "4";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -153,16 +155,24 @@ Rules:
   GitHub-searchable TECHNICAL capability terms — the tech the project uses or
   needs, NOT its UI features and NOT its domain. 1-4 words each, in the
   vocabulary real OSS repos use in their description/topics. Derive them from
-  the deps, imports, file tree, and configs — not just prose. Examples:
+  the deps, imports, file tree, and configs — not just prose.
+  Aim for 8-15 tags, and be SPECIFIC — specific tags match far better than
+  broad ones. Break a broad capability into the concrete techniques the project
+  actually uses. "web scraping" is OK, but if the code does more, emit the
+  precise sub-capabilities too: "headless browser", "cloudflare bypass",
+  "anti-bot evasion", "proxy rotation", "session handling". Prefer the precise
+  term a library would describe itself with. Examples:
+    - a scraper that beats Cloudflare with a headless browser and rotates auth →
+      ["web scraping","headless browser","cloudflare bypass","anti-bot evasion",
+       "proxy rotation","session handling","captcha solving","rate limiting"]
     - a defense map UI that shows drone imagery and scores threats →
-      ["computer vision","geospatial mapping","satellite imagery",
-       "object detection","realtime streaming","Bayesian inference"]
-    - a crypto trading bot → ["crypto exchange","market data","backtesting",
-       "technical analysis","websockets","rate limiting"]
+      ["computer vision","object detection","image segmentation",
+       "satellite imagery","geospatial mapping","sensor fusion",
+       "Bayesian inference","realtime streaming"]
   Each tag must be something you could paste into GitHub search and get
   relevant libraries back. FORBIDDEN: the project's own name, domain words
   ("defense","fintech"), UI features ("dashboard","map view"), and vague
-  terms ("data","api","backend"). If you only have generic tags, return fewer.
+  terms ("data","api","backend"). Be specific and thorough, not generic.
 
 Output JSON only. No prose before or after. Schema:
 {

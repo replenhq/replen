@@ -27,7 +27,7 @@ In 60 seconds, the one-liner:
 4. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.)
 5. Registers them with Replen as your projects (no GitHub PAT needed)
 6. Wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
-7. Installs the `/replen-match` skill into `~/.claude/skills/`
+7. Installs the `/replen` skill into `~/.claude/skills/`
 8. Injects a small "Replen integration" section into each project's `CLAUDE.md` + `AGENTS.md`
 
 **What you do not provide:**
