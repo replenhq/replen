@@ -286,6 +286,40 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_set_product",
+    description:
+      "Group repos into a multi-repo PRODUCT. A product usually spans several repos (a web app, an API, " +
+      "workers, infra…) but you mostly work in one — so matches for the others never surface where you are. " +
+      "Grouping them makes Replen union the whole product's capabilities when you're in ANY of its repos, and " +
+      "attribute each match to the repo it's for. Replen auto-groups repos that share a name stem " +
+      "(acme-web / acme-cv → one product); use this tool for repos that belong together but DON'T share a name " +
+      "(e.g. group 'acme-clinic-api' with 'cute'). Pass sameProductAs to join another repo's product (preferred), " +
+      "or productKey to set an explicit group name. Sets the product on the given repo only — call once per repo " +
+      "you want to add.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name (or slug) of the repo to group (owner-tolerant)" },
+        repoId: { type: "number", description: "Alternative to repo — the project's id" },
+        sameProductAs: { type: "string", description: "owner/name or slug of a repo whose product this one should join" },
+        productKey: { type: "string", description: "Alternative to sameProductAs — an explicit product group key" },
+      },
+      required: [],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        repoId: z.number().int().positive().optional(),
+        sameProductAs: z.string().optional(),
+        productKey: z.string().optional(),
+      }).parse(args);
+      if (!parsed.repo && parsed.repoId === undefined) throw new Error("must specify repo (owner/name) or repoId");
+      if (!parsed.sameProductAs && !parsed.productKey) throw new Error("specify sameProductAs (a repo to group with) or productKey");
+      const data = await apiPost(cfg, "/api/projects/product", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_check_new",
     description:
       "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +

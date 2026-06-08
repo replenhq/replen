@@ -337,6 +337,13 @@
       "when": 1779855805651,
       "tag": "0047_catalogue_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1779859405651,
+      "tag": "0048_product_key",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ export type CatalogueMatch = {
   repoShape: string | null;
   cosine: number;
   matchedFacet: string | null;
+  matchedRepo: string | null; // sibling repo this is for, when cross-repo (multi-repo products)
   ageDays: number | null;   // repo age; null when unknown
   rising: boolean;          // recent + relevant → "rising in your space"
 };
@@ -79,9 +80,10 @@ export async function catalogueMatches(opts: {
 
     let bestFacet = -Infinity;
     let bestFacetLabel: string | null = null;
+    let bestFacetRepo: string | undefined;
     for (const f of projectFacets) {
       const s = cosineSimilarity(f.vec, emb);
-      if (Number.isFinite(s) && s > bestFacet) { bestFacet = s; bestFacetLabel = f.label; }
+      if (Number.isFinite(s) && s > bestFacet) { bestFacet = s; bestFacetLabel = f.label; bestFacetRepo = f.repo; }
     }
 
     const cosine = Math.max(cVal, bestFacet);
@@ -97,7 +99,9 @@ export async function catalogueMatches(opts: {
     const kind = (r.kind ?? "unknown") as RepoKind;
     if (r.kind && !KEEP_KINDS.has(kind)) continue;
 
-    const matchedFacet = bestFacetLabel !== null && Number.isFinite(bestFacet) && bestFacet >= cVal ? bestFacetLabel : null;
+    const facetLed = bestFacetLabel !== null && Number.isFinite(bestFacet) && bestFacet >= cVal;
+    const matchedFacet = facetLed ? bestFacetLabel : null;
+    const matchedRepo = facetLed ? (bestFacetRepo ?? null) : null;
     let topics: string[] = [];
     try { topics = r.topics ? JSON.parse(r.topics) : []; } catch { /* ignore */ }
 
@@ -108,7 +112,7 @@ export async function catalogueMatches(opts: {
     out.push({
       fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
-      topics, repoShape: r.repoShape, cosine, matchedFacet,
+      topics, repoShape: r.repoShape, cosine, matchedFacet, matchedRepo,
       ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
     });
   }
@@ -190,7 +194,7 @@ export async function adjacentMatches(opts: {
       out.push({
         fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
         url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
-        topics, repoShape: r.repoShape, cosine: a.cos, matchedFacet: null,
+        topics, repoShape: r.repoShape, cosine: a.cos, matchedFacet: null, matchedRepo: null,
         ageDays: r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null,
         rising: false,
         adjacentTo: a.nearest, adjacentCapability: a.label,

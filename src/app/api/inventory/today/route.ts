@@ -6,6 +6,7 @@ import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
+import { deriveProductKey } from "@/projects/product-key";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
@@ -360,9 +361,36 @@ export async function GET(req: Request) {
   // though it's nowhere near the project's blended centroid. The centroid is
   // retained: a candidate that matches the WHOLE project (high centroid) rather
   // than a part is a competitor, and we use that to suppress same-domain apps.
+  // Multi-repo products: union the scoped repo's facets with its SIBLING repos'
+  // facets (same product_key), so a capability that lives in a sibling you never
+  // open (acme-cv) still surfaces while you work in the repo you do (acme-web).
+  // Sibling facets are tagged with their repo slug for attribution.
   const projectFacets: FacetEmbedding[] = scopedProject
     ? parseStoredFacetEmbeddings(scopedProject.facetEmbeddings ?? null)
     : [];
+  let productRepoCount = 1;
+  if (scopedProject) {
+    const productKey = scopedProject.productKey ?? deriveProductKey(scopedProject.githubFullName);
+    if (productKey) {
+      const siblings = await db
+        .select({ slug: schema.projectProfiles.slug, githubFullName: schema.projectProfiles.githubFullName, facetEmbeddings: schema.projectProfiles.facetEmbeddings, productKey: schema.projectProfiles.productKey })
+        .from(schema.projectProfiles)
+        .where(and(
+          eq(schema.projectProfiles.userId, auth.userId),
+          eq(schema.projectProfiles.active, true),
+          eq(schema.projectProfiles.included, true),
+        ));
+      for (const s of siblings) {
+        if (s.slug === scopedProject.slug) continue;
+        const sKey = s.productKey ?? deriveProductKey(s.githubFullName);
+        if (sKey !== productKey) continue;
+        productRepoCount++;
+        for (const f of parseStoredFacetEmbeddings(s.facetEmbeddings ?? null)) {
+          projectFacets.push({ ...f, repo: s.slug });
+        }
+      }
+    }
+  }
   // An app whose centroid similarity clears this bar is "basically my whole
   // project" — a competitor, not a component. Suppressed unless it leads with a
   // specific capability (facet beats centroid by FACET_LEAD) or is a dep match.
@@ -634,6 +662,7 @@ export async function GET(req: Request) {
     whyShortlisted: string;
     cosine: number | null;
     matchedFacet: string | null; // capability this candidate fills, when facet-led
+    matchedRepo?: string | null; // sibling repo it's for, when cross-repo (multi-repo products)
     promoted: boolean;
     dependencyMatch: boolean;
     projectMatch: string | null;
@@ -793,14 +822,18 @@ export async function GET(req: Request) {
           const ageMo = m.ageDays != null ? Math.round(m.ageDays / 30) : null;
           const fit = m.matchedFacet ? `fits your ${m.matchedFacet} capability` : "semantic match";
           const pct = `${(m.cosine * 100).toFixed(0)}%`;
-          if (m.rising && ageMo != null) return `rising — ${fit}, ${ageMo}mo old (${pct})`;
-          return `catalogue: ${fit} (${pct})`;
+          const forRepo = m.matchedRepo && m.matchedRepo !== scopedProject.slug ? ` — for your \`${m.matchedRepo}\` repo` : "";
+          if (m.rising && ageMo != null) return `rising — ${fit}, ${ageMo}mo old (${pct})${forRepo}`;
+          return `catalogue: ${fit} (${pct})${forRepo}`;
         })(),
         cosine: m.cosine,
         matchedFacet: m.matchedFacet,
+        matchedRepo: m.matchedRepo && m.matchedRepo !== scopedProject.slug ? m.matchedRepo : null,
         promoted: false,
         dependencyMatch: false,
-        projectMatch: scopedProject.slug,
+        // Attribute to the sibling repo it's actually for, so triage/handoff
+        // target the right repo (multi-repo products).
+        projectMatch: m.matchedRepo ?? scopedProject.slug,
       });
     }
   }
@@ -914,7 +947,9 @@ export async function GET(req: Request) {
       // This is the component-fit framing — "helps with your X" rather than
       // "looks like your project" (which would be a competitor).
       const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
-      displayText = `By the way — \`${top.repo}\` could help with your ${top.matchedFacet}${topDesc}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+      // Multi-repo: attribute to the sibling repo it's actually for.
+      const forWhat = top.matchedRepo ? `your \`${top.matchedRepo}\` repo's ${top.matchedFacet}` : `your ${top.matchedFacet}`;
+      displayText = `By the way — \`${top.repo}\` could help with ${forWhat}${topDesc}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else {
       const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
       const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
@@ -926,6 +961,7 @@ export async function GET(req: Request) {
     {
       filterMode,
       scopedTo: scopedProject ? `${scopedProject.slug} (${scopedProject.githubFullName})` : null,
+      productRepos: productRepoCount, // repos in this product whose capabilities are unioned
       days,
       windowReason,
       minCosine: applyFloor ? MIN_COSINE : null,

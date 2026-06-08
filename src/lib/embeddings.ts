@@ -244,7 +244,10 @@ export function projectEmbeddingText(input: {
 // intelligence app" but high against the "computer vision" facet — the centroid
 // can't see it, a facet can.
 
-export type FacetEmbedding = { label: string; vec: number[] };
+// `repo` is set only for facets borrowed from a SIBLING repo in the same
+// multi-repo product (for attribution — "this match is for your acme-cv").
+// Undefined for the scoped repo's own facets.
+export type FacetEmbedding = { label: string; vec: number[]; repo?: string };
 export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[] };
 
 // Capability labels too generic to be useful probes — they'd match almost any

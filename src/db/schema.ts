@@ -324,6 +324,11 @@ export const projectProfiles = sqliteTable(
     // GitHub "owner/name" of this project's own repo. Used by the
     // "create handoff PR" feature to know where to commit. Optional.
     githubFullName: text("github_full_name"),
+    // Multi-repo products: repos sharing a productKey ("owner/stem") are one
+    // product. When scoped to any of them, matching unions the whole product's
+    // capabilities, so a CV library surfaces in acme-web (where you work), not
+    // only in acme-cv (which you never open). Auto-derived; user-overridable.
+    productKey: text("product_key"),
     // Skill-mode filter B: user-curated tag list for the inventory
     // pre-filter. JSON array of strings (e.g. ["typescript", "next.js",
     // "news", "social-syndication"]). Auto-suggested at project-onboard
