@@ -207,16 +207,26 @@ that actually fit."* If the user agrees, run this checklist:
    what it is · stack · niche/domain · active areas · constraints/non-goals ·
    anti-patterns · integration preferences). Use the project's real domain
    vocabulary, not abstractions.
-3. **Register + tag.** Register the repo: `npx replen sync-projects` (scans the
-   local repos and pushes them to Replen). Then **set the domain tags yourself
-   with the `replen_set_tags` tool** — derive them from the code you just read
-   (e.g. for a Python CCXT market-making engine:
-   `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
-   **Do NOT tell the user to set tags on the web** — that's the sticky step this
-   replaces; set them with the tool. (They can still fine-tune later at
-   app.replen.dev/projects.) Tags matter most right after onboarding, before the
-   project has an embedding — without them a fresh project falls back to
-   language-only matching and surfaces noise.
+3. **Register + tag + set capabilities.** Register the repo: `npx replen
+   sync-projects` (scans the local repos and pushes them to Replen). Then, from
+   the code you just read:
+   - **Set domain tags** with `replen_set_tags` — broad domain labels (e.g. for
+     a Python CCXT market-making engine:
+     `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
+   - **Set technical capabilities** with `replen_set_capabilities` — short,
+     GitHub-searchable tech terms for what the project DOES at the tech level
+     (e.g. `["crypto exchange","market data","backtesting","technical
+     analysis"]`; for a defense CV pipeline `["computer vision","object
+     detection","satellite imagery","geospatial mapping"]`). Derive these from
+     the actual imports/deps, not guesses. This is the highest-leverage step:
+     the server builds the project's facet vectors from these IMMEDIATELY (no
+     waiting for a scheduled run), and they drive both faceted matching and the
+     shared capability catalogue.
+
+   **Do NOT tell the user to set tags/capabilities on the web** — that's the
+   sticky step this replaces; set them with the tools. (They can fine-tune later
+   at app.replen.dev/projects.) These matter most right after onboarding — they
+   give a fresh project working query vectors before any server-side inference.
 4. **Embed it now (don't wait for the daily run).** A freshly-registered
    project has no embedding yet, so matching falls back to language/tags only
    (noise) until the next scheduled run. Trigger an immediate run with the

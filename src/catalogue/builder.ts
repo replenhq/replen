@@ -11,7 +11,7 @@
 
 import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
-import { embedBatch, candidateEmbeddingText, serialiseEmbedding } from "../lib/embeddings";
+import { embed, embedBatch, candidateEmbeddingText, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { readRunOrEnv } from "../analyzer/run-context";
 
@@ -88,11 +88,20 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
       }
     }
     const now = new Date();
+    // Embed the capability label itself (Phase 7 adjacency). Keep an existing
+    // vector if this embed fails.
+    const labelVec = await embed(facetEmbeddingText(label));
     const existing = await db.select().from(schema.catalogueCapabilities).where(eq(schema.catalogueCapabilities.label, label)).get();
     if (existing) {
-      await db.update(schema.catalogueCapabilities).set({ lastRefreshedAt: now, repoCount: hits.length }).where(eq(schema.catalogueCapabilities.label, label));
+      await db.update(schema.catalogueCapabilities).set({
+        lastRefreshedAt: now, repoCount: hits.length,
+        embedding: labelVec ? serialiseEmbedding(labelVec.vector) : existing.embedding,
+      }).where(eq(schema.catalogueCapabilities.label, label));
     } else {
-      await db.insert(schema.catalogueCapabilities).values({ label, lastRefreshedAt: now, repoCount: hits.length });
+      await db.insert(schema.catalogueCapabilities).values({
+        label, lastRefreshedAt: now, repoCount: hits.length,
+        embedding: labelVec ? serialiseEmbedding(labelVec.vector) : null,
+      });
     }
   }
   console.log(`[catalogue] refreshed ${toRefresh.length} capabilit${toRefresh.length === 1 ? "y" : "ies"} → ${upserted} repos upserted`);
@@ -147,11 +156,18 @@ async function searchGithub(label: string, token: string | undefined): Promise<R
     const topics = Array.isArray(item.topics) ? (item.topics as unknown[]).filter((t): t is string => typeof t === "string") : [];
     const stars = typeof item.stargazers_count === "number" ? item.stargazers_count : null;
     const language = typeof item.language === "string" ? item.language : null;
+    const shape = inferRepoShape({ name, description, topics });
+    // Firehose guard: aggregators (awesome-lists) and templates/starters are
+    // never libraries you'd adopt for a capability. Drop them at source. (We
+    // keep 'tutorial' despite some false positives — inferRepoShape mislabels
+    // deep-learning libraries as tutorials via the "learning" keyword, so
+    // filtering it would drop genuine libs like opencv.)
+    if (shape === "aggregator" || shape === "template") continue;
     out.push({
       fullName, owner, name, description,
       url: `https://github.com/${fullName}`,
       topics, stars, language,
-      shape: inferRepoShape({ name, description, topics }),
+      shape,
       pushedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
     });
   }

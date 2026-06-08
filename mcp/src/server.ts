@@ -251,6 +251,40 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_set_capabilities",
+    description:
+      "Set the TECHNICAL CAPABILITIES of a Replen project from what you read in its code. Use this during ONBOARDING " +
+      "to give the matcher its query vectors WITHOUT waiting for the server to infer them on the next scheduled run — " +
+      "matching works immediately. Capabilities are short, GitHub-searchable tech terms describing what the project " +
+      "DOES at the tech level (not its UI features, not its domain): e.g. for a defense CV pipeline " +
+      "[\"computer vision\",\"object detection\",\"satellite imagery\",\"geospatial mapping\"]; for a crypto bot " +
+      "[\"crypto exchange\",\"market data\",\"backtesting\",\"technical analysis\"]. DERIVE them from the actual " +
+      "imports/deps and code, not generic guesses. The server merges in dependency-derived capabilities and builds " +
+      "the facet vectors right away. Distinct from replen_set_tags (broad domain labels); capabilities drive faceted " +
+      "matching + the shared catalogue. Replaces the project's current capability set.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name of the project repo (owner-tolerant)" },
+        repoId: { type: "number", description: "Alternative to repo — the project's id" },
+        capabilities: { type: "array", items: { type: "string" }, description: "Short tech-capability terms (1-4 words each). Cleaned + deduped server-side." },
+      },
+      required: ["capabilities"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        repoId: z.number().int().positive().optional(),
+        capabilities: z.array(z.string()).max(40),
+      }).parse(args);
+      if (!parsed.repo && parsed.repoId === undefined) {
+        throw new Error("must specify repo (owner/name) or repoId");
+      }
+      const data = await apiPost(cfg, "/api/projects/capabilities", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_check_new",
     description:
       "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +

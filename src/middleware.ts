@@ -162,14 +162,15 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/mcp/")) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
-  // /api/inventory/*, /api/state, /api/triage, /api/projects/bulk:
+  // /api/inventory/*, /api/state, /api/triage, /api/projects/*:
   // skill-mode endpoints called by the user's local CLI / MCP / skill.
-  // Same token auth as /api/mcp/*, enforced in each route's handler.
+  // Same token auth as /api/mcp/*, enforced in each route's handler (all
+  // /api/projects/* routes — bulk, tags, capabilities — use authenticate()).
   if (
     request.nextUrl.pathname.startsWith("/api/inventory/") ||
     request.nextUrl.pathname === "/api/state" ||
     request.nextUrl.pathname === "/api/triage" ||
-    request.nextUrl.pathname === "/api/projects/bulk"
+    request.nextUrl.pathname.startsWith("/api/projects/")
   ) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }

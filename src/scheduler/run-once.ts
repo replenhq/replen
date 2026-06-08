@@ -9,16 +9,11 @@ import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking, hasPrimaryKey, LlmQuotaError } from "../analyzer/llm";
 import {
   embed,
-  embedBatch,
   projectEmbeddingText,
   serialiseEmbedding,
-  selectFacetLabels,
-  facetEmbeddingText,
   serialiseFacetEmbeddings,
-  facetSetHash,
-  type FacetEmbedding,
 } from "../lib/embeddings";
-import { extractDocSections } from "../projects/doc-sections";
+import { facetInputsFor, embedFacets } from "../projects/facets";
 import { refreshCatalogue } from "../catalogue/builder";
 import { createHash } from "node:crypto";
 function sha256Hex(text: string): string {
@@ -652,32 +647,15 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     // "computer vision" that embed to the right region and match capability
     // libraries. Fall back to the verbose keyCapabilities for old summaries
     // that predate capabilityTags (until they regenerate).
-    const facetSource = (summary?.capabilityTags?.length ? summary.capabilityTags : summary?.keyCapabilities) ?? [];
-    const capLabels = selectFacetLabels(facetSource);
-    // Phase 3: raw doc-section facets alongside the capability probes. Each is
-    // {label = heading, text = heading + body}. Embeds the user's own words, so
-    // a candidate matching a section the capability tags missed still surfaces.
-    const sections = extractDocSections(p.readmeMd, p.claudeMd);
-    // Combined facet inputs, deduped by label (capability probe wins over a
-    // same-named section). Capability text is "Capability: <label>"; section
-    // text is the prose itself.
-    const facetInputs: Array<{ label: string; text: string }> = [];
-    const seenFacet = new Set<string>();
-    for (const l of capLabels) {
-      const k = l.toLowerCase();
-      if (seenFacet.has(k)) continue;
-      seenFacet.add(k);
-      facetInputs.push({ label: l, text: facetEmbeddingText(l) });
-    }
-    for (const s of sections) {
-      const k = s.label.toLowerCase();
-      if (seenFacet.has(k)) continue;
-      seenFacet.add(k);
-      facetInputs.push({ label: s.label, text: s.text });
-    }
-    // Hash over label+text (not just labels) so a doc edit that changes a
-    // section's prose — without changing the capability tags — still regenerates.
-    const facetHash = facetSetHash(facetInputs.map((f) => `${f.label}::${f.text}`));
+    // Facet set = capability probes + doc-section vectors (Phases 1-3), built by
+    // the shared helper so the pipeline and the in-session capability route
+    // (Phase 6) stay identical. Hash is cheap; we embed only when stale.
+    const { hash: facetHash, inputs: facetInputs } = facetInputsFor({
+      capabilityTags: summary?.capabilityTags,
+      keyCapabilities: summary?.keyCapabilities,
+      readmeMd: p.readmeMd,
+      claudeMd: p.claudeMd,
+    });
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {
       try { storedFacetHash = (JSON.parse(p.facetEmbeddings) as { hash?: string }).hash ?? null; } catch { /* regen */ }
@@ -702,12 +680,7 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
         // Nothing to probe — record the empty set so we don't retry every run.
         set.facetEmbeddings = serialiseFacetEmbeddings({ hash: facetHash, facets: [] });
       } else {
-        const vecs = await embedBatch(facetInputs.map((f) => f.text));
-        const facets: FacetEmbedding[] = [];
-        for (let i = 0; i < facetInputs.length; i++) {
-          const r = vecs[i];
-          if (r) facets.push({ label: facetInputs[i].label, vec: r.vector });
-        }
+        const facets = await embedFacets(facetInputs);
         // Only persist when at least one facet embedded — an all-null batch
         // means the API/key is down; leave facetEmbeddings untouched to retry.
         if (facets.length > 0) {

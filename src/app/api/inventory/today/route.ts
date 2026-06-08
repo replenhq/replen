@@ -5,7 +5,7 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
-import { catalogueMatches } from "@/catalogue/reader";
+import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
@@ -368,6 +368,14 @@ export async function GET(req: Request) {
   // specific capability (facet beats centroid by FACET_LEAD) or is a dep match.
   const COMPETITOR_CENTROID = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_COMPETITOR_CENTROID ?? "0.5")));
   const FACET_LEAD = Math.max(0, parseFloat(process.env.REPLEN_FACET_LEAD ?? "0.04"));
+  // Phase 7 — capability adjacency. Surface a library from a capability the
+  // project doesn't have but is NEAR (band [ADJ_LO, ADJ_HI]), labelled
+  // exploratory. Only when the direct results are sparse (< ADJ_SHOW_BELOW) and
+  // capped at ADJ_MAX, so it stays a "you might also explore" nudge, not noise.
+  const ADJ_LO = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_LO ?? "0.45")));
+  const ADJ_HI = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_HI ?? "0.62")));
+  const ADJ_MAX = Math.max(0, parseInt(process.env.REPLEN_ADJ_MAX ?? "2", 10) || 2);
+  const ADJ_SHOW_BELOW = Math.max(0, parseInt(process.env.REPLEN_ADJ_SHOW_BELOW ?? "4", 10) || 4);
 
   // Relevance floor — "silence beats a weak match". A candidate must clear a
   // quality bar to be surfaced at all; if NONE do, the response is empty and
@@ -818,6 +826,54 @@ export async function GET(req: Request) {
     })
     .slice(0, limit);
 
+  // Phase 7 — capability adjacency. When the direct results are sparse, append
+  // exploratory suggestions: the best library from a capability the project
+  // doesn't have but is adjacent to. Calm by construction — only fills the gap
+  // up to `limit`, capped at ADJ_MAX, ranks last.
+  if (scopedProject && applyFloor && projectFacets.length > 0 && ADJ_MAX > 0 && candidatesOut.length < ADJ_SHOW_BELOW) {
+    const ownedCaps = new Set(projectFacets.map((f) => f.label.toLowerCase()));
+    const shownNames = new Set(candidatesOut.map((c) => c.repo.toLowerCase()));
+    if (scopedProject.githubFullName) shownNames.add(scopedProject.githubFullName.toLowerCase());
+    const adj = await adjacentMatches({
+      projectFacets,
+      ownedCapabilities: ownedCaps,
+      excludeFullNames: shownNames,
+      adjLo: ADJ_LO,
+      adjHi: ADJ_HI,
+      maxCapabilities: ADJ_MAX,
+      competitorCentroid: COMPETITOR_CENTROID,
+      limit: ADJ_MAX,
+    });
+    for (const a of adj) {
+      if (candidatesOut.length >= limit) break;
+      const r = await db.select({ id: schema.repos.id }).from(schema.repos)
+        .where(and(eq(schema.repos.owner, a.owner), eq(schema.repos.name, a.name))).get();
+      if (r && excludedRepoIds.has(r.id)) continue;
+      candidatesOut.push({
+        candidateId: null,
+        repoId: r?.id ?? null,
+        repo: a.fullName,
+        title: a.fullName,
+        url: a.url,
+        description: a.description,
+        stars: a.stars,
+        language: a.language,
+        license: a.license,
+        topics: a.topics,
+        repoShape: a.repoShape,
+        source: "catalogue-adjacent",
+        postedAt: null,
+        pushedAt: null,
+        whyShortlisted: `exploratory — adjacent to your ${a.adjacentTo}; provides ${a.adjacentCapability}`,
+        cosine: a.cosine,
+        matchedFacet: a.adjacentCapability,
+        promoted: false,
+        dependencyMatch: false,
+        projectMatch: scopedProject.slug,
+      });
+    }
+  }
+
   // Pre-formatted user-facing footnote string. Built server-side so the
   // agent doesn't have to derive it from the JSON (which has historically
   // been the unreliable bit — agents inconsistently formatted or skipped
@@ -838,6 +894,11 @@ export async function GET(req: Request) {
         ? `a security advisory affects a dependency you use — ${top.title}`
         : `a dependency you use just shipped — ${top.title}`;
       displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+    } else if (top.source === "catalogue-adjacent") {
+      // Exploratory adjacency: a capability the project doesn't have but is
+      // near. Frame it as a suggestion, not a fit.
+      const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
+      displayText = `By the way — \`${top.repo}\` could add ${top.matchedFacet} to this project (adjacent to what you already do)${topDesc}. ${candidatesOut.length} Replen suggestion${candidatesOut.length === 1 ? "" : "s"} for this repo — want me to take a look?`;
     } else if (top.matchedFacet) {
       // Facet-led: surface WHICH capability it fills, not a bare "% match".
       // This is the component-fit framing — "helps with your X" rather than

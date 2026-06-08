@@ -852,4 +852,10 @@ export const catalogueCapabilities = sqliteTable("catalogue_capabilities", {
   label: text("label").primaryKey(), // lowercased capability label
   lastRefreshedAt: integer("last_refreshed_at", { mode: "timestamp" }).notNull(),
   repoCount: integer("repo_count").notNull().default(0),
+  // Phase 7: the capability label's OWN embedding. Drives capability adjacency —
+  // a catalogue capability whose vector is near (but distinct from) one of a
+  // project's capabilities is "adjacent", and we surface its best library as an
+  // exploratory suggestion ("you don't use graph memory, but it's adjacent to
+  // your intel-correlation").
+  embedding: text("embedding"),
 });
