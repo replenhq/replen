@@ -637,7 +637,12 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     // strongest SINGLE capability (a CV library matches "computer vision" even
     // when it's far from the blended centroid). Regenerated independently of the
     // centroid: keyed on the capability label set, not the full project text.
-    const facetLabels = selectFacetLabels(summary?.keyCapabilities ?? []);
+    // Prefer the clean capabilityTags (Phase 2) — short tech terms like
+    // "computer vision" that embed to the right region and match capability
+    // libraries. Fall back to the verbose keyCapabilities for old summaries
+    // that predate capabilityTags (until they regenerate).
+    const facetSource = (summary?.capabilityTags?.length ? summary.capabilityTags : summary?.keyCapabilities) ?? [];
+    const facetLabels = selectFacetLabels(facetSource);
     const facetHash = facetSetHash(facetLabels);
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {

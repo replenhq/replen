@@ -12,7 +12,10 @@ import type { ProjectSummary } from "./summarize";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing vector sets — they regenerate on next pipeline run.
-export const VECTORS_PROMPT_VERSION = "3";
+// "4" (Phase 2): prepend a deterministic capability search vector built from
+// the summary's capabilityTags, so the targeted fetcher pulls capability-
+// libraries (a CV lib for a CV project) into the pool — not just outcome-tools.
+export const VECTORS_PROMPT_VERSION = "4";
 
 // Max age before we force-regenerate even if the summary hasn't changed.
 // Looser than the summary ceiling (3 days) because vectors are derived from
@@ -169,8 +172,15 @@ function coerceVectors(
   const o = (raw ?? {}) as Record<string, unknown>;
   const validOutcomeStatements = new Set(summary.outcomeGoals.map((g) => g.statement));
 
-  const vectorsRaw = Array.isArray(o.vectors) ? o.vectors : [];
   const vectors: SearchVector[] = [];
+
+  // Phase 2: a deterministic capability vector leads the set (see
+  // capabilityVector). It takes one of the MAX_VECTORS slots; outcomes fill
+  // the rest.
+  const capVec = capabilityVector(summary);
+  if (capVec) vectors.push(capVec);
+
+  const vectorsRaw = Array.isArray(o.vectors) ? o.vectors : [];
   for (const v of vectorsRaw) {
     if (vectors.length >= MAX_VECTORS) break;
     const vv = (v ?? {}) as Record<string, unknown>;
@@ -262,6 +272,34 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// Phase 2: build the deterministic capability search vector. Its query terms
+// ARE the project's capabilityTags ("computer vision", "geospatial mapping"),
+// so Stage 3 searches GitHub for the libraries that fill each capability —
+// independent of the LLM and of whether the user wrote explicit outcome goals
+// (which is why thin-doc projects like a fresh crypto-fund previously surfaced
+// nothing). Returns null when there are no usable capability terms.
+function capabilityVector(summary: ProjectSummary): SearchVector | null {
+  const terms = Array.from(
+    new Set(
+      (summary.capabilityTags ?? [])
+        .filter((t): t is string => typeof t === "string")
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 2 && t.length <= 80)
+        .filter((t) => !isVaguePhrase(t))
+        .filter((t) => !isTooLong(t)),
+    ),
+  ).slice(0, MAX_TERMS_PER_VECTOR);
+  if (terms.length === 0) return null;
+  return {
+    outcome: "technical capabilities",
+    outcomeSource: "inferred",
+    outcomeConfidence: "high",
+    queryTerms: terms,
+    languageConstraint: null,
+    reasoning: "Searching for libraries that fill the project's technical capabilities (faceted matching).",
+  };
+}
+
 // Belt-and-braces: the prompt forbids these but the LLM occasionally returns
 // them anyway. Reject server-side.
 const VAGUE_PATTERNS = [
@@ -310,8 +348,12 @@ export async function generateSearchVectors(
     return confidenceFloor === "high" ? c === "high" : c === "high" || c === "medium";
   });
   if (!hasEligibleAtFloor) {
+    // No outcome goals concrete enough to search — but capabilities still are.
+    // Return the capability vector alone (skip the LLM) so thin-doc projects
+    // get capability-driven sourcing instead of nothing.
+    const capVec = capabilityVector(summary);
     return {
-      vectors: [],
+      vectors: capVec ? [capVec] : [],
       skippedLowConfidence: summary.outcomeGoals.map((g) => ({
         outcome: g.statement,
         confidence: (g.source === "user" ? "high" : g.confidence) as "medium" | "low",

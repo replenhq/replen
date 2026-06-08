@@ -4,6 +4,8 @@
 // (Stage 3+4) live elsewhere. See docs/stage-1-scope.md.
 
 import { chatCompletion, triageModel } from "../analyzer/llm";
+import { capabilitiesFromDeps, mergeCapabilityTags } from "./capabilities";
+import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing summaries — they re-generate on next pipeline run.
@@ -12,7 +14,9 @@ import { chatCompletion, triageModel } from "../analyzer/llm";
 // non-markdown signal files: schemas, configs, diagrams) alongside
 // readme/claude/techSummary. Old "1" summaries are grounded only in
 // markdown and will mis-rank.
-export const PROMPT_VERSION = "2";
+// "3" (Phase 2): adds capabilityTags — clean tech-capability terms that drive
+// facet matching + targeted search. Old summaries lack them and re-generate.
+export const PROMPT_VERSION = "3";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -50,6 +54,15 @@ export type ProjectSummary = {
   // 3-8 short noun phrases describing what the project DOES.
   // E.g. ["lead capture", "property browsing", "admin reporting"].
   keyCapabilities: string[];
+
+  // Phase 2: clean, GitHub-searchable TECHNICAL capability tags — the tech a
+  // project uses/needs, NOT its UI features. 1-4 words each, in the vocabulary
+  // real repos use ("computer vision", "geospatial mapping", "satellite
+  // imagery", "Bayesian inference", "realtime streaming"). Distinct from
+  // keyCapabilities (verbose feature descriptions): these are the probes that
+  // drive facet matching AND targeted GitHub search, so a CV library surfaces
+  // for a project that does CV. Augmented post-LLM from the dependency set.
+  capabilityTags: string[];
 
   // Current implementation across functional areas. Keys are free-form (web,
   // scraping, data, charts, ...); values describe what's used. CONTEXT for
@@ -136,11 +149,26 @@ Rules:
   directories in currentTech where they tell the matching system something
   precise (e.g. currentTech.images: "branded social cards rendered in
   lib/social/imageRenderer.ts").
+- capabilityTags are the most important field for matching. They are SHORT,
+  GitHub-searchable TECHNICAL capability terms — the tech the project uses or
+  needs, NOT its UI features and NOT its domain. 1-4 words each, in the
+  vocabulary real OSS repos use in their description/topics. Derive them from
+  the deps, imports, file tree, and configs — not just prose. Examples:
+    - a defense map UI that shows drone imagery and scores threats →
+      ["computer vision","geospatial mapping","satellite imagery",
+       "object detection","realtime streaming","Bayesian inference"]
+    - a crypto trading bot → ["crypto exchange","market data","backtesting",
+       "technical analysis","websockets","rate limiting"]
+  Each tag must be something you could paste into GitHub search and get
+  relevant libraries back. FORBIDDEN: the project's own name, domain words
+  ("defense","fintech"), UI features ("dashboard","map view"), and vague
+  terms ("data","api","backend"). If you only have generic tags, return fewer.
 
 Output JSON only. No prose before or after. Schema:
 {
   "purpose": "string (1 sentence + 2-4 sentence elaboration)",
   "keyCapabilities": ["3-8 short noun phrases"],
+  "capabilityTags": ["3-10 short GitHub-searchable tech capability terms"],
   "currentTech": { "web": "...", "scraping": "...", ... },
   "outcomeGoals": [
     { "statement": "...", "source": "user" | "inferred", "confidence": "high" | "medium" | "low" }
@@ -191,6 +219,7 @@ function coerceSummary(raw: unknown, model: string, sourceFiles: string[]): Proj
   return {
     purpose: typeof o.purpose === "string" ? o.purpose : "",
     keyCapabilities: Array.isArray(o.keyCapabilities) ? o.keyCapabilities.filter((s): s is string => typeof s === "string") : [],
+    capabilityTags: Array.isArray(o.capabilityTags) ? o.capabilityTags.filter((s): s is string => typeof s === "string") : [],
     currentTech: (o.currentTech && typeof o.currentTech === "object" && !Array.isArray(o.currentTech))
       ? Object.fromEntries(
           Object.entries(o.currentTech as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
@@ -283,7 +312,13 @@ export async function generateProjectSummary(input: SummarizeInput): Promise<Pro
     console.warn(`[summarize] ${input.slug} returned non-JSON: ${(e as Error).message}; sample: ${text.slice(0, 200)}`);
     return null;
   }
-  return coerceSummary(parsed, model, sourceFiles);
+  const summary = coerceSummary(parsed, model, sourceFiles);
+  // Augment the LLM's capabilityTags with deterministic dep→capability tags —
+  // catches tech the docs never name (a project that imports cv2 does computer
+  // vision whether or not its README says so). Merged + deduped + capped.
+  const depCaps = capabilitiesFromDeps(parseTechSummaryDeps(input.techSummary));
+  summary.capabilityTags = mergeCapabilityTags(summary.capabilityTags, depCaps);
+  return summary;
 }
 
 // Cache-invalidation predicate. True if we need to (re)generate the summary.

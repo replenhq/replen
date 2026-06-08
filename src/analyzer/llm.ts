@@ -44,8 +44,16 @@ function pickApiKey(slot: "primary" | "sensitive"): string {
   }
   if (slot === "primary") {
     const k = readRunOrEnv("deepseekApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY");
-    if (!k) throw new Error("LLM_PRIMARY_API_KEY (or legacy DEEPSEEK_API_KEY) not set");
-    return k;
+    if (k) return k;
+    // OpenAI fallback: when the primary slot is pointed at OpenAI (or any
+    // *.openai.com endpoint) and no dedicated primary key is set, reuse the
+    // OPENAI_API_KEY already configured for embeddings. Lets us consolidate on
+    // one OpenAI account without duplicating the key into the primary slot.
+    if (/(^|\.)openai\.com/i.test(primaryBase())) {
+      const oa = process.env.OPENAI_API_KEY ?? process.env.OPENAI_EMBEDDING_KEY;
+      if (oa) return oa;
+    }
+    throw new Error("LLM_PRIMARY_API_KEY (or legacy DEEPSEEK_API_KEY) not set");
   }
   const k = readRunOrEnv("anthropicApiKey", "LLM_SENSITIVE_API_KEY", "ANTHROPIC_API_KEY");
   if (!k) throw new Error("LLM_SENSITIVE_API_KEY (or legacy ANTHROPIC_API_KEY) not set; required for high-sensitivity projects");
@@ -260,8 +268,13 @@ export function hasAnthropicKey(): boolean {
 // users without LLM keys configured should hit this and skip Stage 1/2
 // rather than letting every per-project call throw the same error.
 export function hasPrimaryKey(): boolean {
-  return !!(readRunOrEnv("llmPrimaryApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY")
-    ?? readRunOrEnv("deepseekApiKey", "DEEPSEEK_API_KEY"));
+  if (readRunOrEnv("llmPrimaryApiKey", "LLM_PRIMARY_API_KEY", "DEEPSEEK_API_KEY")
+    ?? readRunOrEnv("deepseekApiKey", "DEEPSEEK_API_KEY")) return true;
+  // OpenAI fallback (see pickApiKey): primary pointed at OpenAI reuses OPENAI_API_KEY.
+  if (/(^|\.)openai\.com/i.test(primaryBase())) {
+    return !!(process.env.OPENAI_API_KEY ?? process.env.OPENAI_EMBEDDING_KEY);
+  }
+  return false;
 }
 
 // Primary slot (OpenAI-compatible /chat/completions wire format).

@@ -479,7 +479,8 @@ export async function GET(req: Request) {
     const stakeKind =
       c.source.startsWith("stack-watch:") ? "stack" :
       c.source.startsWith("spec-watch:") ? "spec" :
-      c.source.startsWith("health-watch:") ? "health" : null;
+      c.source.startsWith("health-watch:") ? "health" :
+      c.source.startsWith("security-watch:") ? "security" : null;
     if (scopedProject && scopedProjectDeps.size > 0 && stakeKind) {
       let candTopics: string[] = [];
       try { candTopics = c.topics ? JSON.parse(c.topics) : []; } catch { /* ignore */ }
@@ -488,6 +489,7 @@ export async function GET(req: Request) {
         reasons.unshift(
           stakeKind === "spec" ? `a standard your code implements changed — ${c.title}` :
           stakeKind === "health" ? `an upstream you depend on needs attention — ${c.title}` :
+          stakeKind === "security" ? `a security advisory affects a dependency you use — ${c.title}` :
           `you depend on this — new ${c.title}`,
         );
       }
@@ -558,7 +560,7 @@ export async function GET(req: Request) {
   // join for canonical metadata (stars/license/etc.); feed candidates are
   // hydrated directly from the candidate row below.
   const isFeedSource = (src: string) =>
-    src.startsWith("stack-watch:") || src.startsWith("spec-watch:") || src.startsWith("health-watch:");
+    src.startsWith("stack-watch:") || src.startsWith("spec-watch:") || src.startsWith("health-watch:") || src.startsWith("security-watch:");
   const normalFiltered = filtered.filter((c) => !isFeedSource(c.source));
   const feedFiltered = filtered.filter((c) => isFeedSource(c.source));
 
@@ -670,7 +672,7 @@ export async function GET(req: Request) {
     feedOut.push({
       candidateId: c.id,
       repoId,
-      repo: on ? `${on.owner}/${on.name}` : (asString(raw?.specName) ?? asString(raw?.vendor) ?? c.source),
+      repo: on ? `${on.owner}/${on.name}` : (asString(raw?.specName) ?? asString(raw?.vendor) ?? asString(raw?.depName) ?? c.source),
       title: asString(c.title) ?? (on ? `${on.owner}/${on.name}` : c.source),
       url: c.url,
       description: asString(raw?.notes) ?? asString(raw?.summary) ?? null,
@@ -764,6 +766,8 @@ export async function GET(req: Request) {
         ? `a standard your code implements just changed — ${top.title}`
         : top.source.startsWith("health-watch:")
         ? `an upstream you depend on needs attention — ${top.title}`
+        : top.source.startsWith("security-watch:")
+        ? `a security advisory affects a dependency you use — ${top.title}`
         : `a dependency you use just shipped — ${top.title}`;
       displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else if (top.matchedFacet) {

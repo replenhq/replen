@@ -143,7 +143,8 @@ export function checkEligibility(
   const isFeedCandidate =
     c.source.startsWith("stack-watch:") ||
     c.source.startsWith("spec-watch:") ||
-    c.source.startsWith("health-watch:");
+    c.source.startsWith("health-watch:") ||
+    c.source.startsWith("security-watch:");
   if (!isFeedCandidate && c.postedAt && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
     const ageDays = (Date.now() - c.postedAt.getTime()) / (24 * 3600 * 1000);
     if (ageDays < FRESHNESS_FLOOR_DAYS) {
