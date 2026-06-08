@@ -2,6 +2,11 @@
 Description=Replen - Next.js dashboard
 After=network-online.target
 Wants=network-online.target
+# Give up (enter failed state) after 4 failed starts in 60s instead of
+# crash-looping forever. A persistent EADDRINUSE / bad build then surfaces
+# loudly via `systemctl status` rather than silently serving a stale process.
+StartLimitIntervalSec=60
+StartLimitBurst=4
 
 [Service]
 Type=simple
@@ -24,9 +29,19 @@ ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen
 ExecStartPre=+/usr/bin/touch /var/log/replen/web.log
 ExecStartPre=+/bin/chmod 0640 /var/log/replen/web.log
 ExecStartPre=+/bin/chown ubuntu:adm /var/log/replen/web.log
-ExecStart=/usr/bin/npm run start
+# Run `next` DIRECTLY rather than via `npm run start`. npm doesn't reliably
+# forward SIGTERM to its child, so on stop/restart the old next-server could
+# linger holding :3031, and the new instance crash-looped on EADDRINUSE. With
+# next as the unit's main process, systemd's SIGTERM reaches it directly and it
+# releases the port before the new one binds. Args mirror package.json "start".
+ExecStart=/opt/replen/node_modules/.bin/next start -H 127.0.0.1 -p 3031
 Restart=on-failure
 RestartSec=5
+# Belt-and-suspenders: SIGTERM the main process, then SIGKILL anything still in
+# the cgroup after the timeout (stray Next workers), so the port is always free
+# for the next start. TimeoutStopSec caps how long a wedged stop can hang.
+KillMode=mixed
+TimeoutStopSec=20
 StandardOutput=append:/var/log/replen/web.log
 StandardError=append:/var/log/replen/web.log
 
