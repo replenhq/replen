@@ -36,6 +36,8 @@ const STOP_TOPICS = new Set([
   "ai", "llm", "llms", "rag", "genai", "generative-ai", "artificial-intelligence",
   "machine-intelligence", "chatgpt", "gpt", "gpt-4", "gpt4", "chatbot", "chatbots",
   "ai-agents", "agents", "agent", "agentic", "mcp", "prompt", "prompts", "chatglm",
+  "claude", "claude-code", "claudecode", "copilot", "github-copilot", "cursor",
+  "codex", "gemini", "model-context-protocol", "claude-code-configuration",
   "automation", "productivity", "monitoring", "analytics", "dashboard", "ui", "ux",
   "security", "privacy", "performance", "testing", "deployment", "scalability",
 ]);

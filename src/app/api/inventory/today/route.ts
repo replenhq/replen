@@ -369,11 +369,14 @@ export async function GET(req: Request) {
     ? parseStoredFacetEmbeddings(scopedProject.facetEmbeddings ?? null)
     : [];
   let productRepoCount = 1;
+  // Dep tokens across the whole product — a library the project (or a sibling)
+  // already depends on must never be suggested back.
+  const productDeps = new Set<string>(parseTechSummaryDeps(scopedProject?.techSummary ?? null));
   if (scopedProject) {
     const productKey = scopedProject.productKey ?? deriveProductKey(scopedProject.githubFullName);
     if (productKey) {
       const siblings = await db
-        .select({ slug: schema.projectProfiles.slug, githubFullName: schema.projectProfiles.githubFullName, facetEmbeddings: schema.projectProfiles.facetEmbeddings, productKey: schema.projectProfiles.productKey })
+        .select({ slug: schema.projectProfiles.slug, githubFullName: schema.projectProfiles.githubFullName, facetEmbeddings: schema.projectProfiles.facetEmbeddings, productKey: schema.projectProfiles.productKey, techSummary: schema.projectProfiles.techSummary })
         .from(schema.projectProfiles)
         .where(and(
           eq(schema.projectProfiles.userId, auth.userId),
@@ -388,6 +391,7 @@ export async function GET(req: Request) {
         for (const f of parseStoredFacetEmbeddings(s.facetEmbeddings ?? null)) {
           projectFacets.push({ ...f, repo: s.slug });
         }
+        for (const d of parseTechSummaryDeps(s.techSummary)) productDeps.add(d);
       }
     }
   }
@@ -410,6 +414,14 @@ export async function GET(req: Request) {
   const ADJ_HI = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_ADJ_HI ?? "0.85")));
   const ADJ_MAX = Math.max(0, parseInt(process.env.REPLEN_ADJ_MAX ?? "2", 10) || 2);
   const ADJ_SHOW_BELOW = Math.max(0, parseInt(process.env.REPLEN_ADJ_SHOW_BELOW ?? "4", 10) || 4);
+  // Confidence gate. The catalogue is broad, so it WILL find a plausible-looking
+  // match for almost any facet — including a noisy one. If Replen's read on a
+  // project is too thin (few real capability/section facets, e.g. a repo whose
+  // docs are mostly AI-tooling config), don't confidently pull catalogue
+  // suggestions — silence beats a confident wrong guess. Dep/stake matches and
+  // the user's own targeted pool still surface; only the broad catalogue is
+  // gated. (A multi-repo product unions many facets, so it clears this easily.)
+  const MIN_FACETS_FOR_CATALOGUE = Math.max(0, parseInt(process.env.REPLEN_MIN_FACETS_FOR_CATALOGUE ?? "3", 10) || 3);
 
   // Relevance floor — "silence beats a weak match". A candidate must clear a
   // quality bar to be surfaced at all; if NONE do, the response is empty and
@@ -437,7 +449,16 @@ export async function GET(req: Request) {
     depMatch: boolean;        // Pattern A: release of a vendor this project depends on
   };
   const filtered: ScoredRow[] = [];
+  // Feed sources (releases / specs / advisories) are INTENTIONALLY about deps
+  // you already use — don't dep-exclude those. Regular candidates that ARE a
+  // dep you already use are noise (suggesting a library you depend on).
+  const isFeedSrc = (src: string) =>
+    src.startsWith("stack-watch:") || src.startsWith("spec-watch:") || src.startsWith("health-watch:") || src.startsWith("security-watch:");
   for (const c of eligible) {
+    if (productDeps.size > 0 && !isFeedSrc(c.source)) {
+      const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
+      if (on && (productDeps.has(on.name.toLowerCase()) || productDeps.has(on.owner.toLowerCase()))) continue; // already a dependency
+    }
     const reasons: string[] = [];
     let relevance = 0;
     let topicHits: string[] = [];
@@ -780,8 +801,20 @@ export async function GET(req: Request) {
   // a project sees the best library for each capability even when its own
   // targeted search hasn't fetched it. Only on the scoped-project path with a
   // query vector; excludes anything already surfaced from the user's own pool.
+  // The scoped project's languages — for runtime-compatibility gating (don't
+  // surface a Java/Android library for a Node project). Prefer the project's own
+  // detected languages; fall back to the user's across-repos set.
+  const projectLanguages = new Set<string>();
+  try {
+    const s = scopedProject?.summaryJson ? JSON.parse(scopedProject.summaryJson) : null;
+    for (const l of (s?.languageSignals?.detected ?? []) as unknown[]) if (typeof l === "string") projectLanguages.add(l.toLowerCase());
+  } catch { /* ignore */ }
+  if (projectLanguages.size === 0) {
+    for (const l of (auth.settings.detectedLanguages ?? "").split(",")) { const t = l.trim().toLowerCase(); if (t) projectLanguages.add(t); }
+  }
+
   let catalogueOut: OutEntry[] = [];
-  if (scopedProject && applyFloor && (projectEmbedding || projectFacets.length > 0)) {
+  if (scopedProject && applyFloor && projectFacets.length >= MIN_FACETS_FOR_CATALOGUE) {
     const alreadyShown = new Set<string>();
     for (const o of [...ownOut, ...feedOut, ...promotedOut]) if (o.repo) alreadyShown.add(o.repo.toLowerCase());
     if (scopedProject.githubFullName) alreadyShown.add(scopedProject.githubFullName.toLowerCase());
@@ -792,6 +825,8 @@ export async function GET(req: Request) {
       competitorCentroid: COMPETITOR_CENTROID,
       facetLead: FACET_LEAD,
       excludeFullNames: alreadyShown,
+      projectLanguages,
+      knownDeps: productDeps,
       limit,
     });
     // Resolve repoIds (for exclusion + state-keying) where the repo is already
@@ -873,7 +908,7 @@ export async function GET(req: Request) {
   // exploratory suggestions: the best library from a capability the project
   // doesn't have but is adjacent to. Calm by construction — only fills the gap
   // up to `limit`, capped at ADJ_MAX, ranks last.
-  if (scopedProject && applyFloor && projectFacets.length > 0 && ADJ_MAX > 0 && candidatesOut.length < ADJ_SHOW_BELOW) {
+  if (scopedProject && applyFloor && projectFacets.length >= MIN_FACETS_FOR_CATALOGUE && ADJ_MAX > 0 && candidatesOut.length < ADJ_SHOW_BELOW) {
     const ownedCaps = new Set(projectFacets.map((f) => f.label.toLowerCase()));
     const shownNames = new Set(candidatesOut.map((c) => c.repo.toLowerCase()));
     if (scopedProject.githubFullName) shownNames.add(scopedProject.githubFullName.toLowerCase());

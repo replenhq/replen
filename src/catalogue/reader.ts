@@ -28,6 +28,26 @@ export type CatalogueMatch = {
   rising: boolean;          // recent + relevant → "rising in your space"
 };
 
+// Language/runtime compatibility. A library is only useful if you can actually
+// use it. Platform-locked languages (Java/Android, Swift/iOS, C#/.NET, Dart) are
+// hard-incompatible — you can't import an Android job-queue into a Node bot — so
+// a repo in one of those, for a project that doesn't use it, is excluded.
+// Other cross-language (Python/Rust/Go/C) is a SOFT penalty: you might use it via
+// a sidecar or port the idea, but it shouldn't outrank a same-language fit.
+const PLATFORM_LOCKED = new Set(["java", "kotlin", "swift", "objective-c", "objective-c++", "dart", "c#", "scala", "groovy"]);
+const JS_FAMILY = new Set(["javascript", "typescript", "coffeescript"]);
+const CROSS_LANG_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_CATALOGUE_CROSSLANG_PENALTY ?? "0.06"));
+
+// Returns Infinity (exclude) for hard-incompatible, else a cosine penalty.
+function languagePenalty(projectLangs: Set<string>, repoLang: string | null): number {
+  if (!repoLang || projectLangs.size === 0) return 0;
+  const rl = repoLang.toLowerCase();
+  if (projectLangs.has(rl)) return 0;
+  if (JS_FAMILY.has(rl) && [...projectLangs].some((l) => JS_FAMILY.has(l))) return 0;
+  if (PLATFORM_LOCKED.has(rl)) return Infinity; // can't import it — exclude
+  return CROSS_LANG_PENALTY; // sidecar/port-able, but down-rank vs same-language
+}
+
 // Recency/trending boost. A recently-CREATED repo that's relevant is the
 // "rising gem" signal — the thing you'd catch on a creator's feed before it's
 // canonical. It gets a bonus added to its ranking score (not its cosine — the
@@ -57,9 +77,11 @@ export async function catalogueMatches(opts: {
   competitorCentroid: number;
   facetLead: number;
   excludeFullNames: Set<string>; // lowercased owner/name already surfaced or excluded
+  projectLanguages: Set<string>;  // lowercased; for runtime-compatibility gating
+  knownDeps: Set<string>;         // lowercased dep tokens the project already uses — don't suggest back
   limit: number;
 }): Promise<CatalogueMatch[]> {
-  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, limit } = opts;
+  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, projectLanguages, knownDeps, limit } = opts;
   if (!projectEmbedding && projectFacets.length === 0) return [];
 
   const rows = await db
@@ -72,6 +94,9 @@ export async function catalogueMatches(opts: {
   const out: CatalogueMatch[] = [];
   for (const r of rows) {
     if (excludeFullNames.has(r.fullName.toLowerCase())) continue;
+    // Already a dependency of this project (or its product) — suggesting a
+    // library you already use is noise. Match by repo name OR owner.
+    if (knownDeps.size > 0 && (knownDeps.has(r.name.toLowerCase()) || knownDeps.has(r.owner.toLowerCase()))) continue;
     const emb = parseStoredEmbedding(r.embedding);
     if (!emb) continue;
 
@@ -87,7 +112,12 @@ export async function catalogueMatches(opts: {
     }
 
     const cosine = Math.max(cVal, bestFacet);
-    if (!Number.isFinite(cosine) || cosine < minCosine) continue;
+    // Runtime compatibility: exclude libraries you can't use (an Android job
+    // queue for a Node bot); soft-penalise cross-language so it doesn't outrank
+    // a same-language fit.
+    const langPen = languagePenalty(projectLanguages, r.primaryLanguage);
+    if (langPen === Infinity) continue;
+    if (!Number.isFinite(cosine) || cosine - langPen < minCosine) continue;
 
     const facetLeads = Number.isFinite(bestFacet) && bestFacet >= cVal + facetLead;
     // Competitor suppression: an app that matches the whole project (high
@@ -117,9 +147,10 @@ export async function catalogueMatches(opts: {
     });
   }
 
-  // Rank by relevance + recency: a fresh, relevant newcomer ranks alongside or
-  // above the all-time leader instead of being buried under it.
-  out.sort((a, b) => (b.cosine + (b.rising ? recencyBoost(b.ageDays) : 0)) - (a.cosine + (a.rising ? recencyBoost(a.ageDays) : 0)));
+  // Rank by relevance + recency − cross-language penalty: a fresh same-language
+  // fit ranks above a stale or cross-language one.
+  const score = (m: CatalogueMatch) => m.cosine + (m.rising ? recencyBoost(m.ageDays) : 0) - languagePenalty(projectLanguages, m.language);
+  out.sort((a, b) => score(b) - score(a));
   return out.slice(0, limit);
 }
 

@@ -32,6 +32,12 @@ const BOILERPLATE = /^(install\b|installation|usage|how to use|getting started|q
 // rejected, so they're dropped entirely.
 const NEGATIVE = /(not in scope|out of scope|non.?goals?|what'?s not|anti.?patterns?|don'?t|do not|avoid|won'?t|limitations?|known issues?|caveats?|gotchas?|deprecated|exclusions?)/i;
 
+// Headings about AI-tooling / assistant config — that's HOW you develop, not
+// what the project DOES. CLAUDE.md / AGENTS.md sections about these would
+// otherwise become "Claude Code Configuration"-style noise facets that match
+// dev-tooling repos for unrelated projects.
+const META_TOOLING = /(claude code|claude\b|\bmcp\b|model context protocol|cursor|copilot|\bagents?\b|subagents?|\bhooks?\b|slash commands?|\breplen\b|ai assistant|coding assistant|gemini|codex|\bllm instructions?\b)/i;
+
 type RawSection = { heading: string; body: string };
 
 function parseMarkdownSections(md: string): RawSection[] {
@@ -78,9 +84,13 @@ function sectionsFromDoc(md: string | null, preambleLabel: string): DocSection[]
   for (const raw of parseMarkdownSections(md)) {
     const label = raw.heading ? cleanHeading(raw.heading) : preambleLabel;
     if (!label) continue;
-    if (BOILERPLATE.test(label) || NEGATIVE.test(label)) continue;
+    if (BOILERPLATE.test(label) || NEGATIVE.test(label) || META_TOOLING.test(label)) continue;
     const body = raw.body.trim();
     if (body.length < MIN_BODY_CHARS) continue;
+    // Drop sections dominated by AI-tooling/assistant config even when the
+    // heading is innocuous (a CLAUDE.md block of Claude Code instructions).
+    const metaHits = (body.match(META_TOOLING) ? (body.match(new RegExp(META_TOOLING, "gi"))?.length ?? 0) : 0);
+    if (metaHits >= 3) continue;
     const text = `${label}. ${body}`.slice(0, MAX_SECTION_CHARS);
     out.push({ label, text });
   }

@@ -18,7 +18,9 @@ import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 // facet matching + targeted search. Old summaries lack them and re-generate.
 // "4": more + more-SPECIFIC capabilityTags (8-15, sub-capabilities broken out)
 // for sharper matching. Old summaries regenerate.
-export const PROMPT_VERSION = "4";
+// "5": exclude AI-tooling/assistant config (Claude Code, MCP, agents) from
+// capabilities — that's how you develop, not what the project does.
+export const PROMPT_VERSION = "5";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -171,8 +173,12 @@ Rules:
        "Bayesian inference","realtime streaming"]
   Each tag must be something you could paste into GitHub search and get
   relevant libraries back. FORBIDDEN: the project's own name, domain words
-  ("defense","fintech"), UI features ("dashboard","map view"), and vague
-  terms ("data","api","backend"). Be specific and thorough, not generic.
+  ("defense","fintech"), UI features ("dashboard","map view"), vague terms
+  ("data","api","backend"), and — IMPORTANT — AI-tooling / assistant config
+  (Claude Code, Cursor, Copilot, MCP, agents, hooks, "Claude Code
+  Configuration"). Those describe HOW the project is developed, not what it
+  DOES — ignore them even when CLAUDE.md / AGENTS.md / GEMINI.md mention them.
+  Be specific and thorough about the project's REAL technical work, not generic.
 
 Output JSON only. No prose before or after. Schema:
 {

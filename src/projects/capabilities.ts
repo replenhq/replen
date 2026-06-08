@@ -175,6 +175,15 @@ const GENERIC_TAGS = new Set([
   // backstop for when the LLM emits one anyway.
   "python", "javascript", "typescript", "java", "golang", "rust", "ruby",
   "php", "swift", "kotlin", "scala", "node", "nodejs", "asyncio",
+  // AI-tooling / assistant config — that's HOW you develop (Claude Code, MCP,
+  // Cursor, agents/hooks), not what the project DOES. A project's CLAUDE.md
+  // mentioning these must not make them project capabilities (they match
+  // dev-tooling repos like claude-code-templates for unrelated projects).
+  "claude code", "claude-code", "claude code configuration", "claude code config",
+  "ai assistant", "ai coding assistant", "ai coding", "coding agent", "coding agents",
+  "cursor", "copilot", "github copilot", "model context protocol", "mcp",
+  "mcp server", "agent configuration", "ai agents", "ai agent", "agentic",
+  "slash commands", "subagents", "hooks", "claude", "gemini", "codex",
 ]);
 
 export function mergeCapabilityTags(
