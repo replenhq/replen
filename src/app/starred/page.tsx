@@ -108,6 +108,7 @@ export default async function Starred() {
   const awaiting = starred.filter((m) => !m.handoffPrUrl);
   const openPr = starred.filter((m) => m.handoffPrUrl && !m.integratedAt && m.handoffPrStatus !== "merged");
   const integrated = starred.filter((m) => m.integratedAt || m.handoffPrStatus === "merged");
+  const isEmpty = starred.length === 0 && bookmarks.length === 0;
 
   // When was the most recent PR poll? This is the timestamp the "Last refresh"
   // label shows next to the refresh button — useful so the user can tell at a
@@ -133,7 +134,7 @@ export default async function Starred() {
       <SkillTierBanner userId={user.id} subscriptionTier={subscriptionTier} />
       <h1>⭐ Starred &amp; 🔖 Bookmarks</h1>
       {skillStarred && skillStarred.rows.length > 0 && (
-        <section style={{ margin: "12px 0 20px", padding: "12px 14px", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8 }}>
+        <section style={{ margin: "12px 0 20px", padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-1)" }}>
           <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>From skill-mode sessions</h2>
           <table style={{ width: "100%", fontSize: 13 }}>
             <thead><tr><th style={{ textAlign: "left" }}>Repo</th><th style={{ textAlign: "left" }}>Project</th><th style={{ textAlign: "left" }}>Note</th><th style={{ textAlign: "right" }}>Starred</th></tr></thead>
@@ -145,8 +146,8 @@ export default async function Starred() {
                   <tr key={row.id}>
                     <td><a href={r?.url ?? "#"} target="_blank" rel="noopener noreferrer">{r ? `${r.owner}/${r.name}` : `repo#${row.repoId}`}</a></td>
                     <td>{p?.slug ?? "—"}</td>
-                    <td style={{ color: "rgba(0,0,0,0.6)" }}>{row.userNote ?? ""}</td>
-                    <td style={{ textAlign: "right", color: "rgba(0,0,0,0.55)" }}>{formatTimestampToMinute(row.actionAt ?? row.surfacedAt)}</td>
+                    <td style={{ color: "var(--dim)" }}>{row.userNote ?? ""}</td>
+                    <td style={{ textAlign: "right", color: "var(--faint)" }}>{formatTimestampToMinute(row.actionAt ?? row.surfacedAt)}</td>
                   </tr>
                 );
               })}
@@ -154,9 +155,28 @@ export default async function Starred() {
           </table>
         </section>
       )}
-      <p className="meta">
-        {starred.length} starred · {awaiting.length} awaiting handoff · {openPr.length} PR open · {integrated.length} integrated · {bookmarks.length} bookmarked
-      </p>
+      {!isEmpty && (
+        <p className="meta">
+          {starred.length} starred · {awaiting.length} awaiting handoff · {openPr.length} PR open · {integrated.length} integrated · {bookmarks.length} bookmarked
+        </p>
+      )}
+      {isEmpty && (!skillStarred || skillStarred.rows.length === 0) && (
+        <div style={{
+          border: "1px solid var(--line)",
+          borderRadius: 10,
+          background: "var(--surface-1)",
+          padding: "32px 28px",
+          marginTop: 16,
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 15, color: "var(--fg)", marginBottom: 8, fontWeight: 500 }}>Nothing starred or bookmarked yet</div>
+          <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--dim)", maxWidth: 480, margin: "0 auto" }}>
+            When you triage matches in a session and <b style={{ color: "var(--fg)" }}>star</b> the ones worth shipping
+            or <b style={{ color: "var(--fg)" }}>bookmark</b> ones to revisit, they show up here — starred items track
+            their handoff-PR status, and bookmarks get re-checked against your projects automatically.
+          </div>
+        </div>
+      )}
       {(openPr.length > 0 || awaiting.length > 0) && (
         <form action={refresh} style={{ margin: "8px 0 16px" }}>
           <button type="submit">↻ Refresh PR statuses</button>
@@ -196,7 +216,7 @@ function Section({ title, list, repoMap, projectMap, bucket }: {
   if (list.length === 0) return null;
   return (
     <section style={{ marginTop: 28 }}>
-      <h2 style={{ borderBottom: "1px solid #ccc4", paddingBottom: 4, marginBottom: 8 }}>{title}</h2>
+      <h2 style={{ borderBottom: "1px solid var(--line)", paddingBottom: 4, marginBottom: 8 }}>{title}</h2>
       {list.map((m) => {
         const repo = repoMap.get(m.repoId);
         if (!repo) return null;
@@ -221,7 +241,7 @@ function Section({ title, list, repoMap, projectMap, bucket }: {
                 </form>
               )}
               {bucket === "awaiting" && !project?.githubFullName && (
-                <span className="meta" style={{ color: "#a96" }}>
+                <span className="meta" style={{ color: "var(--amber)" }}>
                   {project ? <>(set <code>github_full_name</code> on <a href="/projects">/projects</a>)</> : "_general · no project repo"}
                 </span>
               )}
@@ -252,7 +272,7 @@ function BookmarksSection({ list, repoMap, projectMap, attemptsByRepo, resurface
   if (list.length === 0) return null;
   return (
     <section style={{ marginTop: 36 }}>
-      <h2 style={{ borderBottom: "1px solid #ccc4", paddingBottom: 4, marginBottom: 4 }}>🔖 Bookmarks ({list.length})</h2>
+      <h2 style={{ borderBottom: "1px solid var(--line)", paddingBottom: 4, marginBottom: 4 }}>🔖 Bookmarks ({list.length})</h2>
       <p className="meta" style={{ marginTop: 0, marginBottom: 12 }}>
         Replen re-evaluates each bookmark against every one of your projects every {RESURFACE_RETRY_DAYS} days. If your project goals change, a bookmark may resurface as a fit on your dashboard.
       </p>
@@ -296,7 +316,7 @@ function ResurfaceStatus({ lastAttempt, surfaced, projectMap }: {
   surfaced: { matchId: number; projectId: number | null }[];
   projectMap: Map<number, typeof schema.projectProfiles.$inferSelect>;
 }) {
-  const baseStyle: React.CSSProperties = { marginTop: 6, fontSize: 12, color: "#555" };
+  const baseStyle: React.CSSProperties = { marginTop: 6, fontSize: 12, color: "var(--faint)" };
 
   if (surfaced.length > 0) {
     const links = surfaced.map((s, i) => {
@@ -304,12 +324,12 @@ function ResurfaceStatus({ lastAttempt, surfaced, projectMap }: {
       return (
         <span key={s.matchId}>
           {i > 0 ? ", " : ""}
-          <a href={`/?project=${slug}#m-${s.matchId}`} style={{ color: "#1d4ed8" }}>{slug}</a>
+          <a href={`/?project=${slug}#m-${s.matchId}`} style={{ color: "var(--amber)" }}>{slug}</a>
         </span>
       );
     });
     return (
-      <p style={{ ...baseStyle, color: "#065f46" }}>
+      <p style={{ ...baseStyle, color: "var(--green)" }}>
         ✓ Surfaced as a fit for {links}
       </p>
     );

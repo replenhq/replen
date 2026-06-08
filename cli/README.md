@@ -1,12 +1,21 @@
 # replen
 
-**Make your AI coding tools aware of the wider OSS ecosystem.** One command, no API keys.
+**Make your AI coding tools aware of everything your code depends on, implements, and builds on.** One command, no API keys.
 
 ```bash
 npx replen
 ```
 
-Claude Code, Codex, Cursor already know your code. Replen tells them what else is out there — drop-in libraries, ideas worth porting, dead deps to swap. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
+Claude Code, Codex, Cursor already know your code. Replen tells them what's happening *outside* it. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
+
+Four lenses, all surfaced the same calm way — quietly, in your AI tool's next reply, only when there's something real:
+
+- **🔭 OSS repos** — a new library that replaces code you maintain, a pattern worth porting, a dead dep to swap.
+- **📦 Your stack** — a release in a dependency you actually use (`next`, `openai`, `prisma`, `viem`, … matched against your manifest).
+- **📜 Standards you implement** — EIP/ERC, TC39, and Chrome-deprecation changes matched to what your code touches.
+- **🩺 Upstream health** — a dep gone stale/archived, a hot bug others hit in your deps, or an incident on a service you use.
+
+One discipline throughout: **silence beats a weak match** — if nothing clears the bar, Replen says nothing.
 
 ## What `npx replen` does
 

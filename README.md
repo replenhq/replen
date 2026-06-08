@@ -25,9 +25,9 @@
 
 ---
 
-**Your AI coding tools, with awareness of the wider OSS ecosystem.**
+**Your AI coding tools, with awareness of everything your code depends on, implements, and builds on.**
 
-Claude Code, Codex, Cursor already know your code. Replen tells them what else is out there — drop-in libraries, ideas worth porting, dead deps to swap. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
+Claude Code, Codex, Cursor already know your code. Replen tells them what's happening *outside* it — a drop-in OSS library, a new release in a dependency you use, a standard you implement changing, an upstream you build on going dark. The match decision happens *inside your AI tool's session* on your subscription tokens. Your code stays on your laptop. Replen never sees it.
 
 1–3 actionable matches per month, by design. Most days, nothing — that's the point. When something real lands, your AI tool mentions it the next time you open it: "by the way, 2 new Replen matches landed for this repo. Top one: kvnang/workers-og — could simplify lib/social/imageRenderer.ts. Want the full triage?"
 
@@ -70,6 +70,25 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 3. **The agent triages in-session.** Using your subscription tokens (no API key needed), your AI tool: WebFetches each candidate's README, greps your local source for related code, forms a verdict (adopt / port / skip) with score + effort estimate, and composes a writeup grounded in concrete file references in *your* repo. All reasoning runs on your AI tool's subscription — Replen has no LLM provider on the server side, so there's nothing to bill and no API key to give us.
 
 4. **You act on the keepers.** Star / hide / handoff PR — captured server-side via `replen_state`; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
+
+## What Replen watches
+
+Replen began by matching new **OSS repos** to your code. It now watches four lenses — everything your code depends on, implements, or builds on. Each surfaces the same calm way: quietly, in your AI tool's next reply, only when there's something real.
+
+- **🔭 What's out there — OSS repos.** New and trending open-source projects scored against your repo: a library that replaces 200 lines you maintain, a pattern worth porting, a dependency that's gone stale. *(The original lens — see the example below.)*
+
+- **📦 Your stack — dependency releases.** When a vendor you actually depend on ships, you hear about it — `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
+  > *By the way — a dependency you use just shipped: OpenAI SDK v6.39.0.*
+
+- **📜 The standards you implement — spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends — matched to the standards your project actually touches.
+  > *By the way — a standard your code implements just changed: ERC-5516.*
+
+- **🩺 The health of what you build on — upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …).
+  > *By the way — an upstream you depend on needs attention: `request` looks dead (no push in 654 days).*
+
+Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing — no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. And the inventory learns from how people triage: a candidate enough users judge rubbish stops being shown to *anyone*, while one that proves useful for a project like yours can surface to you too — repo identity and aggregate signal only, never your code or anyone else's.
+
+Manage which repos Replen watches — inclusion, tags, owner — at **[app.replen.dev/projects](https://app.replen.dev/projects)**.
 
 ## What a match looks like
 

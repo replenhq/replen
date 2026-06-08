@@ -41,31 +41,30 @@ export async function SkillTierBanner({ userId, subscriptionTier }: {
 
   return (
     <section style={{
-      maxWidth: 720,
       margin: "16px 0 0",
       padding: "14px 18px",
-      border: "1px solid rgba(0, 100, 200, 0.18)",
+      border: "1px solid var(--amber-line)",
       borderRadius: 10,
-      background: "rgba(0, 100, 200, 0.04)",
+      background: "var(--amber-soft)",
       fontSize: 14,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Skill mode</div>
-          <div style={{ color: "rgba(0,0,0,0.7)", lineHeight: 1.5 }}>
-            Matching now runs in your CLI on your subscription tokens, not on Replen's hosted scorer.
-            Open Claude Code in a tracked repo and run <code style={codeStyle}>/replen-match</code> (or
+        <div style={{ flex: "1 1 360px", minWidth: 0 }}>
+          <div style={{ fontWeight: 600, marginBottom: 5, color: "var(--fg)" }}>Skill mode</div>
+          <div style={{ color: "var(--dim)", lineHeight: 1.55 }}>
+            Matching now runs in your CLI on your subscription tokens, not on Replen&apos;s hosted scorer.
+            Open Claude Code in a tracked repo and run <code style={codeStyle}>/replen-match</code> (or{" "}
             <code style={codeStyle}>use replen_match</code> on any MCP host). This page is your action history.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 14, flexShrink: 0, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 18, flexShrink: 0, alignItems: "center" }}>
           <Stat n={starred} label="starred" href="/starred" />
           <Stat n={handedOff} label="handed off" href="/integrated" />
           <Stat n={hidden} label="hidden" />
         </div>
       </div>
       {total === 0 && (
-        <div style={{ marginTop: 10, color: "rgba(0,0,0,0.55)", fontSize: 13 }}>
+        <div style={{ marginTop: 12, color: "var(--dim)", fontSize: 13 }}>
           No matches actioned yet. Run <code style={codeStyle}>/replen-match</code> when you next open Claude Code.
         </div>
       )}
@@ -74,7 +73,8 @@ export async function SkillTierBanner({ userId, subscriptionTier }: {
 }
 
 const codeStyle: React.CSSProperties = {
-  background: "rgba(0,0,0,0.06)",
+  background: "var(--surface-2)",
+  color: "var(--fg)",
   padding: "1px 5px",
   borderRadius: 3,
   fontFamily: "ui-monospace, monospace",
@@ -84,8 +84,8 @@ const codeStyle: React.CSSProperties = {
 function Stat({ n, label, href }: { n: number; label: string; href?: string }) {
   const body = (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.2 }}>
-      <span style={{ fontWeight: 600, fontSize: 18 }}>{n}</span>
-      <span style={{ fontSize: 11, color: "rgba(0,0,0,0.55)", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
+      <span style={{ fontWeight: 600, fontSize: 18, color: "var(--fg)" }}>{n}</span>
+      <span style={{ fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
     </span>
   );
   return href && n > 0

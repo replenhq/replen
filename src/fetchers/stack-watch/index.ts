@@ -20,7 +20,16 @@ import { readRunOrEnv } from "../../analyzer/run-context";
 import { vendorsForDeps, parseTechSummaryDeps, type StackVendor } from "./registry";
 
 const RELEASE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_STACK_WINDOW_DAYS ?? "90", 10) || 90);
-const MAX_RELEASES_PER_VENDOR = Math.max(1, parseInt(process.env.REPLEN_STACK_MAX_PER_VENDOR ?? "3", 10) || 3);
+// Default to the single latest STABLE release per vendor — surfacing 3 point
+// releases (or a stream of canaries) is noise, not signal.
+const MAX_RELEASES_PER_VENDOR = Math.max(1, parseInt(process.env.REPLEN_STACK_MAX_PER_VENDOR ?? "1", 10) || 1);
+// Pre-releases (canary / rc / alpha / beta / nightly) are OFF by default: a
+// user on a stable line shouldn't be pinged about every Next.js canary.
+const INCLUDE_PRERELEASE = process.env.REPLEN_STACK_INCLUDE_PRERELEASE === "1";
+// Semver pre-release suffix sniff — GitHub's `prerelease` flag is unreliable
+// across vendors, so we also reject tags with a pre-release marker after the
+// version (e.g. v16.3.0-canary.44, 2.0.0-beta.1, v5-rc.0).
+const PRERELEASE_TAG = /-(canary|nightly|alpha|beta|rc|pre|preview|experimental|snapshot|dev|next|insiders?)\b/i;
 
 type GhRelease = {
   id: number;
@@ -75,6 +84,7 @@ export const stackWatchFetcher: Fetcher = {
       let kept = 0;
       for (const r of releases) {
         if (r.draft) continue;
+        if (!INCLUDE_PRERELEASE && (r.prerelease || PRERELEASE_TAG.test(r.tag_name))) continue;
         const pub = r.published_at ? Date.parse(r.published_at) : NaN;
         if (!Number.isFinite(pub) || pub < sinceMs) continue;
         const body = (r.body ?? "").trim();
@@ -120,7 +130,9 @@ async function fetchReleases(repo: string, token: string | undefined): Promise<G
     "x-github-api-version": "2022-11-28",
   };
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=10`, { headers });
+  // Fetch deeper than we keep: vendors like Next.js cut a stream of canaries
+  // between stables, so the latest stable can be ~20 releases back.
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, { headers });
   if (!res.ok) throw new Error(`GET releases ${repo} → ${res.status}`);
   return (await res.json()) as GhRelease[];
 }

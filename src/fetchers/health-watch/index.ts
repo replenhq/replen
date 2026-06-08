@@ -28,6 +28,15 @@ const MAX_ISSUE_REPOS = Math.max(0, parseInt(process.env.REPLEN_HEALTH_ISSUE_REP
 const ISSUE_REACTION_MIN = Math.max(1, parseInt(process.env.REPLEN_HEALTH_ISSUE_REACTIONS ?? "10", 10) || 10);
 const ISSUE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_HEALTH_ISSUE_WINDOW_DAYS ?? "60", 10) || 60);
 const PROBE_CONCURRENCY = 5;
+// 'stale' (9-18mo no push) is too noisy — lots of healthy, complete libraries
+// trip it. Off by default; surface only 'dead' (18mo+) and 'archived'.
+const SURFACE_STALE = process.env.REPLEN_HEALTH_SURFACE_STALE === "1";
+// A 'dead'-by-push-date verdict on a very popular library is usually a
+// false positive — the lib is COMPLETE, not abandoned (e.g. clsx). Popularity
+// is social proof of continued viability; abandonment risk is real for obscure
+// deps, not battle-tested ones. Skip 'dead' above this star count. ('archived'
+// is always surfaced — that's the maintainer explicitly saying it's done.)
+const DEAD_STAR_CEILING = Math.max(0, parseInt(process.env.REPLEN_HEALTH_DEAD_STAR_CEILING ?? "5000", 10) || 5000);
 
 export const healthWatchFetcher: Fetcher = {
   name: "health-watch",
@@ -70,7 +79,15 @@ export const healthWatchFetcher: Fetcher = {
     for (const h of health) {
       if (!h) continue;
       if (h.githubFullName) resolvedRepos.push({ depName: h.depName, repo: h.githubFullName });
-      if (h.verdict === "stale" || h.verdict === "dead" || h.verdict === "archived") {
+      // Quality gate (cuts false positives like a complete-but-quiet utility):
+      //   archived → always (definitive)
+      //   dead     → only if not a very popular "probably complete" lib
+      //   stale    → off by default (too noisy)
+      const surfaceVerdict =
+        h.verdict === "archived" ||
+        (h.verdict === "dead" && (h.stars ?? 0) < DEAD_STAR_CEILING) ||
+        (h.verdict === "stale" && SURFACE_STALE);
+      if (surfaceVerdict) {
         out.push({
           source: `health-watch:dep-${h.verdict}`,
           sourceItemId: `${h.depName}-${h.verdict}`,
