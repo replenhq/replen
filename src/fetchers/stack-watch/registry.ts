@@ -51,6 +51,33 @@ export const STACK_VENDORS: StackVendor[] = [
   { id: "wagmi", name: "wagmi", depNames: ["wagmi", "@wagmi/core", "@wagmi/connectors"], githubRepo: "wevm/wagmi", ecosystem: "npm" },
   { id: "ethers", name: "ethers.js", depNames: ["ethers"], githubRepo: "ethers-io/ethers.js", ecosystem: "npm" },
   { id: "solana-web3", name: "Solana web3.js", depNames: ["@solana/web3.js"], githubRepo: "solana-labs/solana-web3.js", ecosystem: "npm" },
+
+  // ── Python / PyPI ──────────────────────────────────────────────────────
+  // Dep names are the pip package (lowercased — the route + tech-summary parse
+  // both lowercase). Kept to unambiguous Python names (not common npm packages)
+  // to avoid cross-ecosystem mismatches. GitHub Releases back all of these.
+  { id: "ccxt", name: "CCXT", depNames: ["ccxt"], githubRepo: "ccxt/ccxt", ecosystem: "python" },
+  { id: "python-binance", name: "python-binance", depNames: ["python-binance"], githubRepo: "sammchardy/python-binance", ecosystem: "python" },
+  { id: "pybit", name: "pybit (Bybit)", depNames: ["pybit"], githubRepo: "bybit-exchange/pybit", ecosystem: "python" },
+  { id: "pandas", name: "pandas", depNames: ["pandas"], githubRepo: "pandas-dev/pandas", ecosystem: "python" },
+  { id: "numpy", name: "NumPy", depNames: ["numpy"], githubRepo: "numpy/numpy", ecosystem: "python" },
+  { id: "scipy", name: "SciPy", depNames: ["scipy"], githubRepo: "scipy/scipy", ecosystem: "python" },
+  { id: "polars", name: "Polars", depNames: ["polars"], githubRepo: "pola-rs/polars", ecosystem: "python" },
+  { id: "sqlalchemy", name: "SQLAlchemy", depNames: ["sqlalchemy"], githubRepo: "sqlalchemy/sqlalchemy", ecosystem: "python" },
+  { id: "fastapi", name: "FastAPI", depNames: ["fastapi"], githubRepo: "fastapi/fastapi", ecosystem: "python" },
+  { id: "pydantic", name: "Pydantic", depNames: ["pydantic"], githubRepo: "pydantic/pydantic", ecosystem: "python" },
+  { id: "httpx", name: "HTTPX", depNames: ["httpx"], githubRepo: "encode/httpx", ecosystem: "python" },
+  { id: "aiohttp", name: "aiohttp", depNames: ["aiohttp"], githubRepo: "aio-libs/aiohttp", ecosystem: "python" },
+  { id: "django", name: "Django", depNames: ["django"], githubRepo: "django/django", ecosystem: "python" },
+  { id: "flask", name: "Flask", depNames: ["flask"], githubRepo: "pallets/flask", ecosystem: "python" },
+  { id: "celery", name: "Celery", depNames: ["celery"], githubRepo: "celery/celery", ecosystem: "python" },
+  { id: "scikit-learn", name: "scikit-learn", depNames: ["scikit-learn"], githubRepo: "scikit-learn/scikit-learn", ecosystem: "python" },
+  { id: "pytorch", name: "PyTorch", depNames: ["torch"], githubRepo: "pytorch/pytorch", ecosystem: "python" },
+  { id: "transformers", name: "Transformers", depNames: ["transformers"], githubRepo: "huggingface/transformers", ecosystem: "python" },
+  { id: "langchain", name: "LangChain", depNames: ["langchain", "langchain-core"], githubRepo: "langchain-ai/langchain", ecosystem: "python" },
+  { id: "duckdb", name: "DuckDB", depNames: ["duckdb"], githubRepo: "duckdb/duckdb", ecosystem: "python" },
+  { id: "ruff", name: "Ruff", depNames: ["ruff"], githubRepo: "astral-sh/ruff", ecosystem: "python" },
+  { id: "uv", name: "uv", depNames: ["uv"], githubRepo: "astral-sh/uv", ecosystem: "python" },
 ];
 
 // depName (lowercased) -> vendor, for O(1) matching.

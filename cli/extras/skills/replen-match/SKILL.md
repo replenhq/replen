@@ -181,11 +181,58 @@ fresh candidate shows up at session start via the hook).
 **Inventory call returns 401.** User's token expired or got rotated.
 Tell them to run `npx replen` to re-auth.
 
-**Inventory returns `scopedTo: null` with a `note` about "repo not in
-your project list"**. The cwd isn't a known project. Ask the user:
-"This repo isn't in your Replen projects yet. Add it via /projects?"
-Then either stop or re-run with `?repo=` (empty) to see the global
-firehose.
+**The project isn't scoped — `scopedTo: null`, a `note` about "repo not in
+your project list", OR the cwd has no git remote.** Replen can only match
+against a repo it has registered, and it scopes by the git remote. When it's
+unscoped you'll get the global trending firehose — which is noise for this
+codebase. **Do NOT triage the firehose** (manufacturing reasons to care about
+random trending repos is exactly what this skill must not do).
+
+Instead, **offer to onboard the project.** Lead with ONE line, not the whole
+checklist: *"This project isn't set up with Replen yet, so I can only see the
+global firehose (not matches for your code). Want me to scope it — init git,
+create the repo, write the docs, and add tags? Then Replen can surface things
+that actually fit."* If the user agrees, run this checklist:
+
+1. **Git + GitHub.** If there's no git repo, `git init`. Create the GitHub
+   repo using the user's existing `gh` auth — ask for owner/name or suggest a
+   sensible default from the folder name, and confirm public vs private:
+   `gh repo create <owner>/<name> --private --source=. --remote=origin --push`.
+   If a repo exists locally but has no remote, just add + push the remote.
+2. **Docs Replen can read.** Replen's scorer reads your `README.md` +
+   `CLAUDE.md` to understand the project — that's the difference between
+   useful matches and noise. Write a concrete `README.md` (what it is, stack,
+   domain) if missing, and a `CLAUDE.md` optimised for Replen (run the
+   `/replen-project-init` protocol, or draft the seven sections directly:
+   what it is · stack · niche/domain · active areas · constraints/non-goals ·
+   anti-patterns · integration preferences). Use the project's real domain
+   vocabulary, not abstractions.
+3. **Register + tag.** Register the repo: `npx replen sync-projects` (scans the
+   local repos and pushes them to Replen). Then **set the domain tags yourself
+   with the `replen_set_tags` tool** — derive them from the code you just read
+   (e.g. for a Python CCXT market-making engine:
+   `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
+   **Do NOT tell the user to set tags on the web** — that's the sticky step this
+   replaces; set them with the tool. (They can still fine-tune later at
+   app.replen.dev/projects.) Tags matter most right after onboarding, before the
+   project has an embedding — without them a fresh project falls back to
+   language-only matching and surfaces noise.
+4. **Embed it now (don't wait for the daily run).** A freshly-registered
+   project has no embedding yet, so matching falls back to language/tags only
+   (noise) until the next scheduled run. Trigger an immediate run with the
+   `replen_run` tool — it builds the project's summary + embedding + initial
+   candidates from the README/CLAUDE.md you just pushed. It's async: poll
+   `replen_status` until the phase reports inventory ready (~1–3 min). Tell the
+   user it's processing.
+5. **Re-run.** Once the run finishes, call `replen_match` again — now scoped
+   AND embedded, matching against the real code (a dev-tool that only shared the
+   project's language now scores low on cosine and gets floored out).
+
+Note on recording actions: always use the MCP tools — `replen_state` (star /
+hide / handoff), `replen_record_triage` (your verdict), `replen_set_tags` — for
+any write back to Replen. Don't hand-roll `curl` to the API for these; the MCP
+path is the intended mechanism and avoids tripping host permission classifiers
+on the candidate repo name in a curl payload.
 
 **Candidate's README is unreachable (WebFetch 404)**. Note it in the
 writeup (`Caveats: README unreachable; verdict based on description

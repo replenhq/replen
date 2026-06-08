@@ -146,7 +146,7 @@ export async function GET(req: Request) {
           displayText: null,
           note: p
             ? "project is excluded from matching on /projects; pass repo='' for the global firehose"
-            : "repo not in your project list; pass repo='' for the global firehose",
+            : "repo not in your project list — this project isn't set up with Replen. Do NOT triage the global firehose (it's noise for this codebase). Instead, offer to onboard it: (1) git init + create the GitHub repo via `gh` if there's no remote, (2) write a README + a Replen-optimised CLAUDE.md so the scorer can read the project, (3) register it + add domain tags at app.replen.dev/projects, then re-run. Lead with a one-line offer.",
         },
         { headers: corsHeaders },
       );
@@ -335,7 +335,7 @@ export async function GET(req: Request) {
   // (relevance > 0) is the signal. Applied only on the scoped-project path
   // (where the footnote fires); zero-knowledge mode and the explicit global
   // firehose (repo='') opt out — there the user has asked to see everything.
-  const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.4")));
+  const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.48")));
   const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
 
   // Pattern A — "watch your stack". A release from a vendor the SCOPED project

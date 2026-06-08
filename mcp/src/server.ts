@@ -219,6 +219,38 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_set_tags",
+    description:
+      "Set the domain tags on one of the user's registered Replen projects. " +
+      "Use this during ONBOARDING (and any time the project's focus changes) to give the matcher domain context — " +
+      "tags sharpen matching and matter MOST for a freshly-registered project that has no embedding yet, which would " +
+      "otherwise fall back to language-only matching and surface noise. " +
+      "DERIVE the tags from the project's actual code + docs, not generic guesses — e.g. for a Python crypto " +
+      "market-making bot: [\"crypto\",\"trading\",\"market-making\",\"ccxt\",\"quant\",\"backtesting\"]. " +
+      "Do NOT tell the user to set tags on the web — set them here. Replaces the project's current tag list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name of the project repo (owner-tolerant — resolves even if the org drifted)" },
+        repoId: { type: "number", description: "Alternative to repo — the project's id" },
+        tags: { type: "array", items: { type: "string" }, description: "Domain tags. Lowercased + deduped server-side; max 30 kept." },
+      },
+      required: ["tags"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        repoId: z.number().int().positive().optional(),
+        tags: z.array(z.string()).max(50),
+      }).parse(args);
+      if (!parsed.repo && parsed.repoId === undefined) {
+        throw new Error("must specify repo (owner/name) or repoId");
+      }
+      const data = await apiPost(cfg, "/api/projects/tags", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_check_new",
     description:
       "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +

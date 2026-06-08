@@ -23,6 +23,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { installSkills } from "./skill-install.js";
 
@@ -268,8 +269,27 @@ function backupIfExists(path: string): void {
 // their current docs). Both rely on the AGENTS.md / GEMINI.md project-
 // context file being read at session start, which our inject step
 // covers.
-const HOOK_COMMAND = "npx --quiet replen check-new --hook";
-const HOOK_MARKER = "replen check-new --hook";
+// Version-PIN the hook command. A bare `npx replen` resolves a LOCAL package
+// named "replen" when one exists in cwd (e.g. the replen repo itself, whose
+// server package is also "replen" and has no bin) → "could not determine
+// executable to run", and the hook silently dies every session there. Pinning
+// to the published version forces npx to the registry (collision-proof) and,
+// because the exact version is cached, avoids the per-session `@latest`
+// registry round-trip. Re-running setup refreshes the pin.
+const HOOK_COMMAND = `npx --quiet replen@${cliVersion()} check-new --hook`;
+// Match on the stable substring so we find/replace our hook regardless of the
+// pinned version in any previously-written command.
+const HOOK_MARKER = "check-new --hook";
+
+function cliVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url)); // cli/dist
+    const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version?: string };
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : "latest";
+  } catch {
+    return "latest";
+  }
+}
 
 type HookEntry = {
   matcher?: string;

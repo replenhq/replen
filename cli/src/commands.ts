@@ -2,6 +2,7 @@
 // terminal rather than returning JSON to an agent. `--json` flag on every
 // command dumps raw JSON for piping/scripting.
 
+import { readdirSync, existsSync } from "node:fs";
 import { apiGet, apiPost, loadConfigOrExit } from "./api.js";
 import { configPath } from "./config.js";
 
@@ -204,6 +205,34 @@ export async function runCheckNew(argv: string[]): Promise<void> {
     if (hookMode) return;
     console.error("Not signed in. Run `npx replen` first.");
     process.exit(1);
+  }
+
+  // Hook mode surfaces the repo-scoped SKILL inventory directly — the good data
+  // (semantic + dependency / spec / health matches, with the relevance floor +
+  // cool-off applied server-side), using the server's pre-formatted footnote.
+  // It deliberately skips the legacy hosted `check-new` below, which returns
+  // generic, un-scoped, high-star matches that aren't useful to skill-tier
+  // users. Output is injected into the agent's opening context by Claude Code's
+  // SessionStart-hook stdout injection; the framing nudges the agent to relay
+  // it verbatim (final surfacing is still the model's call).
+  if (hookMode && !json) {
+    const cwdRepo = await detectCwdRepo();
+    if (!cwdRepo) {
+      // No git remote → Replen can't scope this project. If the cwd looks like
+      // a real project (has source / a manifest), nudge the user to set it up;
+      // otherwise stay silent (don't nag in /tmp or a random dir). Surfacing is
+      // the model's call, but the explicit framing maximises it.
+      if (looksLikeProject()) {
+        console.log("[Replen] This project has no git remote, so Replen can't scope or match against it. Mention to the user, briefly, as a footnote: 'By the way — this project isn't set up with Replen yet (no git remote), so I can't surface matches for it. Want me to scope it — init git, create the repo, write the docs, and add tags?'");
+      }
+      return;
+    }
+    const inv = await fetchInventoryStatus(cfg, cwdRepo);
+    if (inv?.displayText) {
+      console.log("[Replen] Relay the following line to the user, verbatim, as a footnote at the very end of your first reply:");
+      console.log(inv.displayText);
+    }
+    return;
   }
 
   type CheckNewResp = {
@@ -500,6 +529,27 @@ async function detectCwdRepo(): Promise<string | null> {
   }
 }
 
+// Cheap heuristic: does the cwd look like a real project worth nudging the user
+// to scope with Replen? True when there's a recognised manifest, a src/lib/app
+// dir, or a couple of source files. Keeps the "no git — want to scope?" prompt
+// from firing in /tmp, $HOME, or an empty directory.
+function looksLikeProject(): boolean {
+  try {
+    const manifests = ["package.json", "pyproject.toml", "requirements.txt", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "Gemfile", "composer.json", "pubspec.yaml"];
+    if (manifests.some((m) => existsSync(m))) return true;
+    if (["src", "lib", "app", "cmd", "pkg"].some((d) => existsSync(d))) return true;
+    const codeExt = /\.(ts|tsx|js|jsx|py|rs|go|java|rb|php|c|cc|cpp|h|hpp|swift|kt|scala|sol|ex|clj)$/i;
+    let codeFiles = 0;
+    for (const e of readdirSync(".", { withFileTypes: true })) {
+      if (e.isFile() && codeExt.test(e.name)) codeFiles++;
+      if (codeFiles >= 2) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Query the inventory for the cwd's repo and return a compact status
 // suitable for the hook one-liner. We deliberately don't pull the full
 // candidate writeups here — the hook output goes into the agent's
@@ -510,6 +560,7 @@ type InventoryHookStatus = {
   count: number;
   topRepo: string | null;
   topSimilarity: number | null;
+  displayText: string | null;
 };
 async function fetchInventoryStatus(
   cfg: { token: string; base: string },
@@ -529,6 +580,7 @@ async function fetchInventoryStatus(
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
+      displayText?: string | null;
       candidates?: Array<{ repo?: string; whyShortlisted?: string }>;
     };
     const cands = data.candidates ?? [];
@@ -541,6 +593,9 @@ async function fetchInventoryStatus(
       count: cands.length,
       topRepo: top.repo ?? null,
       topSimilarity: simMatch ? Number(simMatch[1]) : null,
+      // The server's pre-formatted, pattern-aware footnote ("By the way — a
+      // dependency you use just shipped: …" / "… N candidates queued …").
+      displayText: (typeof data.displayText === "string" && data.displayText) ? data.displayText : null,
     };
   } catch {
     return null;
