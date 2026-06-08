@@ -7,7 +7,17 @@ import { sendDigestEmail } from "../email/send";
 import { sendHighRelevanceWebhook } from "../email/webhook";
 import { resolveUserConfig, type UserConfig } from "./user-config";
 import { beginUsageTracking, endUsageTracking, hasPrimaryKey, LlmQuotaError } from "../analyzer/llm";
-import { embed, projectEmbeddingText, serialiseEmbedding } from "../lib/embeddings";
+import {
+  embed,
+  embedBatch,
+  projectEmbeddingText,
+  serialiseEmbedding,
+  selectFacetLabels,
+  facetEmbeddingText,
+  serialiseFacetEmbeddings,
+  facetSetHash,
+  type FacetEmbedding,
+} from "../lib/embeddings";
 import { createHash } from "node:crypto";
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -621,18 +631,59 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     if (!text) continue;
 
     const contentHash = sha256Hex(text);
-    if (p.embeddingContentHash === contentHash && p.embedding) continue; // cache hit
 
-    const result = await embed(text);
-    if (!result) continue;
+    // Per-capability facet vectors (Phase 1). The centroid above matches whole-
+    // apps in the same domain; facet vectors let a candidate match the project's
+    // strongest SINGLE capability (a CV library matches "computer vision" even
+    // when it's far from the blended centroid). Regenerated independently of the
+    // centroid: keyed on the capability label set, not the full project text.
+    const facetLabels = selectFacetLabels(summary?.keyCapabilities ?? []);
+    const facetHash = facetSetHash(facetLabels);
+    let storedFacetHash: string | null = null;
+    if (p.facetEmbeddings) {
+      try { storedFacetHash = (JSON.parse(p.facetEmbeddings) as { hash?: string }).hash ?? null; } catch { /* regen */ }
+    }
+
+    const centroidStale = !(p.embeddingContentHash === contentHash && p.embedding);
+    const facetsStale = storedFacetHash !== facetHash;
+    if (!centroidStale && !facetsStale) continue; // cache hit on both
+
+    const set: Partial<typeof schema.projectProfiles.$inferInsert> = { updatedAt: new Date() };
+
+    if (centroidStale) {
+      const result = await embed(text);
+      if (!result) continue; // API down / no key — leave both for next run
+      set.embedding = serialiseEmbedding(result.vector);
+      set.embeddingContentHash = contentHash;
+      set.embeddingGeneratedAt = result.generatedAt;
+    }
+
+    if (facetsStale) {
+      if (facetLabels.length === 0) {
+        // Nothing to probe — record the empty set so we don't retry every run.
+        set.facetEmbeddings = serialiseFacetEmbeddings({ hash: facetHash, facets: [] });
+      } else {
+        const vecs = await embedBatch(facetLabels.map(facetEmbeddingText));
+        const facets: FacetEmbedding[] = [];
+        for (let i = 0; i < facetLabels.length; i++) {
+          const r = vecs[i];
+          if (r) facets.push({ label: facetLabels[i], vec: r.vector });
+        }
+        // Only persist when at least one facet embedded — an all-null batch
+        // means the API/key is down; leave facetEmbeddings untouched to retry.
+        if (facets.length > 0) {
+          set.facetEmbeddings = serialiseFacetEmbeddings({ hash: facetHash, facets });
+        }
+      }
+    }
+
+    // Nothing actually produced (e.g. facets stale but batch failed and centroid
+    // fresh) — skip the write.
+    if (set.embedding === undefined && set.facetEmbeddings === undefined) continue;
+
     await db
       .update(schema.projectProfiles)
-      .set({
-        embedding: serialiseEmbedding(result.vector),
-        embeddingContentHash: contentHash,
-        embeddingGeneratedAt: result.generatedAt,
-        updatedAt: new Date(),
-      })
+      .set(set)
       .where(eq(schema.projectProfiles.id, p.id));
     regenerated++;
   }

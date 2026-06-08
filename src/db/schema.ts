@@ -343,6 +343,14 @@ export const projectProfiles = sqliteTable(
     embedding: text("embedding"),
     embeddingContentHash: text("embedding_content_hash"),
     embeddingGeneratedAt: integer("embedding_generated_at", { mode: "timestamp" }),
+    // Faceted matching (Phase 1). The single `embedding` above is the project
+    // CENTROID — it blends every capability into one point and therefore
+    // matches whole-apps in the same domain (competitors) rather than the
+    // libraries that fill a specific capability. `facetEmbeddings` stores one
+    // vector PER capability ({label, vec}) so a candidate can match on its
+    // BEST facet (a CV library matches the "computer vision" facet even though
+    // it's nowhere near the centroid). JSON: { hash, facets: [{label, vec[]}] }.
+    facetEmbeddings: text("facet_embeddings"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

@@ -302,6 +302,13 @@
       "when": 1779837805651,
       "tag": "0042_repo_quality",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1779841405651,
+      "tag": "0043_facet_embeddings",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
-import { cosineSimilarity, parseStoredEmbedding } from "@/lib/embeddings";
+import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
@@ -48,33 +48,31 @@ export async function GET(req: Request) {
   const repoFilter = url.searchParams.get("repo")?.trim().toLowerCase() || null;
 
   // Adaptive lookback window. An explicit ?days= wins (clamped 1..365).
-  // Otherwise the window adapts to the user's history: a brand-new user (no
-  // prior match-state at all) gets a wide FIRST-RUN window so their very
-  // first match has months of inventory to pull from — the good per-project
-  // `gh-targeted:*` candidates are often days-to-weeks old and a 2-day
-  // window amputates them, making the matcher look empty/broken. Established
-  // users get a steady ~week so the footnote stays "what's new" rather than
-  // re-litigating old candidates. Both are env-tunable.
+  // Otherwise the window adapts to the SCOPED PROJECT's history (computed
+  // after scope resolves below): a project that has never surfaced a match
+  // the user engaged with gets a wide FIRST-RUN window so its very first
+  // match has months of inventory to pull from — the good per-project
+  // `gh-targeted:*` candidates are often days-to-weeks old and a narrow
+  // window amputates them, making the matcher look empty/broken. A project
+  // that's already surfaced matches gets the steady ~month window so the
+  // footnote stays "what's new" rather than re-litigating old candidates.
+  // Both are env-tunable.
   const FIRSTRUN_DAYS = Math.min(365, Math.max(1, parseInt(process.env.REPLEN_FIRSTRUN_DAYS ?? "180", 10) || 180));
-  const STEADY_DAYS = Math.min(90, Math.max(1, parseInt(process.env.REPLEN_STEADY_DAYS ?? "7", 10) || 7));
+  // 30 days, not 7: Replen's positioning is "1-3 matches per MONTH", so a
+  // 7-day steady window systematically missed ~3 weeks of every month's
+  // candidates — a genuinely-relevant 55%-match for a project could sit just
+  // outside the window and never surface. The cool-off (surfaced_count) stops
+  // the same candidate repeating daily, so a wider window doesn't mean noise.
+  const STEADY_DAYS = Math.min(120, Math.max(1, parseInt(process.env.REPLEN_STEADY_DAYS ?? "30", 10) || 30));
   const explicitDays = url.searchParams.get("days");
-  let days: number;
-  let windowReason: string;
-  if (explicitDays !== null && explicitDays.trim() !== "") {
-    days = Math.min(365, Math.max(1, parseInt(explicitDays, 10) || STEADY_DAYS));
-    windowReason = "explicit";
-  } else {
-    // First-run detection is user-level: "have we ever served this user any
-    // inventory they engaged with?" One indexed existence check.
-    const prior = await db
-      .select({ id: schema.userMatchState.id })
-      .from(schema.userMatchState)
-      .where(eq(schema.userMatchState.userId, auth.userId))
-      .limit(1);
-    const firstRun = prior.length === 0;
-    days = firstRun ? FIRSTRUN_DAYS : STEADY_DAYS;
-    windowReason = firstRun ? "first-run" : "steady";
-  }
+  const hasExplicitDays = explicitDays !== null && explicitDays.trim() !== "";
+  // `days` for the explicit case is known now; the adaptive case is computed
+  // AFTER project scope resolves, because first-run is per-PROJECT not
+  // per-user (see the block after scope resolution). Placeholder until then.
+  let days = hasExplicitDays
+    ? Math.min(365, Math.max(1, parseInt(explicitDays!, 10) || STEADY_DAYS))
+    : STEADY_DAYS;
+  let windowReason = hasExplicitDays ? "explicit" : "steady";
 
   const filterMode = (auth.settings.filterMode ?? "tags") as "zero-knowledge" | "tags" | "fingerprint";
 
@@ -151,6 +149,34 @@ export async function GET(req: Request) {
         { headers: corsHeaders },
       );
     }
+  }
+
+  // Adaptive per-PROJECT lookback. First-run is keyed to the SCOPED PROJECT,
+  // not the user: a project that has never surfaced a match the user engaged
+  // with — one added today (crypto-fund), never run (cute), or dormant for
+  // weeks (acme-web) — must get the wide first-run window even when the user
+  // is well-established on OTHER repos. Keying first-run to the user instead
+  // meant every newly-added project inherited the narrow steady window and its
+  // months of backlog never surfaced. Unscoped (global firehose) falls back to
+  // user-level. An explicit ?days= already won above and skips this.
+  if (!hasExplicitDays) {
+    const priorRows = scopedProjectId
+      ? await db
+          .select({ id: schema.userMatchState.id })
+          .from(schema.userMatchState)
+          .where(and(
+            eq(schema.userMatchState.userId, auth.userId),
+            eq(schema.userMatchState.projectId, scopedProjectId),
+          ))
+          .limit(1)
+      : await db
+          .select({ id: schema.userMatchState.id })
+          .from(schema.userMatchState)
+          .where(eq(schema.userMatchState.userId, auth.userId))
+          .limit(1);
+    const firstRun = priorRows.length === 0;
+    days = firstRun ? FIRSTRUN_DAYS : STEADY_DAYS;
+    windowReason = firstRun ? (scopedProjectId ? "first-run-project" : "first-run") : "steady";
   }
 
   // Build the user's tag set (for filter 'tags'). When scoped to one
@@ -327,6 +353,21 @@ export async function GET(req: Request) {
     ? parseStoredEmbedding(scopedProject.embedding ?? null)
     : null;
 
+  // Faceted matching (Phase 1). Per-capability vectors for the scoped project.
+  // A candidate is scored on its BEST facet, not the centroid — so a library
+  // that fills ONE capability (a CV lib → "computer vision") surfaces even
+  // though it's nowhere near the project's blended centroid. The centroid is
+  // retained: a candidate that matches the WHOLE project (high centroid) rather
+  // than a part is a competitor, and we use that to suppress same-domain apps.
+  const projectFacets: FacetEmbedding[] = scopedProject
+    ? parseStoredFacetEmbeddings(scopedProject.facetEmbeddings ?? null)
+    : [];
+  // An app whose centroid similarity clears this bar is "basically my whole
+  // project" — a competitor, not a component. Suppressed unless it leads with a
+  // specific capability (facet beats centroid by FACET_LEAD) or is a dep match.
+  const COMPETITOR_CENTROID = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_COMPETITOR_CENTROID ?? "0.5")));
+  const FACET_LEAD = Math.max(0, parseFloat(process.env.REPLEN_FACET_LEAD ?? "0.04"));
+
   // Relevance floor — "silence beats a weak match". A candidate must clear a
   // quality bar to be surfaced at all; if NONE do, the response is empty and
   // the footnote stays silent — better than interrupting with a 20%-cosine
@@ -348,7 +389,8 @@ export async function GET(req: Request) {
   type ScoredRow = CandidateRow & {
     whyShortlisted: string;
     relevance: number;        // tag-overlap fallback score
-    cosine: number | null;    // semantic similarity (null when unavailable)
+    cosine: number | null;    // BEST of centroid / facet similarity (null when unavailable)
+    matchedFacet: string | null; // which capability this hit, when facet-led (else null)
     depMatch: boolean;        // Pattern A: release of a vendor this project depends on
   };
   const filtered: ScoredRow[] = [];
@@ -385,14 +427,46 @@ export async function GET(req: Request) {
 
     // Semantic similarity layered on top. Only meaningful when both
     // sides have an embedding; otherwise null → falls back to relevance.
+    //
+    // Faceted (Phase 1): score the candidate against the project CENTROID and
+    // against each capability FACET, then take the best. centroidCos measures
+    // "is this my whole project?" (high = competitor); the best facet measures
+    // "does this fill a capability I have?" (high = useful component). The
+    // surfaced `cosine` is the max — so a library that nails one capability
+    // ranks on that strength even when its centroid match is near zero.
     let cosine: number | null = null;
+    let centroidCos: number | null = null;
+    let matchedFacet: string | null = null;
+    let facetLeadsCentroid = false; // a capability beats the whole-project match by a margin
     if (projectEmbedding) {
       const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
       if (candEmbedding) {
-        const sim = cosineSimilarity(projectEmbedding, candEmbedding);
-        if (Number.isFinite(sim)) {
-          cosine = sim;
-          reasons.push(`semantic similarity: ${(sim * 100).toFixed(0)}%`);
+        const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
+        if (Number.isFinite(cSim)) centroidCos = cSim;
+
+        let bestFacetCos = -Infinity;
+        let bestFacetLabel: string | null = null;
+        for (const f of projectFacets) {
+          const fSim = cosineSimilarity(f.vec, candEmbedding);
+          if (Number.isFinite(fSim) && fSim > bestFacetCos) {
+            bestFacetCos = fSim;
+            bestFacetLabel = f.label;
+          }
+        }
+
+        const cVal = centroidCos ?? -Infinity;
+        const best = Math.max(cVal, bestFacetCos);
+        facetLeadsCentroid = Number.isFinite(bestFacetCos) && bestFacetCos >= cVal + FACET_LEAD;
+        if (Number.isFinite(best)) {
+          cosine = best;
+          // Facet-led when a specific capability beats the centroid: that's the
+          // "fills a part of my project" signal we want to surface and label.
+          if (bestFacetLabel !== null && bestFacetCos >= cVal) {
+            matchedFacet = bestFacetLabel;
+            reasons.push(`fits your ${bestFacetLabel} capability: ${(bestFacetCos * 100).toFixed(0)}%`);
+          } else {
+            reasons.push(`semantic similarity: ${(best * 100).toFixed(0)}%`);
+          }
         }
       }
     }
@@ -427,11 +501,32 @@ export async function GET(req: Request) {
       if (!clears) continue;
     }
 
+    // Competitor suppression (Phase 1). An APP that matches the project's whole
+    // centroid (not a specific capability) is a competitor — it does what you
+    // do, you can't adopt it. Drop it. Libraries/tools are never suppressed
+    // (you can always use or learn from them), and an app that LEADS with a
+    // specific capability (facet beats centroid by FACET_LEAD) is kept — it
+    // fills a part rather than duplicating the whole. Gated on the project
+    // having facets, so un-faceted (pre-backfill) projects are unaffected. Dep
+    // matches are always exempt.
+    if (
+      applyFloor &&
+      !depMatch &&
+      projectFacets.length > 0 &&
+      (c.repoShape as string | null) === "app" &&
+      centroidCos !== null &&
+      centroidCos >= COMPETITOR_CENTROID &&
+      !facetLeadsCentroid
+    ) {
+      continue;
+    }
+
     filtered.push({
       ...c,
       whyShortlisted: reasons.join("; ") || "candidate eligible",
       relevance,
       cosine,
+      matchedFacet,
       depMatch,
     });
   }
@@ -521,6 +616,7 @@ export async function GET(req: Request) {
     pushedAt: string | null;
     whyShortlisted: string;
     cosine: number | null;
+    matchedFacet: string | null; // capability this candidate fills, when facet-led
     promoted: boolean;
     dependencyMatch: boolean;
     projectMatch: string | null;
@@ -544,6 +640,7 @@ export async function GET(req: Request) {
     pushedAt: r!.pushedAt?.toISOString() ?? null,
     whyShortlisted: c.whyShortlisted,
     cosine: c.cosine as number | null,
+    matchedFacet: c.matchedFacet,
     promoted: false,
     dependencyMatch: c.depMatch,
     projectMatch: scopedProject?.slug ?? null,
@@ -587,6 +684,7 @@ export async function GET(req: Request) {
       pushedAt: null,
       whyShortlisted: c.whyShortlisted,
       cosine: c.cosine as number | null,
+      matchedFacet: null,
       promoted: false,
       dependencyMatch: c.depMatch,
       projectMatch: scopedProject?.slug ?? null,
@@ -624,6 +722,7 @@ export async function GET(req: Request) {
       pushedAt: p.pushedAt,
       whyShortlisted: p.whyShortlisted,
       cosine: p.cosine as number | null,
+      matchedFacet: null,
       promoted: true,
       dependencyMatch: false,
       projectMatch: scopedProject?.slug ?? null,
@@ -667,6 +766,12 @@ export async function GET(req: Request) {
         ? `an upstream you depend on needs attention — ${top.title}`
         : `a dependency you use just shipped — ${top.title}`;
       displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+    } else if (top.matchedFacet) {
+      // Facet-led: surface WHICH capability it fills, not a bare "% match".
+      // This is the component-fit framing — "helps with your X" rather than
+      // "looks like your project" (which would be a competitor).
+      const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
+      displayText = `By the way — \`${top.repo}\` could help with your ${top.matchedFacet}${topDesc}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else {
       const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
       const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";

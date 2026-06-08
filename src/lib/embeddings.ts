@@ -237,6 +237,92 @@ export function projectEmbeddingText(input: {
   return parts.join(". ");
 }
 
+// ── Faceted matching (Phase 1) ──────────────────────────────────────────────
+// A project's capabilities are embedded SEPARATELY (one vector each) so a
+// candidate can match the project's strongest single capability instead of its
+// blended centroid. A computer-vision library scores ~0 against "defense
+// intelligence app" but high against the "computer vision" facet — the centroid
+// can't see it, a facet can.
+
+export type FacetEmbedding = { label: string; vec: number[] };
+export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[] };
+
+// Capability labels too generic to be useful probes — they'd match almost any
+// repo and reintroduce the firehose. Dropped before embedding. Kept minimal:
+// the summarizer already curates specific noun phrases, this just trims the
+// occasional catch-all.
+const GENERIC_FACETS = new Set([
+  "api", "apis", "web", "webapp", "app", "application", "ui", "ux", "frontend",
+  "front-end", "backend", "back-end", "fullstack", "full-stack", "database",
+  "data", "cli", "tooling", "testing", "logging", "auth", "authentication",
+  "devops", "ci/cd", "infrastructure", "deployment", "monitoring", "analytics",
+]);
+
+/**
+ * Normalise + dedupe a project's capability labels into the facets worth
+ * embedding. Drops blanks, too-short, and over-generic labels, lowercases for
+ * dedupe but keeps the first-seen original casing for display, and caps the
+ * count so a sprawling capability list doesn't balloon storage / API cost.
+ */
+export function selectFacetLabels(labels: Array<string | null | undefined>, cap = 8): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of labels) {
+    if (typeof raw !== "string") continue;
+    const label = raw.trim();
+    const key = label.toLowerCase();
+    if (label.length < 4) continue; // "ml", "ai" etc. — too ambiguous to probe
+    if (GENERIC_FACETS.has(key)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/**
+ * Text to embed for a single capability facet. Bare phrase by design — we WANT
+ * "computer vision" to match OpenCV regardless of the host project's domain.
+ * A light "Capability:" anchor keeps it in capability-space without binding it
+ * to the project.
+ */
+export function facetEmbeddingText(label: string): string {
+  return `Capability: ${label.trim()}`;
+}
+
+export function serialiseFacetEmbeddings(v: StoredFacetEmbeddings): string {
+  return JSON.stringify(v);
+}
+
+/** Parse the stored facet-embeddings blob. Returns [] on missing/malformed. */
+export function parseStoredFacetEmbeddings(raw: string | null | undefined): FacetEmbedding[] {
+  if (!raw) return [];
+  try {
+    const o = JSON.parse(raw) as Partial<StoredFacetEmbeddings>;
+    if (!o || !Array.isArray(o.facets)) return [];
+    return o.facets.filter(
+      (f): f is FacetEmbedding =>
+        !!f &&
+        typeof f.label === "string" &&
+        Array.isArray(f.vec) &&
+        f.vec.length === DIMS &&
+        f.vec.every((n) => typeof n === "number"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Hash of the facet label set + a version marker. Drives regeneration: when the
+ * capability list changes (or we bump the scheme) the facet vectors rebuild.
+ */
+export const FACET_SCHEME_VERSION = "1";
+export function facetSetHash(labels: string[]): string {
+  return sha256(`${FACET_SCHEME_VERSION}:${labels.map((l) => l.toLowerCase()).join("|")}`);
+}
+
 function truncateToLimit(text: string): string {
   if (!text) return "";
   if (text.length <= MAX_INPUT_LENGTH) return text;
