@@ -5,6 +5,7 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
+import { catalogueMatches } from "@/catalogue/reader";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
@@ -731,21 +732,88 @@ export async function GET(req: Request) {
     }));
   }
 
-  // Merge own + feed (Pattern A/B) + promoted, rank: dependency / standard
-  // stake matches first ("a thing you depend on / a standard you implement just
-  // changed"), then by cosine desc (entries without a cosine sink to the bottom
-  // but keep their relevance order via stable sort). Dedup by repoId; repo-less
-  // feed items (chrome-status) are inherently unique and always pass. Cap to limit.
+  // Phase 5 — shared capability catalogue. Match the cross-user library
+  // catalogue against this project's facets (same floor + competitor rule), so
+  // a project sees the best library for each capability even when its own
+  // targeted search hasn't fetched it. Only on the scoped-project path with a
+  // query vector; excludes anything already surfaced from the user's own pool.
+  let catalogueOut: OutEntry[] = [];
+  if (scopedProject && applyFloor && (projectEmbedding || projectFacets.length > 0)) {
+    const alreadyShown = new Set<string>();
+    for (const o of [...ownOut, ...feedOut, ...promotedOut]) if (o.repo) alreadyShown.add(o.repo.toLowerCase());
+    if (scopedProject.githubFullName) alreadyShown.add(scopedProject.githubFullName.toLowerCase());
+    const matches = await catalogueMatches({
+      projectEmbedding,
+      projectFacets,
+      minCosine: MIN_COSINE,
+      competitorCentroid: COMPETITOR_CENTROID,
+      facetLead: FACET_LEAD,
+      excludeFullNames: alreadyShown,
+      limit,
+    });
+    // Resolve repoIds (for exclusion + state-keying) where the repo is already
+    // known; catalogue-only repos keep repoId null (state writes resolve by name).
+    const resolved = await Promise.all(matches.map(async (m) => {
+      const r = await db.select({ id: schema.repos.id }).from(schema.repos)
+        .where(and(eq(schema.repos.owner, m.owner), eq(schema.repos.name, m.name))).get();
+      return { m, repoId: r?.id ?? null };
+    }));
+    for (const { m, repoId } of resolved) {
+      if (repoId !== null && excludedRepoIds.has(repoId)) continue;
+      catalogueOut.push({
+        candidateId: null,
+        repoId,
+        repo: m.fullName,
+        title: m.fullName,
+        url: m.url,
+        description: m.description,
+        stars: m.stars,
+        language: m.language,
+        license: m.license,
+        topics: m.topics,
+        repoShape: m.repoShape,
+        source: "catalogue",
+        postedAt: null,
+        pushedAt: null,
+        whyShortlisted: m.matchedFacet
+          ? `catalogue: fits your ${m.matchedFacet} capability (${(m.cosine * 100).toFixed(0)}%)`
+          : `catalogue: semantic match (${(m.cosine * 100).toFixed(0)}%)`,
+        cosine: m.cosine,
+        matchedFacet: m.matchedFacet,
+        promoted: false,
+        dependencyMatch: false,
+        projectMatch: scopedProject.slug,
+      });
+    }
+  }
+
+  // Merge own + feed (Pattern A/B) + promoted + catalogue, rank: dependency /
+  // standard stake matches first ("a thing you depend on / a standard you
+  // implement just changed"), then by cosine desc (entries without a cosine
+  // sink to the bottom but keep their relevance order via stable sort). Dedup by
+  // repoId; repo-less feed items (chrome-status) are inherently unique and
+  // always pass. Cap to limit.
   const mergedSeen = new Set<number>();
-  const candidatesOut = [...ownOut, ...feedOut, ...promotedOut]
+  const mergedNameSeen = new Set<string>();
+  const candidatesOut = [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]
     .sort((a, b) => {
       if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
       return (b.cosine ?? -1) - (a.cosine ?? -1);
     })
     .filter((e) => {
-      if (e.repoId === null) return true;
+      // Dedup catalogue / repo-less entries by full name too (they carry no
+      // repoId), so a catalogue repo can't double up with a feed item.
+      if (e.repoId === null) {
+        const key = e.repo.toLowerCase();
+        if (mergedNameSeen.has(key)) return false;
+        mergedNameSeen.add(key);
+        return true;
+      }
       if (mergedSeen.has(e.repoId)) return false;
       mergedSeen.add(e.repoId);
+      // A catalogue entry whose repoId WAS resolved must also block a later
+      // repo-less dup of the same name.
+      mergedNameSeen.add(e.repo.toLowerCase());
       return true;
     })
     .slice(0, limit);

@@ -318,7 +318,9 @@ export function parseStoredFacetEmbeddings(raw: string | null | undefined): Face
  * Hash of the facet label set + a version marker. Drives regeneration: when the
  * capability list changes (or we bump the scheme) the facet vectors rebuild.
  */
-export const FACET_SCHEME_VERSION = "1";
+// "2" (Phase 3): facet set now includes raw doc-section vectors alongside the
+// capability vectors. Bumping regenerates every project's facets to add them.
+export const FACET_SCHEME_VERSION = "2";
 export function facetSetHash(labels: string[]): string {
   return sha256(`${FACET_SCHEME_VERSION}:${labels.map((l) => l.toLowerCase()).join("|")}`);
 }

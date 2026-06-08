@@ -18,6 +18,8 @@ import {
   facetSetHash,
   type FacetEmbedding,
 } from "../lib/embeddings";
+import { extractDocSections } from "../projects/doc-sections";
+import { refreshCatalogue } from "../catalogue/builder";
 import { createHash } from "node:crypto";
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -211,6 +213,15 @@ async function executePipeline(
     // project's embedding is missing.
     await refreshStaleProjectEmbeddings(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} project embeddings failed:`, e),
+    );
+
+    // Phase 5 — warm the shared capability catalogue for this user's
+    // capabilities. Cross-user, budget-bounded (a few GitHub searches for the
+    // stalest capabilities), so a brand-new project can match the best library
+    // for each of its capabilities immediately instead of waiting for its own
+    // targeted search. Non-fatal.
+    await refreshCatalogueStep(runId, userId).catch((e) =>
+      console.warn(`[pipeline] user=${userId} catalogue refresh failed:`, e),
     );
 
     // Phase 3 — Scouted pool. Uses the per-project search vectors built
@@ -642,8 +653,31 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     // libraries. Fall back to the verbose keyCapabilities for old summaries
     // that predate capabilityTags (until they regenerate).
     const facetSource = (summary?.capabilityTags?.length ? summary.capabilityTags : summary?.keyCapabilities) ?? [];
-    const facetLabels = selectFacetLabels(facetSource);
-    const facetHash = facetSetHash(facetLabels);
+    const capLabels = selectFacetLabels(facetSource);
+    // Phase 3: raw doc-section facets alongside the capability probes. Each is
+    // {label = heading, text = heading + body}. Embeds the user's own words, so
+    // a candidate matching a section the capability tags missed still surfaces.
+    const sections = extractDocSections(p.readmeMd, p.claudeMd);
+    // Combined facet inputs, deduped by label (capability probe wins over a
+    // same-named section). Capability text is "Capability: <label>"; section
+    // text is the prose itself.
+    const facetInputs: Array<{ label: string; text: string }> = [];
+    const seenFacet = new Set<string>();
+    for (const l of capLabels) {
+      const k = l.toLowerCase();
+      if (seenFacet.has(k)) continue;
+      seenFacet.add(k);
+      facetInputs.push({ label: l, text: facetEmbeddingText(l) });
+    }
+    for (const s of sections) {
+      const k = s.label.toLowerCase();
+      if (seenFacet.has(k)) continue;
+      seenFacet.add(k);
+      facetInputs.push({ label: s.label, text: s.text });
+    }
+    // Hash over label+text (not just labels) so a doc edit that changes a
+    // section's prose — without changing the capability tags — still regenerates.
+    const facetHash = facetSetHash(facetInputs.map((f) => `${f.label}::${f.text}`));
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {
       try { storedFacetHash = (JSON.parse(p.facetEmbeddings) as { hash?: string }).hash ?? null; } catch { /* regen */ }
@@ -664,15 +698,15 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     }
 
     if (facetsStale) {
-      if (facetLabels.length === 0) {
+      if (facetInputs.length === 0) {
         // Nothing to probe — record the empty set so we don't retry every run.
         set.facetEmbeddings = serialiseFacetEmbeddings({ hash: facetHash, facets: [] });
       } else {
-        const vecs = await embedBatch(facetLabels.map(facetEmbeddingText));
+        const vecs = await embedBatch(facetInputs.map((f) => f.text));
         const facets: FacetEmbedding[] = [];
-        for (let i = 0; i < facetLabels.length; i++) {
+        for (let i = 0; i < facetInputs.length; i++) {
           const r = vecs[i];
-          if (r) facets.push({ label: facetLabels[i], vec: r.vector });
+          if (r) facets.push({ label: facetInputs[i].label, vec: r.vector });
         }
         // Only persist when at least one facet embedded — an all-null batch
         // means the API/key is down; leave facetEmbeddings untouched to retry.
@@ -709,6 +743,34 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
 // .git/ in the projects-mirror so the local probe always returned
 // empty. GitHub API works wherever the pipeline runs.
 //
+// Phase 5 — warm the shared capability catalogue. Gathers the union of this
+// user's project capabilityTags and asks the builder to refresh the stalest
+// ones (budget-bounded GitHub searches). The catalogue is cross-user, so this
+// also serves every other user whose project shares a capability.
+async function refreshCatalogueStep(runId: number, userId: number): Promise<void> {
+  const projects = await db
+    .select({ summaryJson: schema.projectProfiles.summaryJson })
+    .from(schema.projectProfiles)
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      eq(schema.projectProfiles.included, true),
+    ));
+  const labels = new Set<string>();
+  for (const p of projects) {
+    if (!p.summaryJson) continue;
+    try {
+      const s = JSON.parse(p.summaryJson) as ProjectSummary;
+      for (const t of s.capabilityTags ?? []) if (typeof t === "string") labels.add(t);
+    } catch { /* ignore */ }
+  }
+  if (labels.size === 0) return;
+  const { searched, upserted } = await refreshCatalogue([...labels]);
+  if (searched > 0) {
+    void recordEvent(runId, userId, "scan", `Capability catalogue: refreshed ${searched} capabilit${searched === 1 ? "y" : "ies"} → ${upserted} librar${upserted === 1 ? "y" : "ies"} indexed`);
+  }
+}
+
 // Projects with no github_full_name are skipped (can't address them).
 // The auto-detect on /settings PAT save normally fills this in;
 // /projects also lets the user set it manually.

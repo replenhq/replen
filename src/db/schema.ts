@@ -806,3 +806,50 @@ export const matchInsights = sqliteTable(
     idxUserCreated: index("idx_insights_user_created").on(t.userId, t.createdAt),
   })
 );
+
+// Phase 5 — the shared capability catalogue. A CROSS-USER, capability-indexed
+// pool of high-quality OSS libraries, sourced by searching GitHub for the
+// capabilities that the union of all users' projects actually need. Public-OSS
+// metadata only (no user project data) so cross-user sharing is safe.
+//
+// Why: per-user sourcing means a brand-new project can only match repos its own
+// targeted search has fetched yet. The catalogue lets it match the best library
+// for each of its capabilities immediately — and it improves with every user
+// (a capability one user surfaced is cached for the next). Matching against it
+// is the same faceted cosine as the per-user pool, with the same relevance
+// floor + competitor suppression, so it doesn't become a trending firehose.
+export const catalogueRepos = sqliteTable(
+  "catalogue_repos",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fullName: text("full_name").notNull(), // "owner/name", unique
+    owner: text("owner").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    url: text("url"),
+    topics: text("topics"), // JSON string[]
+    stars: integer("stars"),
+    primaryLanguage: text("primary_language"),
+    repoShape: text("repo_shape"), // 'lib' | 'app' | ... (for competitor suppression)
+    license: text("license"),
+    pushedAt: integer("pushed_at", { mode: "timestamp" }),
+    embedding: text("embedding"), // serialised vector (matched against project facets)
+    capabilities: text("capabilities"), // JSON string[] — capability labels that sourced this repo
+    firstSeen: integer("first_seen", { mode: "timestamp" }).notNull(),
+    lastSeen: integer("last_seen", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqFullName: uniqueIndex("uniq_catalogue_full_name").on(t.fullName),
+    idxStars: index("idx_catalogue_stars").on(t.stars),
+  })
+);
+
+// Tracks when each capability label was last searched against GitHub, so the
+// builder refreshes stale capabilities round-robin and skips fresh ones —
+// bounding GitHub API spend as the catalogue warms across users.
+export const catalogueCapabilities = sqliteTable("catalogue_capabilities", {
+  label: text("label").primaryKey(), // lowercased capability label
+  lastRefreshedAt: integer("last_refreshed_at", { mode: "timestamp" }).notNull(),
+  repoCount: integer("repo_count").notNull().default(0),
+});
