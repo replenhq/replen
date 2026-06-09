@@ -161,6 +161,29 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_recall",
+    description:
+      "Replen's MEMORY across the user's whole portfolio + decision history. Ask it before re-deriving things the user has already settled. Answers questions like:\n" +
+      "  - 'what have we decided about <topic>?'  → past verdicts (adopt/port/skip) + the one-line reasons, across all the user's projects\n" +
+      "  - 'have we evaluated <repo or area> before?'  → prior verdicts on it\n" +
+      "  - 'what have we ported / adopted?'  → pass verdict='port' (or 'adopt') to filter\n" +
+      "  - 'what do we use for <capability>, and where?'  → which projects have that capability and how grounded it is\n" +
+      "Returns { capabilities: [...], decisions: [...] }. Use it to avoid suggesting something the user already rejected (and why), or to point them at a repo they already ported in another project. Spans projects and time — something a single-repo view can't.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to recall (free text), e.g. 'satellite imagery', 'scraping', 'mapbox/robosat'." },
+        verdict: { type: "string", enum: ["adopt", "port", "skip", "defer"], description: "Optional: only return decisions with this verdict (e.g. 'port' for 'what have we ported')." },
+        limit: { type: "number", minimum: 1, maximum: 20, default: 8 },
+      },
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({ query: z.string().optional().default(""), verdict: z.enum(["adopt", "port", "skip", "defer"]).optional(), limit: z.number().int().min(1).max(20).default(8) }).parse(args);
+      const data = await apiPost(cfg, "/api/graph/recall", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_state",
     description:
       "Record a user action on a Replen candidate. Call AFTER you've presented writeups via replen_match and the user has chosen what to do with each one. " +

@@ -32,6 +32,16 @@ async function inspect(userId: number) {
     console.log(`\nKeystone capabilities (shared across projects):`);
     for (const [capId, ps] of shared) console.log(`  ${idToNode.get(capId)?.label.padEnd(28)} ← ${ps.join(", ")}`);
   }
+  // Themes (§5 communities) + keystones
+  const capNodes = nodes.filter((n) => n.kind === "capability");
+  const themes = new Map<string, string[]>();
+  for (const n of capNodes) { let d: { themeName?: string; keystone?: boolean } = {}; try { d = JSON.parse(n.data ?? "{}"); } catch { /* */ } const t = d.themeName || "—"; (themes.get(t) ?? themes.set(t, []).get(t)!).push(n.label); }
+  const bigThemes = [...themes.entries()].filter(([, m]) => m.length >= 3).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
+  if (bigThemes.length) {
+    console.log(`\nThemes (capability communities):`);
+    for (const [name, members] of bigThemes) console.log(`  ${name.padEnd(26)} (${members.length}) ${members.slice(0, 6).join(", ")}${members.length > 6 ? " …" : ""}`);
+  }
+
   // Sample: a few ADJACENT_TO leaps
   const adj = edges.filter((e) => e.kind === "ADJACENT_TO").sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 6);
   if (adj.length) {
