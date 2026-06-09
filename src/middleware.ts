@@ -170,7 +170,8 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/inventory/") ||
     request.nextUrl.pathname === "/api/state" ||
     request.nextUrl.pathname === "/api/triage" ||
-    request.nextUrl.pathname.startsWith("/api/projects/")
+    request.nextUrl.pathname.startsWith("/api/projects/") ||
+    request.nextUrl.pathname.startsWith("/api/graph/")
   ) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
