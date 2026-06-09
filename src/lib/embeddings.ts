@@ -247,7 +247,7 @@ export function projectEmbeddingText(input: {
 // `repo` is set only for facets borrowed from a SIBLING repo in the same
 // multi-repo product (for attribution — "this match is for your acme-cv").
 // Undefined for the scoped repo's own facets.
-export type FacetEmbedding = { label: string; vec: number[]; repo?: string };
+export type FacetEmbedding = { label: string; vec: number[]; repo?: string; modality?: import("../projects/modality").Modality[]; provenance?: import("../projects/modality").Provenance };
 export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[] };
 
 // Capability labels too generic to be useful probes — they'd match almost any
@@ -285,12 +285,16 @@ export function selectFacetLabels(labels: Array<string | null | undefined>, cap 
 }
 
 /**
- * Text to embed for a single capability facet. Bare phrase by design — we WANT
- * "computer vision" to match OpenCV regardless of the host project's domain.
- * A light "Capability:" anchor keeps it in capability-space without binding it
- * to the project.
+ * Text to embed for a single capability facet. When a GROUNDED descriptor is
+ * available (the in-session agent or summarizer wrote "rule-based anomaly
+ * detection over drone telemetry time-series — link-loss, GPS-drop; no ML"), we
+ * embed THAT — it's rich enough that cosine separates a telemetry capability
+ * from an image-defect library. Without a descriptor we fall back to the bare
+ * "Capability: <label>" anchor (legacy behaviour). Trimmed to the embed cap.
  */
-export function facetEmbeddingText(label: string): string {
+export function facetEmbeddingText(label: string, descriptor?: string | null): string {
+  const d = descriptor?.trim();
+  if (d) return `Capability: ${label.trim()} — ${d}`.slice(0, 7000);
   return `Capability: ${label.trim()}`;
 }
 
@@ -323,7 +327,12 @@ export function parseStoredFacetEmbeddings(raw: string | null | undefined): Face
  */
 // "2" (Phase 3): facet set now includes raw doc-section vectors alongside the
 // capability vectors. Bumping regenerates every project's facets to add them.
-export const FACET_SCHEME_VERSION = "2";
+// "3" (grounded matching): capability facets embed a GROUNDED descriptor (+
+// modality) rather than the bare label. Bumping regenerates every project's
+// facets with the richer, modality-aware probes.
+// "4" (provenance): each facet carries a provenance tag (grounded/extracted/
+// inferred/ambiguous). Bumping regenerates so every facet is tagged.
+export const FACET_SCHEME_VERSION = "4";
 export function facetSetHash(labels: string[]): string {
   return sha256(`${FACET_SCHEME_VERSION}:${labels.map((l) => l.toLowerCase()).join("|")}`);
 }

@@ -25,7 +25,7 @@ const MAX_SECTION_CHARS = 7000;
 // case-insensitively against the (cleaned) heading; a leading-word match is
 // enough. Includes structural headings (repo layout, status, tags) that embed
 // file paths or meta rather than capabilities.
-const BOILERPLATE = /^(install\b|installation|usage|how to use|getting started|quick ?start|setup|set up|prerequisites?|requirements?|licen[sc]e|contributing|contribution|table of contents|contents|development|developing|testing|tests?|deployment|deploy(ing)?|building|build\b|ci\/cd|^ci$|faq|frequently asked|change ?log|roadmap|acknowledge?ments?|credits|authors?|maintainers?|contact|support|getting help|sponsors?|donate|funding|stars?|badges?|disclaimer|warranty|security policy|code of conduct|repo layout|repository layout|project structure|directory structure|file structure|folder structure|layout|status|replen tags|tags|overview|introduction|intro\b|about\b|summary|features?|configuration|config\b|commands?|environments?|env\b)/i;
+const BOILERPLATE = /^(install\b|installation|usage|how to use|getting started|quick ?start|setup|set up|prerequisites?|requirements?|licen[sc]e|contributing|contribution|table of contents|contents|development|developing|testing|tests?|deployment|deploy(ing)?|building|build\b|ci\/cd|^ci$|faq|frequently asked|change ?log|roadmap|acknowledge?ments?|credits|authors?|maintainers?|contact|support|getting help|sponsors?|donate|funding|stars?|badges?|disclaimer|warranty|security policy|code of conduct|repo layout|repository layout|project structure|directory structure|file structure|folder structure|layout|status|replen tags|tags|overview|introduction|intro\b|about\b|summary|features?|configuration|config\b|commands?|environments?|env\b|stack\b|tech stack|active areas?|niche|domain|constraints?|non.?goals?|anti.?patterns?|integration preferences?|what it is|how it works|architecture|notes?|todo|option \d|step \d)/i;
 
 // Headings that carry NEGATIVE signal — what the project deliberately does NOT
 // do. Embedding these as positive probes would surface exactly what the user
@@ -37,6 +37,24 @@ const NEGATIVE = /(not in scope|out of scope|non.?goals?|what'?s not|anti.?patte
 // otherwise become "Claude Code Configuration"-style noise facets that match
 // dev-tooling repos for unrelated projects.
 const META_TOOLING = /(claude code|claude\b|\bmcp\b|model context protocol|cursor|copilot|\bagents?\b|subagents?|\bhooks?\b|slash commands?|\breplen\b|ai assistant|coding assistant|gemini|codex|\bllm instructions?\b)/i;
+
+// Structural / non-capability headings that aren't boilerplate-by-name but
+// carry no capability signal: video-script cues ("02-context — 0:18"),
+// numbered-section slugs ("01-open"), narration/teleprompter docs, or labels
+// with no real words (codes/slugs). These slipped past BOILERPLATE because the
+// heading text is arbitrary — they're caught structurally instead. Exported so
+// the matcher can ALSO drop them defensively at read time (legacy facets stored
+// before this filter existed), not just at generation.
+const NARRATION_NOISE = /(teleprompter|narration|voice-?over|screencast|b-?roll|storyboard|walkthrough script|demo script)/i;
+export function isNoiseFacetLabel(label: string): boolean {
+  const l = label.trim();
+  if (!l) return true;
+  if (/\b\d{1,2}:\d{2}\b/.test(l)) return true;           // timestamp cue (0:18) — video/teleprompter
+  if (/^\d{1,3}\s*[-.)]/.test(l)) return true;            // numbered-section prefix (01-, 2., 3))
+  if ((l.match(/[a-z]/gi) ?? []).length < 3) return true; // codes/slugs with no real words
+  if (NARRATION_NOISE.test(l)) return true;               // video/script meta doc
+  return false;
+}
 
 type RawSection = { heading: string; body: string };
 
@@ -90,6 +108,7 @@ function sectionsFromDoc(md: string | null, preambleLabel: string, dropNames: Se
     // like a mini-centroid and matches loosely. Drop it (the real centroid
     // already covers the whole project).
     if (dropNames.has(norm(label))) continue;
+    if (isNoiseFacetLabel(label)) continue;
     if (BOILERPLATE.test(label) || NEGATIVE.test(label) || META_TOOLING.test(label)) continue;
     const body = raw.body.trim();
     if (body.length < MIN_BODY_CHARS) continue;
@@ -109,14 +128,18 @@ function sectionsFromDoc(md: string | null, preambleLabel: string, dropNames: Se
  * (case-insensitive, first-seen wins) and capped. Preamble (text before the
  * first heading — usually the project description) is kept as "Overview".
  */
-export function extractDocSections(readmeMd: string | null, claudeMd: string | null, projectName?: string | null): DocSection[] {
+export function extractDocSections(readmeMd: string | null, claudeMd: string | null, projectName?: string | null, projectSlug?: string | null): DocSection[] {
   // Labels matching the project's own name/slug are the title blob — drop them.
+  // BOTH name and slug: the human name ("acme Command Intelligence") and the
+  // slug/H1 ("acme-web") often differ, and the README H1 is usually the slug.
   const dropNames = new Set<string>();
-  if (projectName) {
-    const n = norm(projectName);
+  for (const raw of [projectName, projectSlug]) {
+    if (!raw) continue;
+    const n = norm(raw);
+    if (!n) continue;
     dropNames.add(n);
     // also without a trailing role suffix (acme-web → acme)
-    dropNames.add(n.replace(/\s+(web|app|api|ui|frontend|backend|server|client|cli|core|service|mobile)$/i, "").trim());
+    dropNames.add(n.replace(/\s+(web|app|api|ui|frontend|backend|server|client|cli|core|service|mobile|cv|edge|infra|engine)$/i, "").trim());
   }
   const all = [
     ...sectionsFromDoc(claudeMd, "Overview", dropNames),

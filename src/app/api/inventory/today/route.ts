@@ -7,6 +7,7 @@ import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
+import { isNoiseFacetLabel } from "@/projects/doc-sections";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
@@ -372,6 +373,22 @@ export async function GET(req: Request) {
   // Dep tokens across the whole product — a library the project (or a sibling)
   // already depends on must never be suggested back.
   const productDeps = new Set<string>(parseTechSummaryDeps(scopedProject?.techSummary ?? null));
+  // Defensive facet hygiene: a repo's OWN name/slug is a title blob, not a
+  // capability, and must never be a probe. We drop these (across the whole
+  // product) at READ time too — not just at generation — so legacy facets
+  // stored before the slug-drop + noise filters stop producing junk matches
+  // immediately, without waiting on a full facet regen.
+  const normName = (s: string) => s.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  const dropFacetNorms = new Set<string>();
+  const addDropName = (s?: string | null) => {
+    if (!s) return;
+    const n = normName(s);
+    if (!n) return;
+    dropFacetNorms.add(n);
+    dropFacetNorms.add(n.replace(/\s+(web|app|api|ui|frontend|backend|server|client|cli|core|service|mobile|cv|edge|infra|engine)$/i, "").trim());
+  };
+  addDropName(scopedProject?.name);
+  addDropName(scopedProject?.slug);
   if (scopedProject) {
     const productKey = scopedProject.productKey ?? deriveProductKey(scopedProject.githubFullName);
     if (productKey) {
@@ -392,15 +409,30 @@ export async function GET(req: Request) {
           projectFacets.push({ ...f, repo: s.slug });
         }
         for (const d of parseTechSummaryDeps(s.techSummary)) productDeps.add(d);
+        addDropName(s.slug);
+        addDropName(s.githubFullName?.split("/")[1] ?? null);
       }
     }
+  }
+  // Apply the defensive facet hygiene: drop the product's own name/slug probes
+  // and any structural/teleprompter-style noise label (timestamps, numbered
+  // slugs) that legacy generation let through.
+  for (let i = projectFacets.length - 1; i >= 0; i--) {
+    const label = projectFacets[i].label;
+    if (isNoiseFacetLabel(label) || dropFacetNorms.has(normName(label))) projectFacets.splice(i, 1);
   }
   // Map deps to their canonical GitHub repos (next → vercel/next.js), so the
   // exclusion catches libraries whose package name ≠ repo name.
   const knownRepoFullNames = new Set<string>();
+  // Capability facets the project ALREADY has a dependency for ("Tailwind CSS"
+  // because it uses tailwindcss). Matches led by these are "more of what you
+  // have" — down-ranked so genuine gaps + non-obvious finds surface instead.
+  const coveredFacets = new Set<string>();
+  const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
   for (const d of productDeps) {
+    coveredFacets.add(normLabel(d));
     const v = vendorForDep(d);
-    if (v) knownRepoFullNames.add(v.githubRepo.toLowerCase());
+    if (v) { knownRepoFullNames.add(v.githubRepo.toLowerCase()); coveredFacets.add(normLabel(v.name)); }
   }
   // An app whose centroid similarity clears this bar is "basically my whole
   // project" — a competitor, not a component. Suppressed unless it leads with a
@@ -691,6 +723,7 @@ export async function GET(req: Request) {
     whyShortlisted: string;
     cosine: number | null;
     matchedFacet: string | null; // capability this candidate fills, when facet-led
+    matchedProvenance?: import("@/projects/modality").Provenance | null; // how grounded that capability is
     matchedRepo?: string | null; // sibling repo it's for, when cross-repo (multi-repo products)
     promoted: boolean;
     dependencyMatch: boolean;
@@ -835,6 +868,7 @@ export async function GET(req: Request) {
       excludeFullNames: alreadyShown,
       projectLanguages,
       knownDeps: productDeps,
+      coveredFacets,
       limit,
     });
     // Resolve repoIds (for exclusion + state-keying) where the repo is already
@@ -871,6 +905,7 @@ export async function GET(req: Request) {
         })(),
         cosine: m.cosine,
         matchedFacet: m.matchedFacet,
+        matchedProvenance: m.matchedProvenance,
         matchedRepo: m.matchedRepo && m.matchedRepo !== scopedProject.slug ? m.matchedRepo : null,
         promoted: false,
         dependencyMatch: false,
@@ -923,6 +958,7 @@ export async function GET(req: Request) {
     const adj = await adjacentMatches({
       projectFacets,
       ownedCapabilities: ownedCaps,
+      projectLanguages,
       excludeFullNames: shownNames,
       adjLo: ADJ_LO,
       adjHi: ADJ_HI,

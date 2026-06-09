@@ -6,7 +6,8 @@ import { capabilitiesFromDeps, mergeCapabilityTags } from "@/projects/capabiliti
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
 import { serialiseFacetEmbeddings } from "@/lib/embeddings";
-import { PROMPT_VERSION, type ProjectSummary } from "@/projects/summarize";
+import { PROMPT_VERSION, reconcileCapabilities, type ProjectSummary } from "@/projects/summarize";
+import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
 
 // Phase 6 — in-session capability extraction. The onboarding skill reads the
 // open codebase and pushes the project's technical capabilities here, instead
@@ -20,7 +21,10 @@ import { PROMPT_VERSION, type ProjectSummary } from "@/projects/summarize";
 //
 // Project resolution is owner-tolerant (exact github_full_name, then repo name).
 
-type Body = { repo?: string; repoId?: number; capabilities?: unknown };
+type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown };
+
+// Cap the stored report so a runaway agent can't write megabytes.
+const MAX_REPORT_CHARS = 24_000;
 
 export async function POST(req: Request) {
   const auth = await authenticate(req);
@@ -33,9 +37,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400, headers: corsHeaders });
   }
   if (!Array.isArray(body.capabilities)) {
-    return NextResponse.json({ error: "capabilities must be an array of strings" }, { status: 400, headers: corsHeaders });
+    return NextResponse.json({ error: "capabilities must be an array (of strings, or {tag, descriptor, modality} objects)" }, { status: 400, headers: corsHeaders });
   }
-  const agentCaps = body.capabilities.filter((c): c is string => typeof c === "string");
+  // Accept BOTH the grounded form ({tag, descriptor, modality}) and the legacy
+  // bare-string form. Grounded specs carry the disambiguating descriptor +
+  // modality the matcher needs; bare strings get an inferred modality.
+  const agentSpecs: CapabilitySpec[] = [];
+  const agentTags: string[] = [];
+  for (const c of body.capabilities) {
+    // Everything the agent sends is GROUNDED — it read the actual source.
+    if (typeof c === "string") {
+      const tag = c.trim();
+      if (tag) { agentTags.push(tag); agentSpecs.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "grounded" }); }
+    } else if (c && typeof c === "object" && typeof (c as Record<string, unknown>).tag === "string") {
+      const cc = c as Record<string, unknown>;
+      const tag = (cc.tag as string).trim();
+      if (!tag) continue;
+      const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim() : "";
+      const modality = coerceModalities(cc.modality);
+      agentTags.push(tag);
+      agentSpecs.push({ tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "grounded" });
+    }
+  }
 
   // Resolve the project (owner-tolerant), scoped to this user.
   let project: typeof schema.projectProfiles.$inferSelect | null = null;
@@ -66,11 +89,13 @@ export async function POST(req: Request) {
     );
   }
 
-  // Merge agent capabilities with the deterministic dep→capability tags.
-  const merged = mergeCapabilityTags(agentCaps, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)));
+  // Merge agent capabilities with the deterministic dep→capability tags, then
+  // reconcile grounded specs so every final tag has a descriptor + modality.
+  const merged = mergeCapabilityTags(agentTags, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)));
   if (merged.length === 0) {
     return NextResponse.json({ error: "no usable capabilities after cleaning" }, { status: 400, headers: corsHeaders });
   }
+  const mergedSpecs = reconcileCapabilities(merged, agentSpecs);
 
   // Store capabilities on the project's summary (preserve an existing summary's
   // other fields; create a minimal one for a fresh project). Marking it fresh
@@ -83,16 +108,23 @@ export async function POST(req: Request) {
   }
   if (!summary) {
     summary = {
-      purpose: "", keyCapabilities: [], capabilityTags: [], currentTech: {},
+      purpose: "", keyCapabilities: [], capabilityTags: [], capabilities: [], currentTech: {},
       outcomeGoals: [], crossRepoDependencies: [],
       languageSignals: { hardConstraints: [], detected: [] },
       generatedAt: new Date().toISOString(), sourceFiles: [], llmModel: "in-session", promptVersion: PROMPT_VERSION,
     };
   }
   summary.capabilityTags = merged;
+  summary.capabilities = mergedSpecs;
 
-  // Build facet vectors now (capabilities + any doc sections). Embeddings only.
-  const { hash, inputs } = facetInputsFor({ capabilityTags: merged, readmeMd: project.readmeMd, claudeMd: project.claudeMd, projectName: project.name ?? project.slug });
+  // The agent's grounded project report (optional) — stored as an additional
+  // grounding input for the server's safety-net summarization on the next regen.
+  const agentReport = typeof body.report === "string" && body.report.trim()
+    ? body.report.trim().slice(0, MAX_REPORT_CHARS)
+    : project.agentReport;
+
+  // Build facet vectors now (grounded capabilities + any doc sections). Embeddings only.
+  const { hash, inputs } = facetInputsFor({ capabilities: mergedSpecs, capabilityTags: merged, readmeMd: project.readmeMd, claudeMd: project.claudeMd, projectName: project.name ?? project.slug, projectSlug: project.slug });
   const facets = inputs.length > 0 ? await embedFacets(inputs) : [];
 
   await db.update(schema.projectProfiles).set({
@@ -100,6 +132,7 @@ export async function POST(req: Request) {
     summaryHash: project.profileHash,
     summaryGeneratedAt: new Date(),
     summaryPromptVersion: PROMPT_VERSION,
+    agentReport,
     facetEmbeddings: facets.length > 0 ? serialiseFacetEmbeddings({ hash, facets }) : project.facetEmbeddings,
     updatedAt: new Date(),
   }).where(eq(schema.projectProfiles.id, project.id));

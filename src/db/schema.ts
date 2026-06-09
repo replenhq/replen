@@ -264,6 +264,12 @@ export const projectProfiles = sqliteTable(
     readmeMd: text("readme_md"),
     claudeMd: text("claude_md"),
     techSummary: text("tech_summary"),
+    // Agentic onboarding: the user's coding agent's grounded project report —
+    // a comprehensive code-read write-up (what it does, tech, algos, how/why,
+    // architecture, for whom). Richer than the docs (it reflects what the agent
+    // KNOWS from reading the source), and an additional input to the server's
+    // safety-net summarization. NULL until the onboarding sweep runs.
+    agentReport: text("agent_report"),
     // Sprint 5 loader expansion: structured project-shape blob captured at
     // loader time. JSON object: { fileTree: string[], structured: string }.
     // - fileTree: sorted repo paths (denylist-filtered, lockfiles + build
@@ -440,6 +446,14 @@ export const triageEvents = sqliteTable(
     score: integer("score"),
     // 'quick' (<1d) | 'moderate' (1-3d) | 'deep' (1+w). Nullable.
     effortBand: text("effort_band"),
+    // The capability facet this candidate matched on, the facet's modality (JSON
+    // Modality[]), and a structured reason for the verdict ('fit' |
+    // 'modality-collision' | 'task-collision' | 'covered' | 'wrong-posture' |
+    // 'low-quality' | 'other'). Powers the CONTEXTUAL learning loop: suppress a
+    // (repo × modality) collision without globally demoting the repo. Nullable.
+    matchedFacet: text("matched_facet"),
+    facetModality: text("facet_modality"),
+    reasonCode: text("reason_code"),
     // Short summary the agent wrote for the user. Like a commit subject.
     oneLine: text("one_line"),
     // Optional full reasoning. Can be 0-5KB. Replen stores this server-
@@ -849,6 +863,9 @@ export const catalogueRepos = sqliteTable(
     // Only library/framework/app are kept; experiment/content (viral hype,
     // curated lists, "skills" repos) are filtered out — viral != adoptable.
     kind: text("kind"),
+    // Data modality (JSON Modality[] — src/projects/modality.ts). Drives the
+    // cross-modal gate. NULL = unknown → gate stays open.
+    modality: text("modality"),
     firstSeen: integer("first_seen", { mode: "timestamp" }).notNull(),
     lastSeen: integer("last_seen", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
@@ -872,4 +889,60 @@ export const catalogueCapabilities = sqliteTable("catalogue_capabilities", {
   // exploratory suggestion ("you don't use graph memory, but it's adjacent to
   // your intel-correlation").
   embedding: text("embedding"),
+});
+
+// ============================================================================
+// Atlas — the materialized per-user knowledge graph (docs/knowledge-graph-plan.md).
+// Derived from facets / triage_events / product_key / catalogue, rebuilt
+// deterministically. Nodes + edges power Leaps, recall, the Atlas export, themes.
+// ============================================================================
+
+export const graphNodes = sqliteTable(
+  "graph_nodes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull(),
+    // 'project' | 'product' | 'capability' | 'candidate' | 'modality'
+    kind: text("kind").notNull(),
+    // Stable key within (userId, kind): project slug, normLabel for capability,
+    // owner/name for candidate, product key, modality value.
+    nodeKey: text("node_key").notNull(),
+    label: text("label").notNull(),
+    // Kind-specific JSON (modality, provenance, stars, descriptor, …).
+    data: text("data"),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqNode: uniqueIndex("uniq_graph_node").on(t.userId, t.kind, t.nodeKey),
+    idxUserKind: index("idx_graph_node_user_kind").on(t.userId, t.kind),
+  }),
+);
+
+export const graphEdges = sqliteTable(
+  "graph_edges",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull(),
+    // HAS_CAPABILITY | ADJACENT_TO | FILLS | EVALUATED | MEMBER_OF | RELATES_TO | ENDORSED_BY_SIMILAR
+    kind: text("kind").notNull(),
+    srcId: integer("src_id").notNull(), // graph_nodes.id
+    dstId: integer("dst_id").notNull(), // graph_nodes.id
+    weight: real("weight"),             // cosine / strength
+    // Edge-specific JSON (provenance, verdict, reasonCode, score, modality, …).
+    data: text("data"),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserKind: index("idx_graph_edge_user_kind").on(t.userId, t.kind),
+    idxSrc: index("idx_graph_edge_src").on(t.userId, t.srcId),
+    idxDst: index("idx_graph_edge_dst").on(t.userId, t.dstId),
+  }),
+);
+
+export const userGraphMeta = sqliteTable("user_graph_meta", {
+  userId: integer("user_id").primaryKey(),
+  contentHash: text("content_hash"),
+  nodeCount: integer("node_count").notNull().default(0),
+  edgeCount: integer("edge_count").notNull().default(0),
+  builtAt: integer("built_at", { mode: "timestamp" }),
 });

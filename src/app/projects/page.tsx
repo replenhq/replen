@@ -27,7 +27,7 @@ export default async function Projects() {
         {projects.length} registered · {totalIncluded} watched (included in matching)
       </p>
       <p className="meta">
-        <b>Include</b> = Replen watches this repo and matches new OSS / releases / spec changes against it.
+        <b>Include</b> = Replen watches this repo and matches new libraries / releases / spec changes against it.
         Add a repo below, fix a drifted owner in the GitHub-repo field, or remove a stale/duplicate row.
       </p>
 

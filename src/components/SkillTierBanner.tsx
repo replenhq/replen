@@ -52,8 +52,8 @@ export async function SkillTierBanner({ userId, subscriptionTier }: {
         <div style={{ flex: "1 1 360px", minWidth: 0 }}>
           <div style={{ fontWeight: 600, marginBottom: 5, color: "var(--fg)" }}>Skill mode</div>
           <div style={{ color: "var(--dim)", lineHeight: 1.55 }}>
-            Matching now runs in your CLI on your subscription tokens, not on Replen&apos;s hosted scorer.
-            Open Claude Code in a tracked repo and run <code style={codeStyle}>/replen-match</code> (or{" "}
+            Matching now runs in your CLI session, not on Replen&apos;s hosted scorer.
+            Open Claude Code in a tracked repo and run <code style={codeStyle}>/replen</code> (or{" "}
             <code style={codeStyle}>use replen_match</code> on any MCP host). This page is your action history.
           </div>
         </div>

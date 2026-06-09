@@ -6,6 +6,7 @@
 import { chatCompletion, triageModel } from "../analyzer/llm";
 import { capabilitiesFromDeps, mergeCapabilityTags } from "./capabilities";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
+import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "./modality";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing summaries — they re-generate on next pipeline run.
@@ -20,7 +21,11 @@ import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 // for sharper matching. Old summaries regenerate.
 // "5": exclude AI-tooling/assistant config (Claude Code, MCP, agents) from
 // capabilities — that's how you develop, not what the project does.
-export const PROMPT_VERSION = "5";
+// "6" (grounded matching): adds `capabilities` — each tag now carries a GROUNDED
+// descriptor (what data it operates on, the task, key constraints) + a data
+// modality, so matching separates same-word/different-modality collisions
+// (telemetry vs image "anomaly detection"). Old summaries regenerate.
+export const PROMPT_VERSION = "6";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -68,6 +73,13 @@ export type ProjectSummary = {
   // for a project that does CV. Augmented post-LLM from the dependency set.
   capabilityTags: string[];
 
+  // Phase "6": the grounded form of capabilityTags. One spec per tag, carrying a
+  // descriptor (modality + data + task + constraints, grounded in the code) and
+  // a data modality. The descriptor is what gets EMBEDDED for matching (richer
+  // than the bare tag, so it doesn't collide across modalities); the modality
+  // drives the cross-modal gate. capabilityTags stays the short retrieval view.
+  capabilities: CapabilitySpec[];
+
   // Current implementation across functional areas. Keys are free-form (web,
   // scraping, data, charts, ...); values describe what's used. CONTEXT for
   // gap analysis, never a recommendation gate.
@@ -103,6 +115,10 @@ export type SummarizeInput = {
   readmeMd: string | null;
   claudeMd: string | null;
   techSummary: string | null;
+  // Agentic onboarding: the coding agent's grounded project report. When
+  // present it's the strongest signal — it reflects what the agent learned from
+  // reading the actual source, not just the prose docs. Null until onboarding.
+  agentReport?: string | null;
   // Sprint 5: structured project shape (file tree + non-markdown signal
   // files). Null on legacy rows / projects with no shape data yet.
   shape: import("./loader").ProjectShape | null;
@@ -179,12 +195,29 @@ Rules:
   Configuration"). Those describe HOW the project is developed, not what it
   DOES — ignore them even when CLAUDE.md / AGENTS.md / GEMINI.md mention them.
   Be specific and thorough about the project's REAL technical work, not generic.
+- "capabilities" is the GROUNDED form of capabilityTags — emit one object per
+  tag. Each has:
+    - "tag": the same short GitHub-searchable term.
+    - "descriptor": one grounded sentence that disambiguates it — WHAT DATA it
+      operates on, the SPECIFIC task, and any key constraint. This is critical:
+      "anomaly detection" is ambiguous (images? telemetry?), but "rule-based
+      anomaly detection over drone telemetry time-series — link-loss, GPS-drop,
+      battery-sag; no ML" is not. Ground it in the file tree / configs / deps,
+      not marketing. Avoid the project's domain words; describe the tech.
+    - "modality": the data modality this capability operates on, as an array from
+      EXACTLY this set: ["image","video","timeseries","tabular","text","audio",
+      "geospatial","graph","3d","code","network"]. Use [] only if genuinely
+      none apply. A satellite-imagery segmenter is ["image","geospatial"]; a
+      telemetry detector is ["timeseries"]; a recsys is ["tabular"].
 
 Output JSON only. No prose before or after. Schema:
 {
   "purpose": "string (1 sentence + 2-4 sentence elaboration)",
   "keyCapabilities": ["3-8 short noun phrases"],
   "capabilityTags": ["3-10 short GitHub-searchable tech capability terms"],
+  "capabilities": [
+    { "tag": "...", "descriptor": "grounded one-liner", "modality": ["image", ...] }
+  ],
   "currentTech": { "web": "...", "scraping": "...", ... },
   "outcomeGoals": [
     { "statement": "...", "source": "user" | "inferred", "confidence": "high" | "medium" | "low" }
@@ -203,6 +236,10 @@ function buildUserPrompt(input: SummarizeInput): string {
   const claudeMd = (input.claudeMd ?? "").slice(0, PER_FILE_CHARS);
   const readmeMd = (input.readmeMd ?? "").slice(0, PER_FILE_CHARS);
   const techSummary = (input.techSummary ?? "").slice(0, 2000);
+  // The agent report (when present) is the strongest grounding — surface it
+  // first and tell the model to weight it. It's the code-read understanding.
+  const agentReport = (input.agentReport ?? "").slice(0, PER_FILE_CHARS);
+  if (agentReport) parts.push(`\n--- Agent project report (GROUND TRUTH — the user's coding agent's code-read understanding; weight this highest) ---\n${agentReport}`);
   if (claudeMd) parts.push(`\n--- CLAUDE.md ---\n${claudeMd}`);
   if (readmeMd) parts.push(`\n--- README.md ---\n${readmeMd}`);
   if (techSummary) parts.push(`\n--- techSummary (manifest digest) ---\n${techSummary}`);
@@ -236,6 +273,21 @@ function coerceSummary(raw: unknown, model: string, sourceFiles: string[]): Proj
     purpose: typeof o.purpose === "string" ? o.purpose : "",
     keyCapabilities: Array.isArray(o.keyCapabilities) ? o.keyCapabilities.filter((s): s is string => typeof s === "string") : [],
     capabilityTags: Array.isArray(o.capabilityTags) ? o.capabilityTags.filter((s): s is string => typeof s === "string") : [],
+    capabilities: Array.isArray(o.capabilities)
+      ? o.capabilities
+          .map((c) => {
+            const cc = (c ?? {}) as Record<string, unknown>;
+            const tag = typeof cc.tag === "string" ? cc.tag.trim() : null;
+            if (!tag) return null;
+            const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim() : "";
+            // Fall back to inferring the modality from tag+descriptor when the LLM omitted it.
+            const modality = coerceModalities(cc.modality);
+            // Server-side summarizer = inferred from docs (the agent path, which is
+            // grounded, comes through the capabilities route instead).
+            return { tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "inferred" } as CapabilitySpec;
+          })
+          .filter((c): c is CapabilitySpec => c !== null)
+      : [],
     currentTech: (o.currentTech && typeof o.currentTech === "object" && !Array.isArray(o.currentTech))
       ? Object.fromEntries(
           Object.entries(o.currentTech as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
@@ -297,10 +349,11 @@ export async function generateProjectSummary(input: SummarizeInput): Promise<Pro
   // Bail early if we have absolutely nothing to summarize. A project with no
   // docs and no manifest is invisible to the LLM — better to skip than to
   // hallucinate a summary from just the slug.
-  if (!input.claudeMd && !input.readmeMd && !input.techSummary) {
+  if (!input.claudeMd && !input.readmeMd && !input.techSummary && !input.agentReport) {
     return null;
   }
   const sourceFiles = [
+    input.agentReport ? "agentReport" : null,
     input.claudeMd ? "CLAUDE.md" : null,
     input.readmeMd ? "README.md" : null,
     input.techSummary ? "techSummary" : null,
@@ -334,7 +387,40 @@ export async function generateProjectSummary(input: SummarizeInput): Promise<Pro
   // vision whether or not its README says so). Merged + deduped + capped.
   const depCaps = capabilitiesFromDeps(parseTechSummaryDeps(input.techSummary));
   summary.capabilityTags = mergeCapabilityTags(summary.capabilityTags, depCaps);
+  // Reconcile grounded specs against the final (merged) tag list: every tag —
+  // including dep-derived ones the LLM never saw — gets a spec, reusing the
+  // LLM's grounded descriptor where it exists and inferring modality otherwise.
+  summary.capabilities = reconcileCapabilities(summary.capabilityTags, summary.capabilities);
   return summary;
+}
+
+/**
+ * Ensure one CapabilitySpec per final capabilityTag. Grounded LLM specs win
+ * (matched case-insensitively by tag); tags with no spec (dep-derived) get a
+ * minimal spec with an inferred modality and no descriptor (the bare-label
+ * embedding is used). Order follows capabilityTags.
+ */
+export function reconcileCapabilities(tags: string[], specs: CapabilitySpec[]): CapabilitySpec[] {
+  const byTag = new Map<string, CapabilitySpec>();
+  for (const s of specs) {
+    const k = s.tag.trim().toLowerCase();
+    if (k && !byTag.has(k)) byTag.set(k, s);
+  }
+  const out: CapabilitySpec[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const k = tag.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const s = byTag.get(k);
+    if (s) {
+      out.push({ tag, descriptor: s.descriptor, modality: s.modality.length ? s.modality : inferCapabilityModality(tag, s.descriptor), provenance: s.provenance ?? (s.descriptor ? "grounded" : "inferred") });
+    } else {
+      // No spec for this tag = it came from the deterministic dep→capability table.
+      out.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "extracted" });
+    }
+  }
+  return out;
 }
 
 // Cache-invalidation predicate. True if we need to (re)generate the summary.

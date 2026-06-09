@@ -14,6 +14,7 @@ import {
   serialiseFacetEmbeddings,
 } from "../lib/embeddings";
 import { facetInputsFor, embedFacets } from "../projects/facets";
+import { buildUserGraph } from "../graph/build";
 import { refreshCatalogue } from "../catalogue/builder";
 import { SEED_CAPABILITIES, isSeedCapability } from "../catalogue/seed-capabilities";
 import { createHash } from "node:crypto";
@@ -209,6 +210,15 @@ async function executePipeline(
     // project's embedding is missing.
     await refreshStaleProjectEmbeddings(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} project embeddings failed:`, e),
+    );
+
+    // Atlas — rebuild the user's knowledge graph from the freshened facets +
+    // triage history. Deterministic + hash-gated, so it's a no-op when nothing
+    // changed. Non-fatal: matching works without the graph; the graph powers
+    // Leaps + recall on top. (docs/knowledge-graph-plan.md)
+    await buildUserGraph(userId).then(
+      (r) => { if (r.built) void recordEvent(runId, userId, "scan", `Atlas graph rebuilt — ${r.nodeCount} nodes, ${r.edgeCount} edges`); },
+      (e) => console.warn(`[pipeline] user=${userId} atlas graph build failed:`, e),
     );
 
     // Phase 5 — warm the shared capability catalogue for this user's
@@ -488,6 +498,7 @@ async function refreshStaleProjectSummaries(runId: number, userId: number): Prom
           readmeMd: p.readmeMd,
           claudeMd: p.claudeMd,
           techSummary: p.techSummary,
+          agentReport: p.agentReport,
           shape: parseShapeJson(p.shapeJson),
         });
         if (!summary) continue; // project has no docs at all — skip silently
@@ -652,11 +663,13 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
     // the shared helper so the pipeline and the in-session capability route
     // (Phase 6) stay identical. Hash is cheap; we embed only when stale.
     const { hash: facetHash, inputs: facetInputs } = facetInputsFor({
+      capabilities: summary?.capabilities,
       capabilityTags: summary?.capabilityTags,
       keyCapabilities: summary?.keyCapabilities,
       readmeMd: p.readmeMd,
       claudeMd: p.claudeMd,
       projectName: p.name ?? p.slug,
+      projectSlug: p.slug,
     });
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {

@@ -55,16 +55,16 @@ export async function SkillHome({ user, demoMode = false }: {
               This is a seeded snapshot of what your Replen looks like
               after a few weeks of use. Below: a real timeline of
               agent verdicts and user actions on candidates from the
-              wider OSS ecosystem. <a href="/login" style={ctaStyle}>
+              wider ecosystem. <a href="/login" style={ctaStyle}>
               Sign up to try it on your own repos &rarr;</a>
             </>
           ) : (
             <>
-              {firstName ? `Hi ${firstName} — ` : ""}
-              Replen watches the OSS ecosystem against your projects.
+              {firstName ? `Hi ${firstName}. ` : ""}
+              Replen watches the wider ecosystem against your projects.
               When something lands that&apos;s worth a look, your agent
               mentions it the next time you open Claude Code.
-              Most days are quiet — that&apos;s the point.
+              Most days are quiet, by design.
             </>
           )}
         </p>
