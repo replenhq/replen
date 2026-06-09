@@ -138,6 +138,29 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_connect",
+    description:
+      "Surface NON-OBVIOUS, high-leverage connections (Leaps) for the user's repos, drawn from Replen's knowledge graph of their whole portfolio. " +
+      "Unlike replen_match (today's candidate inventory), this finds connections a flat search can't see:\n" +
+      "  - cross-project: a capability the user solved in ONE project that a DIFFERENT, related project lacks (often pointing at a repo they already adopted/ported there)\n" +
+      "  - adjacency: a capability ADJACENT to one they have but genuinely distinct (with the best repo that fills it) — e.g. 'you do computer vision; you don't use satellite-imagery tooling yet'\n" +
+      "  - cross-user: a repo that other people building similar projects kept (adopted/ported), that this user hasn't looked at\n" +
+      "Each leap comes with a `via` line explaining the PATH — relay that, it's what makes it land. " +
+      "Scope to the cwd repo by default; pass repo='' for the whole portfolio. Most useful when the user asks 'what am I missing?' / 'what's worth bringing in?' rather than 'what's new today?'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+        limit: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Max leaps to return. Default 12." },
+      },
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({ repo: z.string().optional(), limit: z.number().int().min(1).max(30).default(12) }).parse(args);
+      const data = await apiGet(cfg, "/api/graph/leaps", { repo: resolveRepo(args, cfg), limit: parsed.limit });
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_state",
     description:
       "Record a user action on a Replen candidate. Call AFTER you've presented writeups via replen_match and the user has chosen what to do with each one. " +
@@ -195,6 +218,9 @@ const TOOLS: Tool[] = [
         oneLine: { type: "string", maxLength: 280, description: "1-sentence summary for the Activity feed." },
         writeup: { type: "string", description: "Optional full reasoning. Up to 16 KB. No user source code." },
         sessionId: { type: "string", description: "Opaque per-Claude-Code-session id to cluster events. Use the same value across all replen_record_triage calls in one session." },
+        matchedFacet: { type: "string", description: "The capability facet this candidate matched (the 'matchedFacet' field from replen_match). Lets Replen learn collisions contextually." },
+        facetModality: { type: "string", description: "Data modality of the matched capability (e.g. 'timeseries', 'image'). Helps learn that a repo fits one modality but not another." },
+        reasonCode: { type: "string", enum: ["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"], description: "Structured reason for the verdict. Use 'modality-collision' / 'task-collision' for word-collisions where the candidate's real domain diverges from the matched capability." },
       },
       required: ["verdict"],
     },
@@ -210,6 +236,9 @@ const TOOLS: Tool[] = [
         oneLine: z.string().max(280).optional(),
         writeup: z.string().max(16 * 1024).optional(),
         sessionId: z.string().max(128).optional(),
+        matchedFacet: z.string().max(120).optional(),
+        facetModality: z.string().max(120).optional(),
+        reasonCode: z.enum(["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"]).optional(),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");
@@ -258,17 +287,39 @@ const TOOLS: Tool[] = [
       "Capabilities are short, GitHub-searchable tech terms for what the project DOES at the tech level (not UI features, " +
       "not its domain). AIM FOR 8-15 AND BE SPECIFIC — specific capabilities match far better than broad ones. Break a " +
       "broad capability into the concrete techniques the code actually uses: not just [\"web scraping\"] but " +
-      "[\"web scraping\",\"headless browser\",\"cloudflare bypass\",\"proxy rotation\",\"session handling\",\"rate limiting\"]; " +
-      "not just [\"trading\"] but [\"crypto exchange\",\"market data\",\"backtesting\",\"technical analysis\",\"order management\"]. " +
-      "DERIVE them from the actual imports/deps and code, not generic guesses. The server merges in dependency-derived " +
-      "capabilities and builds the facet vectors right away. Distinct from replen_set_tags (broad domain labels). " +
+      "[\"web scraping\",\"headless browser\",\"cloudflare bypass\",\"proxy rotation\",\"session handling\",\"rate limiting\"]. " +
+      "STRONGLY PREFERRED: send GROUNDED objects {tag, descriptor, modality} instead of bare strings. The 'descriptor' is " +
+      "one sentence grounding the tag in the ACTUAL CODE — what DATA it operates on, the specific task, key constraints — " +
+      "read from the real source files. This is what prevents word-collisions: \"anomaly detection\" is ambiguous, but " +
+      "{tag:\"anomaly detection\", descriptor:\"rule-based detection over drone telemetry time-series (link-loss, GPS-drop); no ML\", " +
+      "modality:[\"timeseries\"]} is not. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
+      "geospatial, graph, 3d, code, network (use [] if none apply). DERIVE all of it from the imports/deps and code, not " +
+      "guesses. The server merges in dependency-derived capabilities and builds the facet vectors right away. " +
       "Replaces the project's current capability set.",
     inputSchema: {
       type: "object",
       properties: {
         repo: { type: "string", description: "owner/name of the project repo (owner-tolerant)" },
         repoId: { type: "number", description: "Alternative to repo — the project's id" },
-        capabilities: { type: "array", items: { type: "string" }, description: "Short tech-capability terms (1-4 words each). Cleaned + deduped server-side." },
+        report: { type: "string", description: "OPTIONAL grounded project report — your comprehensive code-read write-up (what it does, tech, algos, how/why, architecture, for whom). The richest grounding; stored and weighted highest in Replen's own summarization. Derive it from reading the actual source." },
+        capabilities: {
+          type: "array",
+          description: "Capabilities — PREFER grounded objects {tag, descriptor, modality}; bare strings also accepted.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  tag: { type: "string", description: "Short GitHub-searchable term (1-4 words)" },
+                  descriptor: { type: "string", description: "One grounded sentence: the data it operates on, the task, key constraints — read from the code" },
+                  modality: { type: "array", items: { type: "string" }, description: "From: image, video, timeseries, tabular, text, audio, geospatial, graph, 3d, code, network" },
+                },
+                required: ["tag"],
+              },
+            ],
+          },
+        },
       },
       required: ["capabilities"],
     },
@@ -276,7 +327,15 @@ const TOOLS: Tool[] = [
       const parsed = z.object({
         repo: z.string().optional(),
         repoId: z.number().int().positive().optional(),
-        capabilities: z.array(z.string()).max(40),
+        report: z.string().max(32 * 1024).optional(),
+        capabilities: z.array(z.union([
+          z.string(),
+          z.object({
+            tag: z.string(),
+            descriptor: z.string().optional(),
+            modality: z.array(z.string()).optional(),
+          }),
+        ])).max(40),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");
