@@ -3,7 +3,7 @@ import { runInit } from "./init.js";
 import { setupMcp } from "./mcp-setup.js";
 import { readConfig, configPath } from "./config.js";
 import { runProjectInit } from "./project-init.js";
-import { runCheckNew, runFeed, runHandoff, runProgress, runRun, runSearch, runStarred, runWatch } from "./commands.js";
+import { runCheckNew, runFeed, runHandoff, runProgress, runRun, runSearch, runStarred, runWatch, runAtlas } from "./commands.js";
 
 const HELP = `replen: Smarter AI Development workflows
 
@@ -22,6 +22,10 @@ Usage:
        [--root PATH ...]     and register them with Replen. Run after
                              cloning a new repo, or pass --root to point
                              at a non-conventional layout.
+  npx replen atlas           Write your knowledge graph as an owned,
+                             Obsidian-compatible markdown vault to
+                             ~/.replen/atlas/ (projects, capabilities,
+                             decisions, themes, all cross-linked)
   npx replen logout          Forget saved auth
   npx replen --help          This help
 
@@ -145,6 +149,7 @@ async function main() {
   if (cmd === "search") return runSearch(argv);
   if (cmd === "starred") return runStarred(argv);
   if (cmd === "handoff") return runHandoff(argv);
+  if (cmd === "atlas") return runAtlas(argv);
 
   if (cmd === undefined) {
     // Default: if already signed in, just rerun mcp setup. Otherwise, full flow.

@@ -603,3 +603,31 @@ async function fetchInventoryStatus(
     clearTimeout(timer);
   }
 }
+
+// `replen atlas` — write your knowledge graph as an owned, Obsidian-compatible
+// markdown vault to ~/.replen/atlas/. Fetches the rendered files from the server
+// (one source of truth) and writes them locally; you own and can open them.
+export async function runAtlas(argv: string[]): Promise<void> {
+  const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { homedir } = await import("node:os");
+  const cfg = await loadConfigOrExit();
+  const dir = getFlag(argv, "--out") ?? join(homedir(), ".replen", "atlas");
+  const data = await apiGet<{ count: number; files: Array<{ path: string; content: string }> }>(cfg, "/api/graph/atlas");
+  if (!data.files?.length) {
+    console.log("No Atlas yet — run /replen-onboard and a pipeline run first so the graph has something to map.");
+    return;
+  }
+  // Fresh write: clear the managed subdirs, then write.
+  for (const sub of ["projects", "capabilities", "candidates", "themes"]) {
+    try { rmSync(join(dir, sub), { recursive: true, force: true }); } catch { /* */ }
+  }
+  for (const f of data.files) {
+    const full = join(dir, f.path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, f.content);
+  }
+  if (hasFlag(argv, "--json")) { console.log(JSON.stringify({ dir, count: data.files.length })); return; }
+  console.log(`Atlas written: ${data.files.length} notes → ${dir}`);
+  console.log(`Open ${dir} in Obsidian (or any markdown editor) to explore the graph view of your projects, capabilities, and decisions.`);
+}
