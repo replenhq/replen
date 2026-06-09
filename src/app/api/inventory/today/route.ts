@@ -9,7 +9,7 @@ import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
-import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
+import { parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
 
 // Skill-mode inventory endpoint.
 //
@@ -395,6 +395,13 @@ export async function GET(req: Request) {
       }
     }
   }
+  // Map deps to their canonical GitHub repos (next → vercel/next.js), so the
+  // exclusion catches libraries whose package name ≠ repo name.
+  const knownRepoFullNames = new Set<string>();
+  for (const d of productDeps) {
+    const v = vendorForDep(d);
+    if (v) knownRepoFullNames.add(v.githubRepo.toLowerCase());
+  }
   // An app whose centroid similarity clears this bar is "basically my whole
   // project" — a competitor, not a component. Suppressed unless it leads with a
   // specific capability (facet beats centroid by FACET_LEAD) or is a dep match.
@@ -457,7 +464,8 @@ export async function GET(req: Request) {
   for (const c of eligible) {
     if (productDeps.size > 0 && !isFeedSrc(c.source)) {
       const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
-      if (on && (productDeps.has(on.name.toLowerCase()) || productDeps.has(on.owner.toLowerCase()))) continue; // already a dependency
+      if (on && (productDeps.has(on.name.toLowerCase()) || productDeps.has(on.owner.toLowerCase())
+        || knownRepoFullNames.has(`${on.owner}/${on.name}`.toLowerCase()))) continue; // already a dependency
     }
     const reasons: string[] = [];
     let relevance = 0;
@@ -815,7 +823,7 @@ export async function GET(req: Request) {
 
   let catalogueOut: OutEntry[] = [];
   if (scopedProject && applyFloor && projectFacets.length >= MIN_FACETS_FOR_CATALOGUE) {
-    const alreadyShown = new Set<string>();
+    const alreadyShown = new Set<string>(knownRepoFullNames);
     for (const o of [...ownOut, ...feedOut, ...promotedOut]) if (o.repo) alreadyShown.add(o.repo.toLowerCase());
     if (scopedProject.githubFullName) alreadyShown.add(scopedProject.githubFullName.toLowerCase());
     const matches = await catalogueMatches({

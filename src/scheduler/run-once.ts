@@ -656,6 +656,7 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
       keyCapabilities: summary?.keyCapabilities,
       readmeMd: p.readmeMd,
       claudeMd: p.claudeMd,
+      projectName: p.name ?? p.slug,
     });
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {

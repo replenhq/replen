@@ -24,10 +24,11 @@ export function facetInputsFor(input: {
   keyCapabilities?: string[] | null;
   readmeMd?: string | null;
   claudeMd?: string | null;
+  projectName?: string | null;
 }): { hash: string; inputs: FacetInput[] } {
   const facetSource = (input.capabilityTags?.length ? input.capabilityTags : input.keyCapabilities) ?? [];
   const capLabels = selectFacetLabels(facetSource);
-  const sections = extractDocSections(input.readmeMd ?? null, input.claudeMd ?? null);
+  const sections = extractDocSections(input.readmeMd ?? null, input.claudeMd ?? null, input.projectName ?? null);
 
   const inputs: FacetInput[] = [];
   const seen = new Set<string>();

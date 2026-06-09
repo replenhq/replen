@@ -92,7 +92,7 @@ export async function POST(req: Request) {
   summary.capabilityTags = merged;
 
   // Build facet vectors now (capabilities + any doc sections). Embeddings only.
-  const { hash, inputs } = facetInputsFor({ capabilityTags: merged, readmeMd: project.readmeMd, claudeMd: project.claudeMd });
+  const { hash, inputs } = facetInputsFor({ capabilityTags: merged, readmeMd: project.readmeMd, claudeMd: project.claudeMd, projectName: project.name ?? project.slug });
   const facets = inputs.length > 0 ? await embedFacets(inputs) : [];
 
   await db.update(schema.projectProfiles).set({

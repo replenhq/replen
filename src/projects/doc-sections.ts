@@ -25,7 +25,7 @@ const MAX_SECTION_CHARS = 7000;
 // case-insensitively against the (cleaned) heading; a leading-word match is
 // enough. Includes structural headings (repo layout, status, tags) that embed
 // file paths or meta rather than capabilities.
-const BOILERPLATE = /^(install\b|installation|usage|how to use|getting started|quick ?start|setup|set up|prerequisites?|requirements?|licen[sc]e|contributing|contribution|table of contents|contents|development|developing|testing|tests?|deployment|deploy(ing)?|building|build\b|ci\/cd|^ci$|faq|frequently asked|change ?log|roadmap|acknowledge?ments?|credits|authors?|maintainers?|contact|support|getting help|sponsors?|donate|funding|stars?|badges?|disclaimer|warranty|security policy|code of conduct|repo layout|repository layout|project structure|directory structure|file structure|folder structure|layout|status|replen tags|tags)/i;
+const BOILERPLATE = /^(install\b|installation|usage|how to use|getting started|quick ?start|setup|set up|prerequisites?|requirements?|licen[sc]e|contributing|contribution|table of contents|contents|development|developing|testing|tests?|deployment|deploy(ing)?|building|build\b|ci\/cd|^ci$|faq|frequently asked|change ?log|roadmap|acknowledge?ments?|credits|authors?|maintainers?|contact|support|getting help|sponsors?|donate|funding|stars?|badges?|disclaimer|warranty|security policy|code of conduct|repo layout|repository layout|project structure|directory structure|file structure|folder structure|layout|status|replen tags|tags|overview|introduction|intro\b|about\b|summary|features?|configuration|config\b|commands?|environments?|env\b)/i;
 
 // Headings that carry NEGATIVE signal — what the project deliberately does NOT
 // do. Embedding these as positive probes would surface exactly what the user
@@ -78,12 +78,18 @@ function cleanHeading(h: string): string {
     .slice(0, 60);
 }
 
-function sectionsFromDoc(md: string | null, preambleLabel: string): DocSection[] {
+const norm = (s: string) => s.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+
+function sectionsFromDoc(md: string | null, preambleLabel: string, dropNames: Set<string>): DocSection[] {
   if (!md || !md.trim()) return [];
   const out: DocSection[] = [];
   for (const raw of parseMarkdownSections(md)) {
     const label = raw.heading ? cleanHeading(raw.heading) : preambleLabel;
     if (!label) continue;
+    // The H1 title is usually the project name + a description blob — it behaves
+    // like a mini-centroid and matches loosely. Drop it (the real centroid
+    // already covers the whole project).
+    if (dropNames.has(norm(label))) continue;
     if (BOILERPLATE.test(label) || NEGATIVE.test(label) || META_TOOLING.test(label)) continue;
     const body = raw.body.trim();
     if (body.length < MIN_BODY_CHARS) continue;
@@ -103,10 +109,18 @@ function sectionsFromDoc(md: string | null, preambleLabel: string): DocSection[]
  * (case-insensitive, first-seen wins) and capped. Preamble (text before the
  * first heading — usually the project description) is kept as "Overview".
  */
-export function extractDocSections(readmeMd: string | null, claudeMd: string | null): DocSection[] {
+export function extractDocSections(readmeMd: string | null, claudeMd: string | null, projectName?: string | null): DocSection[] {
+  // Labels matching the project's own name/slug are the title blob — drop them.
+  const dropNames = new Set<string>();
+  if (projectName) {
+    const n = norm(projectName);
+    dropNames.add(n);
+    // also without a trailing role suffix (acme-web → acme)
+    dropNames.add(n.replace(/\s+(web|app|api|ui|frontend|backend|server|client|cli|core|service|mobile)$/i, "").trim());
+  }
   const all = [
-    ...sectionsFromDoc(claudeMd, "Overview"),
-    ...sectionsFromDoc(readmeMd, "Overview"),
+    ...sectionsFromDoc(claudeMd, "Overview", dropNames),
+    ...sectionsFromDoc(readmeMd, "Overview", dropNames),
   ];
   const seen = new Set<string>();
   const out: DocSection[] = [];
