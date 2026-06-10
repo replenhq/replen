@@ -11,40 +11,9 @@
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/client";
+import { detectTokens } from "../lib/detect-tokens";
 
 type Row = { category: string; subCategory: string; vendor: string; tool: string; pricingUrl: string; notes: string | null };
-
-// Words too generic to identify a tool in a user's deps/tags.
-const GENERIC = new Set([
-  "pricing", "hub", "page", "cloud", "platform", "api", "apis", "developer", "developers",
-  "tools", "tool", "service", "services", "suite", "app", "apps", "data", "web", "labs",
-  "inc", "the", "and", "for", "pro", "plus", "studio", "stack", "open", "source",
-  "manager", "management", "security", "analytics", "storage", "hosting", "search",
-  "email", "payments", "billing", "amazon", "google", "microsoft", "core", "edge",
-]);
-
-// Vendor-level aliases users actually have in tags/deps.
-const ALIASES: Record<string, string[]> = {
-  "amazon web services": ["aws"],
-  "google cloud": ["gcp", "google-cloud"],
-  "microsoft azure": ["azure"],
-  "atlassian": ["jira", "bitbucket", "confluence"],
-};
-
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-
-function detectTokens(vendor: string, tool: string): string[] {
-  const out = new Set<string>();
-  const nv = norm(vendor);
-  const nt = norm(tool);
-  if (nv) out.add(nv);
-  if (nt) out.add(nt);
-  for (const w of [...nv.split(" "), ...nt.split(" ")]) {
-    if (w.length >= 3 && !GENERIC.has(w)) out.add(w);
-  }
-  for (const a of ALIASES[nv] ?? []) out.add(a);
-  return [...out];
-}
 
 async function main() {
   const path = process.argv[2] ?? "data/pricing-tracker.json";

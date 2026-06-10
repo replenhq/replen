@@ -400,6 +400,20 @@
       "when": 1779888205651,
       "tag": "0056_pricing_watch",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1779891805651,
+      "tag": "0057_announcement_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1779895405651,
+      "tag": "0058_announcement_events",
+      "breakpoints": true
     }
   ]
 }

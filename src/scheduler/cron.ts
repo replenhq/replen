@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { runPipeline } from "./run-once";
 import { archiveOldHiddenForAllUsers } from "./aging";
 import { runPricingScrape } from "../pricing/scrape";
+import { runAnnouncementScrape } from "../announcements/scrape";
 
 const schedule = process.env.DIGEST_CRON ?? "0 6 * * *"; // 06:00 UTC daily
 // Aging policy runs once a night, 03:30 UTC - well before the morning pipeline
@@ -12,8 +13,11 @@ const agingSchedule = process.env.DIGEST_AGING_CRON ?? "30 3 * * *";
 // REPLEN_PRICING_INTERVAL_HOURS (66h) has elapsed — so every tool is checked
 // roughly every ~3 days, staggered, without one big thundering run.
 const pricingSchedule = process.env.REPLEN_PRICING_CRON ?? "15 4 * * *";
+// Announcement poller: daily batch; per-source cadence is priority-staggered
+// inside the runner (P0/P1 daily, P2 every 2 days, P3 every 4).
+const announceSchedule = process.env.REPLEN_ANNOUNCE_CRON ?? "0 5 * * *";
 
-console.log(`[cron] scheduled: pipeline=${schedule}  aging=${agingSchedule}  pricing=${pricingSchedule}`);
+console.log(`[cron] scheduled: pipeline=${schedule}  aging=${agingSchedule}  pricing=${pricingSchedule}  announce=${announceSchedule}`);
 
 cron.schedule(schedule, async () => {
   console.log("[cron] tick - running pipeline");
@@ -40,6 +44,15 @@ cron.schedule(pricingSchedule, async () => {
     await runPricingScrape();
   } catch (e) {
     console.error("[cron] pricing scrape error", e);
+  }
+});
+
+cron.schedule(announceSchedule, async () => {
+  console.log("[cron] tick - announcement poll");
+  try {
+    await runAnnouncementScrape();
+  } catch (e) {
+    console.error("[cron] announcement poll error", e);
   }
 });
 

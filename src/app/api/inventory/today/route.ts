@@ -15,6 +15,7 @@ import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
 import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
 import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
+import { announcementPs } from "@/announcements/surface";
 import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
@@ -1238,21 +1239,38 @@ export async function GET(req: Request) {
     }
   }
 
-  // Pricing watch P.s. — one short line when a tool this product actually
-  // uses (deps + tags) changed its pricing. Once per (user, change), at most
-  // one per response, appended after whatever the footnote already says (or
-  // standing alone on a quiet day). Never a candidate, never a writeup.
+  // Awareness line — pricing watch + announcement layer, AT MOST ONE per
+  // response, each shown once per user ever. Severity decides placement and
+  // priority: a Critical announcement (exploited CVE, breach, malicious
+  // package affecting a tool this product uses) LEADS the footnote; otherwise
+  // a pricing change wins (concrete, actionable), then any other qualifying
+  // announcement as a P.s. Both match via the same deps+tags token contract,
+  // and announcements additionally pass the four-questions gate server-side.
   if (scopedProject) {
     try {
-      const ps = await pricingPs(auth.userId, pricingUserTokens(productDeps, userTagSet));
-      if (ps) {
-        displayText = displayText ? `${displayText}\n\nP.s. ${ps.line}` : `P.s. ${ps.line}`;
+      const userTokens = pricingUserTokens(productDeps, userTagSet);
+      const [pricing, announcement] = await Promise.all([
+        pricingPs(auth.userId, userTokens),
+        announcementPs(auth.userId, userTokens),
+      ]);
+      if (announcement?.critical) {
+        displayText = displayText ? `${announcement.line}\n\n${displayText}` : announcement.line;
+        await db.insert(schema.announcementSurfaces)
+          .values({ userId: auth.userId, eventId: announcement.eventId, surfacedAt: new Date() })
+          .onConflictDoNothing();
+      } else if (pricing) {
+        displayText = displayText ? `${displayText}\n\nP.s. ${pricing.line}` : `P.s. ${pricing.line}`;
         await db.insert(schema.pricingSurfaces)
-          .values({ userId: auth.userId, changeId: ps.changeId, surfacedAt: new Date() })
+          .values({ userId: auth.userId, changeId: pricing.changeId, surfacedAt: new Date() })
+          .onConflictDoNothing();
+      } else if (announcement) {
+        displayText = displayText ? `${displayText}\n\nP.s. ${announcement.line}` : `P.s. ${announcement.line}`;
+        await db.insert(schema.announcementSurfaces)
+          .values({ userId: auth.userId, eventId: announcement.eventId, surfacedAt: new Date() })
           .onConflictDoNothing();
       }
     } catch (e) {
-      console.warn("[inventory] pricing P.s. failed (non-fatal):", e);
+      console.warn("[inventory] awareness line failed (non-fatal):", e);
     }
   }
 

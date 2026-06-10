@@ -1034,6 +1034,132 @@ export const pricingSurfaces = sqliteTable(
   }),
 );
 
+// ============================================================================
+// Announcement sources — the curated watch catalogue behind the announcement
+// layer (Phase 1 of the developer-announcement tracker). ~1k sources across
+// github_releases / pricing_page / security_page / status_page / changelog /
+// rss+web, each tagged with its likely event types, priority, and the four
+// impact questions (will_break_app / security_issue / bill_increase /
+// upgrade_needed). Phase 1 consumes two slices: pricing_page rows merge into
+// pricing_tools, and github_releases rows extend the stack-watch vendor
+// registry (DB-backed, detect-token matched against user deps + tags).
+// Polling for the remaining source types is Phase 2.
+// ============================================================================
+
+export const announcementSources = sqliteTable(
+  "announcement_sources",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sourceId: text("source_id").notNull(), // stable "SRC-0001" key from the seed
+    vendor: text("vendor").notNull(),
+    product: text("product").notNull(),
+    category: text("category"),
+    subCategory: text("sub_category"),
+    sourceUrl: text("source_url").notNull(),
+    // github_releases | github_advisories | pricing_page | security_page |
+    // status_page | changelog | rss+web | web | web+api | git_repo | api+web | api_docs
+    sourceType: text("source_type").notNull(),
+    eventTypes: text("event_types"), // JSON string[] from the 14-type taxonomy
+    priority: text("priority").notNull().default("P2"), // P0..P3
+    pollFrequency: text("poll_frequency"),
+    parserStrategy: text("parser_strategy"),
+    ecosystems: text("ecosystems"),
+    keywords: text("keywords"),
+    // JSON string[] — same matching contract as pricing_tools.detect_tokens.
+    detectTokens: text("detect_tokens"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    urlConfidence: text("url_confidence"),
+    seedStatus: text("seed_status"),
+    // The four product questions this source's events tend to answer.
+    willBreakApp: integer("will_break_app", { mode: "boolean" }).notNull().default(false),
+    securityIssue: integer("security_issue", { mode: "boolean" }).notNull().default(false),
+    billIncrease: integer("bill_increase", { mode: "boolean" }).notNull().default(false),
+    upgradeNeeded: integer("upgrade_needed", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes"),
+    lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
+    // Source health (the pack's source_checks concept, lean): consecutive
+    // failures auto-retire a dead URL into seed_status='needs_review'.
+    lastCheckStatus: text("last_check_status"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqSourceId: uniqueIndex("uniq_announcement_source_id").on(t.sourceId),
+    idxTypeActive: index("idx_announcement_sources_type").on(t.sourceType, t.active),
+  }),
+);
+
+// Last fetched text per HTML announcement source — the diff baseline. Feed
+// sources don't need it (items are naturally keyed); HTML changelogs and
+// security pages diff line-sets between fetches.
+export const announcementPageCache = sqliteTable("announcement_page_cache", {
+  sourcePk: integer("source_pk").primaryKey().references(() => announcementSources.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  hash: text("hash").notNull(),
+  fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+});
+
+// One row per distinct announcement item seen at a source (a feed entry, or a
+// batch of new lines on an HTML page). Append-only; raw_hash dedupes.
+export const rawAnnouncements = sqliteTable(
+  "raw_announcements",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sourcePk: integer("source_pk").notNull().references(() => announcementSources.id, { onDelete: "cascade" }),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    publishedAt: integer("published_at", { mode: "timestamp" }),
+    fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+    rawHash: text("raw_hash").notNull(),
+  },
+  (t) => ({
+    uniqRaw: uniqueIndex("uniq_raw_announcement").on(t.sourcePk, t.rawHash),
+    idxFetched: index("idx_raw_announcements_fetched").on(t.fetchedAt),
+  }),
+);
+
+// A raw announcement the keyword classifier judged to be one of the 14 event
+// types, with severity and the four impact answers. This is what surfaces.
+export const classifiedEvents = sqliteTable(
+  "classified_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    rawId: integer("raw_id").references(() => rawAnnouncements.id, { onDelete: "cascade" }),
+    sourcePk: integer("source_pk").notNull().references(() => announcementSources.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    severity: text("severity").notNull(), // Low | Medium | High | Critical
+    title: text("title").notNull(),
+    summary: text("summary"),
+    url: text("url"),
+    willBreakApp: integer("will_break_app", { mode: "boolean" }).notNull().default(false),
+    securityIssue: integer("security_issue", { mode: "boolean" }).notNull().default(false),
+    billIncrease: integer("bill_increase", { mode: "boolean" }).notNull().default(false),
+    upgradeNeeded: integer("upgrade_needed", { mode: "boolean" }).notNull().default(false),
+    detectedAt: integer("detected_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxDetected: index("idx_classified_events_detected").on(t.detectedAt),
+    idxType: index("idx_classified_events_type").on(t.eventType, t.severity),
+  }),
+);
+
+// One footnote mention per (user, event), ever — same contract as
+// pricing_surfaces.
+export const announcementSurfaces = sqliteTable(
+  "announcement_surfaces",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    eventId: integer("event_id").notNull().references(() => classifiedEvents.id, { onDelete: "cascade" }),
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUserEvent: uniqueIndex("uniq_announcement_surface").on(t.userId, t.eventId),
+  }),
+);
+
 // Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
 // so the calm cadence holds: at most one leap per project per
 // REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.

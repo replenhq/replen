@@ -18,6 +18,7 @@ import { db, schema } from "../../db/client";
 import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../../analyzer/run-context";
 import { vendorsForDeps, parseTechSummaryDeps, type StackVendor } from "./registry";
+import { userToolTokens } from "../../lib/detect-tokens";
 
 const RELEASE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_STACK_WINDOW_DAYS ?? "90", 10) || 90);
 // Default to the single latest STABLE release per vendor — surfacing 3 point
@@ -30,6 +31,9 @@ const INCLUDE_PRERELEASE = process.env.REPLEN_STACK_INCLUDE_PRERELEASE === "1";
 // across vendors, so we also reject tags with a pre-release marker after the
 // version (e.g. v16.3.0-canary.44, 2.0.0-beta.1, v5-rc.0).
 const PRERELEASE_TAG = /-(canary|nightly|alpha|beta|rc|pre|preview|experimental|snapshot|dev|next|insiders?)\b/i;
+// Cap on DB-backed vendors (announcement_sources github_releases rows) added on
+// top of the static registry, per user per run — bounds GitHub API usage.
+const MAX_ANNOUNCEMENT_VENDORS = Math.max(0, parseInt(process.env.REPLEN_STACK_ANN_MAX ?? "25", 10) || 25);
 
 type GhRelease = {
   id: number;
@@ -52,6 +56,7 @@ export const stackWatchFetcher: Fetcher = {
       .select({
         slug: schema.projectProfiles.slug,
         techSummary: schema.projectProfiles.techSummary,
+        tags: schema.projectProfiles.tags,
       })
       .from(schema.projectProfiles)
       .where(and(
@@ -62,10 +67,58 @@ export const stackWatchFetcher: Fetcher = {
 
     // Union the vendors used across all of the user's projects.
     const vendors = new Map<string, StackVendor>();
+    const allDeps = new Set<string>();
+    const allTags = new Set<string>();
     for (const p of projects) {
-      for (const v of vendorsForDeps(parseTechSummaryDeps(p.techSummary))) {
+      const deps = parseTechSummaryDeps(p.techSummary);
+      for (const d of deps) allDeps.add(d);
+      try {
+        const t = JSON.parse(p.tags ?? "[]");
+        if (Array.isArray(t)) for (const tag of t) if (typeof tag === "string") allTags.add(tag);
+      } catch { /* malformed tags — skip */ }
+      for (const v of vendorsForDeps(deps)) {
         vendors.set(v.id, v);
       }
+    }
+
+    // DB-backed vendors from the announcement source catalogue: github_releases
+    // rows whose detect tokens hit the user's deps or tags. Platform-level
+    // repos (deno, bun, supabase/supabase, redis/redis) the static registry
+    // doesn't carry. Tokens that came from a DEP keep the strong stake signal
+    // (the route intersects candidate topics with project deps); tag-matched
+    // sources flow through normal relevance filtering instead.
+    if (MAX_ANNOUNCEMENT_VENDORS > 0 && (allDeps.size > 0 || allTags.size > 0)) {
+      const userTokens = userToolTokens(allDeps, allTags);
+      const knownRepos = new Set([...vendors.values()].map((v) => v.githubRepo.toLowerCase()));
+      const annSources = await db
+        .select()
+        .from(schema.announcementSources)
+        .where(and(
+          eq(schema.announcementSources.sourceType, "github_releases"),
+          eq(schema.announcementSources.active, true),
+        ));
+      let added = 0;
+      for (const s of annSources) {
+        if (added >= MAX_ANNOUNCEMENT_VENDORS) break;
+        const gh = s.sourceUrl.match(/github\.com\/([^/]+)\/([^/?#]+)/i);
+        if (!gh) continue;
+        const repo = `${gh[1]}/${gh[2].replace(/\.git$/i, "")}`;
+        if (knownRepos.has(repo.toLowerCase())) continue;
+        let toks: string[] = [];
+        try { toks = JSON.parse(s.detectTokens ?? "[]"); } catch { /* */ }
+        const matched = toks.filter((t) => userTokens.has(t));
+        if (!matched.length) continue;
+        knownRepos.add(repo.toLowerCase());
+        added++;
+        vendors.set(`ann-${s.sourceId}`, {
+          id: `ann-${s.sourceId}`,
+          name: s.product.replace(/\s+releases$/i, "") || s.vendor,
+          depNames: matched,
+          githubRepo: repo,
+          ecosystem: "multi",
+        });
+      }
+      if (added > 0) console.log(`[stack-watch] user=${userId} +${added} announcement-source vendor(s) matched by deps/tags`);
     }
     if (vendors.size === 0) return [];
 

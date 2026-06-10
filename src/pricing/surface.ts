@@ -6,24 +6,14 @@
 
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
+import { userToolTokens } from "../lib/detect-tokens";
 
 const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_PRICING_SURFACE_DAYS ?? "14", 10) || 14);
 
 // Build the user's "tools I use" token set from product deps + project tags.
-// Scoped deps catch SDK-installed tools (supabase, stripe, sentry); tags catch
-// platform-level ones the manifest can't see (aws, vercel, datadog).
-export function pricingUserTokens(productDeps: Set<string>, tags: Set<string>): Set<string> {
-  const tokens = new Set<string>();
-  for (const t of tags) tokens.add(t.toLowerCase());
-  for (const d of productDeps) {
-    const dl = d.toLowerCase();
-    tokens.add(dl);
-    const scoped = dl.match(/^@([^/]+)\//);
-    if (scoped) tokens.add(scoped[1]);
-    for (const part of dl.split(/[^a-z0-9]+/)) if (part.length >= 3) tokens.add(part);
-  }
-  return tokens;
-}
+// Shared with the announcement sources (src/lib/detect-tokens.ts).
+export const pricingUserTokens = (productDeps: Set<string>, tags: Set<string>): Set<string> =>
+  userToolTokens(productDeps, tags);
 
 export type PricingPs = { changeId: number; line: string };
 

@@ -36,7 +36,7 @@ echo "[2/6] rsyncing repo (excluding heavy + secret paths)"
 rsync -az --delete \
   --exclude node_modules --exclude .next --exclude data --exclude .git \
   --exclude 'mcp/node_modules' --exclude 'mcp/dist' \
-  --exclude 'projects-mirror' --exclude backups \
+  --exclude 'projects-mirror' --exclude backups --exclude '.venv' \
   --exclude '*.log' --exclude '.env' \
   ./ "$REMOTE:$REMOTE_DIR/"
 
