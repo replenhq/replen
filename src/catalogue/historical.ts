@@ -19,6 +19,7 @@ import {
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { looksLikeHype } from "./derive-capabilities";
 import { classifyRepos, KEEP_KINDS, type RepoKind } from "./classify";
+import { type Modality } from "../projects/modality";
 import { readRunOrEnv } from "../analyzer/run-context";
 
 // Repo→capability-label cosine runs lower than repo→repo, so 0.45 is the right
@@ -83,21 +84,21 @@ export async function ingestHistorical(opts: {
   let ingested = 0, tagged = 0, dropped = 0;
   for (let i = 0; i < hits.length; i += CHUNK) {
     const slice = hits.slice(i, i + CHUNK);
-    const kinds = await classifyRepos(slice.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
+    const cls = await classifyRepos(slice.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
     const vecs = await embedBatch(slice.map((h) =>
       candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language }),
     ));
     for (let j = 0; j < slice.length; j++) {
       const h = slice[j];
       // Library-vs-hype: drop viral experiments + curated content.
-      if (kinds[j] !== "unknown" && !KEEP_KINDS.has(kinds[j])) { dropped++; continue; }
+      if (cls[j].kind !== "unknown" && !KEEP_KINDS.has(cls[j].kind)) { dropped++; continue; }
       const vec = vecs[j]?.vector ?? null;
       const caps = vec ? tagCapabilities(vec, capVecs) : [];
       // Noise gate: a trending repo that matches no known capability is most
       // likely hype, a personal project, or a non-library — skip it.
       if (requireTag && caps.length === 0) { dropped++; continue; }
       if (caps.length > 0) tagged++;
-      await upsert(h, caps, vec, kinds[j]);
+      await upsert(h, caps, vec, cls[j].kind, cls[j].modality);
       ingested++;
     }
   }
@@ -115,8 +116,9 @@ function tagCapabilities(repoVec: number[], capVecs: Array<{ label: string; vec:
   return scored.slice(0, MAX_TAGS).map((s) => s.label);
 }
 
-async function upsert(h: Hit, caps: string[], vector: number[] | null, kind: RepoKind): Promise<void> {
+async function upsert(h: Hit, caps: string[], vector: number[] | null, kind: RepoKind, modality: Modality[]): Promise<void> {
   const now = new Date();
+  const modalityJson = modality.length ? JSON.stringify(modality) : null;
   const existing = await db.select().from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
   if (existing) {
     let merged: string[] = [];
@@ -127,6 +129,7 @@ async function upsert(h: Hit, caps: string[], vector: number[] | null, kind: Rep
       description: h.description, url: h.url, topics: JSON.stringify(h.topics), stars: h.stars,
       primaryLanguage: h.language, repoShape: h.shape, pushedAt: h.pushedAt, createdAt: h.createdAt,
       kind: kind === "unknown" ? existing.kind : kind,
+      modality: modalityJson ?? existing.modality,
       embedding: vector ? serialiseEmbedding(vector) : existing.embedding,
       capabilities: JSON.stringify(merged.slice(0, 20)), lastSeen: now, updatedAt: now,
     }).where(eq(schema.catalogueRepos.id, existing.id));
@@ -134,7 +137,8 @@ async function upsert(h: Hit, caps: string[], vector: number[] | null, kind: Rep
     await db.insert(schema.catalogueRepos).values({
       fullName: h.fullName, owner: h.owner, name: h.name, description: h.description, url: h.url,
       topics: JSON.stringify(h.topics), stars: h.stars, primaryLanguage: h.language, repoShape: h.shape,
-      license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, embedding: vector ? serialiseEmbedding(vector) : null,
+      license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, modality: modalityJson,
+      embedding: vector ? serialiseEmbedding(vector) : null,
       capabilities: JSON.stringify(caps), firstSeen: now, lastSeen: now, updatedAt: now,
     });
   }

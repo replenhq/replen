@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../mcp/_auth";
+import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 
 // Skill-mode state endpoint. The skill posts user-action state here
 // when the user stars / hides / opens a handoff PR. This is the ONLY
@@ -65,13 +66,9 @@ export async function POST(req: Request) {
     repoId = r.id;
   } else if (typeof body.repo === "string" && /^[^/]+\/[^/]+$/.test(body.repo)) {
     const [owner, name] = body.repo.split("/");
-    const r = await db
-      .select()
-      .from(schema.repos)
-      .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
-      .get();
-    if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404, headers: corsHeaders });
-    repoId = r.id;
+    // Resolve-or-create: star/hide on a catalogue candidate (repoId: null) must
+    // persist a repo row, not 404. See src/lib/resolve-repo.ts.
+    repoId = await resolveOrCreateRepoId(owner, name);
   } else {
     return NextResponse.json(
       { error: "must specify repoId (number) or repo ('owner/name')" },

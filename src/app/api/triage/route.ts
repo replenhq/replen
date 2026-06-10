@@ -3,6 +3,7 @@ import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../mcp/_auth";
 import { recomputeRepoQuality } from "@/lib/repo-quality";
+import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 
 // Append-only triage-decision log. The /replen-match skill posts here
 // after each per-candidate verdict so the Activity feed on / can show
@@ -38,10 +39,16 @@ type TriageBody = {
   oneLine?: string;
   writeup?: string;
   sessionId?: string;
+  // Contextual learning signal (L4): the capability facet this candidate matched,
+  // its modality, and a structured reason for the verdict.
+  matchedFacet?: string;
+  facetModality?: string;
+  reasonCode?: string;
 };
 
 const VALID_VERDICTS = ["adopt", "port", "skip", "defer"] as const;
 const VALID_EFFORTS = ["quick", "moderate", "deep"] as const;
+const VALID_REASONS = ["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"] as const;
 
 const MAX_WRITEUP_BYTES = 16 * 1024; // 16 KB ceiling; agents shouldn't dump megabytes.
 const MAX_ONELINE_CHARS = 280;
@@ -71,6 +78,12 @@ export async function POST(req: Request) {
       { status: 400, headers: corsHeaders },
     );
   }
+  if (body.reasonCode && !VALID_REASONS.includes(body.reasonCode as typeof VALID_REASONS[number])) {
+    return NextResponse.json(
+      { error: `reasonCode must be one of: ${VALID_REASONS.join(", ")}` },
+      { status: 400, headers: corsHeaders },
+    );
+  }
   if (typeof body.score === "number" && (body.score < 0 || body.score > 100)) {
     return NextResponse.json({ error: "score must be 0-100" }, { status: 400, headers: corsHeaders });
   }
@@ -95,13 +108,9 @@ export async function POST(req: Request) {
     repoId = r.id;
   } else if (typeof body.repo === "string" && /^[^/]+\/[^/]+$/.test(body.repo)) {
     const [owner, name] = body.repo.split("/");
-    const r = await db
-      .select()
-      .from(schema.repos)
-      .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
-      .get();
-    if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404, headers: corsHeaders });
-    repoId = r.id;
+    // Resolve-or-create: most candidates are catalogue entries (repoId: null),
+    // not persisted repo rows. See src/lib/resolve-repo.ts.
+    repoId = await resolveOrCreateRepoId(owner, name);
   } else {
     return NextResponse.json(
       { error: "must specify repoId (number) or repo ('owner/name')" },
@@ -142,6 +151,9 @@ export async function POST(req: Request) {
       oneLine: body.oneLine ?? null,
       writeup: body.writeup ?? null,
       sessionId: body.sessionId ?? null,
+      matchedFacet: typeof body.matchedFacet === "string" ? body.matchedFacet.slice(0, 120) : null,
+      facetModality: typeof body.facetModality === "string" ? body.facetModality.slice(0, 120) : null,
+      reasonCode: body.reasonCode ?? null,
       createdAt: new Date(),
     })
     .returning({ id: schema.triageEvents.id })

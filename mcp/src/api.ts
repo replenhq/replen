@@ -2,6 +2,17 @@
 // server can identify the user. Errors bubble as Error so MCP tool wrappers
 // can translate them to readable messages.
 
+import { createRequire } from "node:module";
+
+// This package's version, sent on every request as `x-replen-client` so the
+// server can tell a stale npx-cached build to refresh. Resolved from our own
+// package.json (always shipped); falls back to "0.0.0" if unreadable.
+let MCP_VERSION = "0.0.0";
+try {
+  MCP_VERSION = (createRequire(import.meta.url)("../package.json") as { version?: string }).version ?? "0.0.0";
+} catch { /* keep default */ }
+const CLIENT_ID = `mcp@${MCP_VERSION}`;
+
 export type ApiConfig = {
   baseUrl: string;
   token: string;
@@ -18,7 +29,7 @@ export async function apiGet<T = unknown>(cfg: ApiConfig, path: string, query?: 
       if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
     }
   }
-  const res = await fetch(url, { headers: { "x-digest-token": cfg.token, accept: "application/json" } });
+  const res = await fetch(url, { headers: { "x-digest-token": cfg.token, "x-replen-client": CLIENT_ID, accept: "application/json" } });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return res.json() as Promise<T>;
 }
@@ -26,7 +37,7 @@ export async function apiGet<T = unknown>(cfg: ApiConfig, path: string, query?: 
 export async function apiPost<T = unknown>(cfg: ApiConfig, path: string, body: unknown): Promise<T> {
   const res = await fetch(cfg.baseUrl + path, {
     method: "POST",
-    headers: { "x-digest-token": cfg.token, "content-type": "application/json", accept: "application/json" },
+    headers: { "x-digest-token": cfg.token, "x-replen-client": CLIENT_ID, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}: ${(await res.text()).slice(0, 200)}`);

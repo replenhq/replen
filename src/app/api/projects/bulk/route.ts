@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 
 // POST /api/projects/bulk
@@ -54,6 +54,19 @@ function normaliseTag(t: unknown): string | null {
   return trimmed;
 }
 
+// Scaffold/template default names that aren't real project names. When a
+// repo's package.json (or the CLI) hands us one of these, it's noise — four
+// repos cloned from the same starter all call themselves "nextn". Fall back
+// to the GitHub repo name instead so the display label is the actual repo.
+const GENERIC_NAMES = new Set([
+  "nextn", "next-app", "create-next-app", "nextjs", "next", "my-app", "myapp",
+  "my-project", "myproject", "app", "web", "webapp", "frontend", "backend",
+  "client", "server", "project", "vite-project", "vite-app", "react-app",
+  "turborepo", "my-turborepo", "monorepo", "example", "template", "starter",
+  "boilerplate", "hello-world", "test", "demo", "untitled",
+]);
+const isGenericName = (n: string) => GENERIC_NAMES.has(n.trim().toLowerCase());
+
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
@@ -100,25 +113,47 @@ export async function POST(req: Request) {
     cleaned.push({
       slug,
       githubFullName: gfn,
-      name: (typeof p.name === "string" && p.name.trim().length > 0 ? p.name.trim() : slug).slice(0, 80),
+      name: (() => {
+        const raw = typeof p.name === "string" ? p.name.trim() : "";
+        // Real package.json name wins; a generic scaffold name or empty falls
+        // back to the GitHub repo name (last path segment of owner/name).
+        if (raw.length > 0 && !isGenericName(raw)) return raw.slice(0, 80);
+        return (gfn.split("/").pop() || slug).slice(0, 80);
+      })(),
       tags,
       primaryLanguage: lang,
     });
   }
 
-  // One round-trip query for existing rows; we know the userId is auth'd.
-  const slugs = cleaned.map((c) => c.slug);
+  // Load all of this user's existing rows once. Identity is
+  // github_full_name (stable across folder/org renames); slug is a
+  // mutable display label. Matching on gfn — not slug — is what stops a
+  // renamed folder or a nsokin→nsokin org rename from minting a fresh
+  // slug and inserting a duplicate row.
   const existing = await db
     .select({
       id: schema.projectProfiles.id,
       slug: schema.projectProfiles.slug,
+      githubFullName: schema.projectProfiles.githubFullName,
     })
     .from(schema.projectProfiles)
-    .where(and(
-      eq(schema.projectProfiles.userId, auth.userId),
-      inArray(schema.projectProfiles.slug, slugs),
-    ));
-  const existingBySlug = new Map(existing.map((r) => [r.slug, r.id]));
+    .where(eq(schema.projectProfiles.userId, auth.userId));
+
+  const gfnKey = (g: string | null | undefined) => (g ?? "").trim().toLowerCase();
+  const byGfn = new Map<string, { id: number; slug: string }>();
+  const bySlug = new Map<string, { id: number; gfn: string | null }>();
+  for (const r of existing) {
+    if (r.githubFullName) byGfn.set(gfnKey(r.githubFullName), { id: r.id, slug: r.slug });
+    bySlug.set(r.slug, { id: r.id, gfn: r.githubFullName ?? null });
+  }
+  // Pick a slug that won't violate uniq_profile_user_slug as we rename
+  // rows / insert within this batch (bySlug is kept current below).
+  const freeSlug = (want: string, owner: string, selfId: number | null): string => {
+    const taken = (s: string) => { const row = bySlug.get(s); return !!row && row.id !== selfId; };
+    if (!taken(want)) return want;
+    const suffixed = `${want}-${owner}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+    return taken(suffixed) ? `${want}-${selfId ?? "x"}`.slice(0, 80) : suffixed;
+  };
 
   const now = new Date();
   let created = 0;
@@ -126,30 +161,44 @@ export async function POST(req: Request) {
   for (const c of cleaned) {
     const tagsJson = c.tags && c.tags.length > 0 ? JSON.stringify(c.tags) : null;
     const path = `github:${c.githubFullName}`;
-    const existingId = existingBySlug.get(c.slug);
-    if (existingId) {
-      // Update only the fields the CLI is authoritative about. Don't
-      // touch user-managed fields (included, sensitivity, llm_provider).
-      // Don't bump profile_hash here — that's the loader's job.
+    const owner = c.githubFullName.split("/")[0] ?? "x";
+
+    // Prefer a gfn match. Fall back to a slug match ONLY when that row has
+    // no gfn yet (a legacy/stale row) — a shared slug across two different
+    // repos must not let one hijack the other's row.
+    let target = byGfn.get(gfnKey(c.githubFullName)) ?? null;
+    if (!target) {
+      const s = bySlug.get(c.slug);
+      if (s && !s.gfn) target = { id: s.id, slug: c.slug };
+    }
+
+    if (target) {
+      // Rename the slug to the new canonical value when it's free; keep the
+      // old slug if the new one belongs to a different repo.
+      const newSlug = freeSlug(c.slug, owner, target.id);
       await db
         .update(schema.projectProfiles)
         .set({
+          slug: newSlug,
           name: c.name,
           githubFullName: c.githubFullName,
           path,
           ...(tagsJson ? { tags: tagsJson } : {}),
           updatedAt: now,
         })
-        .where(eq(schema.projectProfiles.id, existingId));
+        .where(eq(schema.projectProfiles.id, target.id));
+      // Keep the in-memory maps consistent for later rows in this batch.
+      if (newSlug !== target.slug) bySlug.delete(target.slug);
+      bySlug.set(newSlug, { id: target.id, gfn: c.githubFullName });
+      byGfn.set(gfnKey(c.githubFullName), { id: target.id, slug: newSlug });
       updated++;
     } else {
-      // First-time insert. profile_hash is required (notNull) but we
-      // don't have any docs yet — set a placeholder; the loader will
-      // overwrite on its next pass when it pulls README/CLAUDE.md
-      // from GitHub.
-      await db.insert(schema.projectProfiles).values({
+      // First-time insert. profile_hash is required (notNull) but we don't
+      // have docs yet — placeholder; the loader overwrites on its next pass.
+      const slug = freeSlug(c.slug, owner, null);
+      const inserted = await db.insert(schema.projectProfiles).values({
         userId: auth.userId,
-        slug: c.slug,
+        slug,
         path,
         name: c.name,
         githubFullName: c.githubFullName,
@@ -160,7 +209,10 @@ export async function POST(req: Request) {
         llmProvider: "auto",
         ...(tagsJson ? { tags: tagsJson } : {}),
         updatedAt: now,
-      });
+      }).returning({ id: schema.projectProfiles.id });
+      const newId = inserted[0]?.id ?? -1;
+      bySlug.set(slug, { id: newId, gfn: c.githubFullName });
+      byGfn.set(gfnKey(c.githubFullName), { id: newId, slug });
       created++;
     }
   }

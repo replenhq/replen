@@ -15,6 +15,7 @@ import { embed, embedBatch, candidateEmbeddingText, serialiseEmbedding, facetEmb
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { looksLikeHype } from "./derive-capabilities";
 import { classifyRepos, KEEP_KINDS, type RepoKind } from "./classify";
+import { type Modality } from "../projects/modality";
 import { readRunOrEnv } from "../analyzer/run-context";
 
 const MIN_STARS = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_MIN_STARS ?? "80", 10) || 80);
@@ -89,15 +90,15 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
       console.warn(`[catalogue] search "${label}" failed:`, (e as Error).message);
     }
     if (hits.length > 0) {
-      // Library-vs-hype: keep only adoptable repos (library/framework/app).
-      const kinds = await classifyRepos(hits.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
-      const keep = hits.map((h, i) => ({ h, kind: kinds[i] })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
+      // Library-vs-hype + modality classification (one pass).
+      const cls = await classifyRepos(hits.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
+      const keep = hits.map((h, i) => ({ h, kind: cls[i].kind, modality: cls[i].modality })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
       if (keep.length > 0) {
         const vecs = await embedBatch(keep.map(({ h }) =>
           candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language }),
         ));
         for (let i = 0; i < keep.length; i++) {
-          await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind);
+          await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind, keep[i].modality);
           upserted++;
         }
       }
@@ -123,8 +124,9 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
   return { searched: toRefresh.length, upserted };
 }
 
-async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind): Promise<void> {
+async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind, modality: Modality[]): Promise<void> {
   const now = new Date();
+  const modalityJson = modality.length ? JSON.stringify(modality) : null;
   const existing = await db.select().from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
   if (existing) {
     // Merge the sourcing capability into the repo's capability list.
@@ -135,6 +137,8 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, ki
       description: h.description, url: h.url, topics: JSON.stringify(h.topics), stars: h.stars,
       primaryLanguage: h.language, repoShape: h.shape, pushedAt: h.pushedAt, createdAt: h.createdAt,
       kind: kind === "unknown" ? existing.kind : kind,
+      // Keep a known modality if the new pass came back empty (unknown).
+      modality: modalityJson ?? existing.modality,
       // Re-embed only when we have a fresh vector; keep the old one otherwise.
       embedding: vector ? serialiseEmbedding(vector) : existing.embedding,
       capabilities: JSON.stringify(caps.slice(0, 20)), lastSeen: now, updatedAt: now,
@@ -143,7 +147,8 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, ki
     await db.insert(schema.catalogueRepos).values({
       fullName: h.fullName, owner: h.owner, name: h.name, description: h.description, url: h.url,
       topics: JSON.stringify(h.topics), stars: h.stars, primaryLanguage: h.language, repoShape: h.shape,
-      license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, embedding: vector ? serialiseEmbedding(vector) : null,
+      license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, modality: modalityJson,
+      embedding: vector ? serialiseEmbedding(vector) : null,
       capabilities: JSON.stringify([label]), firstSeen: now, lastSeen: now, updatedAt: now,
     });
   }

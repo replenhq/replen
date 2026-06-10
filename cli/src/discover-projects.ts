@@ -166,18 +166,17 @@ const DEP_TO_TAGS: Array<{ match: RegExp; tags: string[] }> = [
  * repos) and by `githubFullName` (so cloning the same repo to two
  * paths doesn't create two project rows).
  *
- * Slug = the local directory basename (normalised). When two repos in
- * the discovery result would share a slug (e.g. `flight-controller`
- * under both `~/projects/drone/` and `~/work/sandbox/`), the second+
- * gets `-<owner>` appended to disambiguate. Keeps slugs short for the
- * common case while preventing server-side `uniq_profile_user_slug`
- * collisions.
+ * Slug = the GitHub repo NAME (normalised), so it's stable across local
+ * folder renames and org renames. When two distinct repos would share a
+ * slug (e.g. two `flight-controller` repos under different owners), the
+ * second+ gets `-<owner>` appended to disambiguate, preventing server-side
+ * `uniq_profile_user_slug` collisions.
  *
- * Identity is `githubFullName` on the server side; slug is just the
- * URL-safe display label. So a local `~/projects/drone/` whose remote
- * is `acme/acme` keeps slug `drone` (matching how you think of it
- * locally) while still registering correctly against `acme/acme` on
- * the dashboard.
+ * Identity is `githubFullName` on the server side (the bulk endpoint
+ * upserts by it); slug is the URL-safe display label derived from the
+ * repo name. So a local `~/projects/drone/` whose remote is
+ * `acme/palisade-website` registers as slug `palisade-website` — matching
+ * the repo, not the local folder.
  */
 export function discoverProjects(roots: string[]): DiscoveryResult {
   const seenPaths = new Set<string>();
@@ -201,10 +200,18 @@ export function discoverProjects(roots: string[]): DiscoveryResult {
       if (seenGithub.has(githubFullName)) continue;
       seenGithub.add(githubFullName);
 
-      const { name, tags, primaryLanguage } = extractMetadata(repoPath, dirName);
+      // Slug + display name both anchor on the GitHub repo NAME, not the
+      // local folder name. Deriving from the folder meant a folder rename (or
+      // an org rename like nsokin→nsokin) minted a fresh slug and the server
+      // inserted a duplicate row. `~/code/drone` with remote
+      // `nsokin/palisade-website` now registers as slug `palisade-website`.
+      // The repo name is also the fallback display name, so a generic
+      // package.json name (the Next.js starter's "nextn", etc.) doesn't stick.
+      const repoName = githubFullName.split("/").pop() || dirName;
+      const { name, tags, primaryLanguage } = extractMetadata(repoPath, repoName);
       projects.push({
         localPath: repoPath,
-        slug: normaliseSlug(dirName),
+        slug: normaliseSlug(repoName),
         name,
         githubFullName,
         tags,
@@ -318,6 +325,18 @@ function readGitRemote(repoPath: string): string | null {
   return `${m[1]}/${m[2]}`;
 }
 
+// Scaffold/template default package.json names that aren't real project
+// names — repos cloned from the same starter all share one (the Next.js
+// starter's "nextn"). Mirrors the server's GENERIC_NAMES guard.
+const GENERIC_PROJECT_NAMES = new Set([
+  "nextn", "next-app", "create-next-app", "nextjs", "next", "my-app", "myapp",
+  "my-project", "myproject", "app", "web", "webapp", "frontend", "backend",
+  "client", "server", "project", "vite-project", "vite-app", "react-app",
+  "turborepo", "my-turborepo", "monorepo", "example", "template", "starter",
+  "boilerplate", "hello-world", "test", "demo", "untitled",
+]);
+const isGenericProjectName = (n: string) => GENERIC_PROJECT_NAMES.has(n.trim().toLowerCase());
+
 function extractMetadata(repoPath: string, fallbackName: string): {
   name: string;
   tags: string[];
@@ -338,7 +357,7 @@ function extractMetadata(repoPath: string, fallbackName: string): {
         dependencies?: Record<string, string>;
         devDependencies?: Record<string, string>;
       };
-      if (typeof pkg.name === "string" && pkg.name.length > 0) name = pkg.name;
+      if (typeof pkg.name === "string" && pkg.name.length > 0 && !isGenericProjectName(pkg.name)) name = pkg.name;
       if (Array.isArray(pkg.keywords)) {
         for (const k of pkg.keywords) {
           if (typeof k === "string" && k.length > 0 && k.length <= 40) {

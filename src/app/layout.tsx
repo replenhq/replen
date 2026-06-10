@@ -144,6 +144,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 )}
               </a>
             )}
+            <a className="counter" href={`${navPrefix}/atlas`} title="Your Atlas — the graph of your dev world">
+              <Icon name="graph" size={13} />
+              Atlas
+            </a>
             <div className="spacer" />
             <UserMenu email={user.email} isAdmin={user.role === "admin"} demoMode={isDemoUser(user)} />
           </header>

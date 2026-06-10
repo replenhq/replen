@@ -5,8 +5,11 @@
 // pass can. This classifies catalogue repos so we keep only the adoptable ones.
 
 import { chatCompletion, triageModel } from "../analyzer/llm";
+import { modalityFromTopics, coerceModalities, type Modality } from "../projects/modality";
 
 export type RepoKind = "library" | "framework" | "app" | "experiment" | "content" | "unknown";
+
+export type RepoClassification = { kind: RepoKind; modality: Modality[] };
 
 // Kinds worth keeping in the catalogue (things you'd actually adopt/use).
 export const KEEP_KINDS = new Set<RepoKind>(["library", "framework", "app"]);
@@ -25,18 +28,28 @@ For each numbered repo, decide what it fundamentally IS:
 Be strict: popularity is NOT evidence of being a library. A viral demo or personal
 experiment is "experiment", not "library". A collection of prompts/skills is "content".
 
-Output JSON only: {"v": {"0":"library","1":"experiment", ...}} with a verdict for EVERY index.`;
+Also tag the DATA MODALITY each repo operates on — the kind of data/signal — as an
+array from EXACTLY this set (use [] for infra/generic libs with no specific data type):
+["image","video","timeseries","tabular","text","audio","geospatial","graph","3d","code","network"].
+Examples: an image anomaly-detection lib → ["image"]; a telemetry/time-series tool →
+["timeseries"]; a recommender → ["tabular"]; a satellite-imagery segmenter → ["image","geospatial"];
+an NLP/LLM lib → ["text"]; a web framework or ORM → [].
+
+Output JSON only: {"v": {"0":{"k":"library","m":["image"]}, "1":{"k":"experiment","m":[]}, ...}}
+with an entry for EVERY index. "k" is the kind, "m" is the modality array.`;
 
 /**
- * Classify a batch of repos. Returns kinds parallel-indexed to the input
- * (defaults to "unknown" for anything the model didn't return). Safe on
- * failure — returns all "unknown" so callers can fall back to keeping them.
+ * Classify a batch of repos into {kind, modality}, parallel-indexed to the
+ * input. Modality is the UNION of a deterministic topic map (always applied,
+ * free) and the LLM's verdict — so even on LLM failure we still get topic-
+ * derived modality. Kind defaults to "unknown" (callers keep unknowns).
  */
 export async function classifyRepos(
   repos: Array<{ fullName: string; description: string | null; topics: string[]; stars: number | null }>,
-): Promise<RepoKind[]> {
+): Promise<RepoClassification[]> {
   if (repos.length === 0) return [];
-  const out: RepoKind[] = repos.map(() => "unknown");
+  // Deterministic modality from topics first — this never fails.
+  const out: RepoClassification[] = repos.map((r) => ({ kind: "unknown" as RepoKind, modality: modalityFromTopics(r.topics) }));
   const list = repos
     .map((r, i) => `${i}. ${r.fullName} (${r.stars ?? "?"}★) — ${(r.description ?? "").replace(/\s+/g, " ").slice(0, 160)} [${r.topics.slice(0, 6).join(", ")}]`)
     .join("\n");
@@ -47,19 +60,28 @@ export async function classifyRepos(
         messages: [{ role: "system", content: SYSTEM }, { role: "user", content: list }],
         response_format: { type: "json_object" },
         temperature: 0,
-        max_tokens: 1800,
+        max_tokens: 2200,
       },
       { timeoutMs: 60_000, retries: 1 },
     );
     const text = res.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(text) as { v?: Record<string, string> };
+    const parsed = JSON.parse(text) as { v?: Record<string, { k?: string; m?: unknown } | string> };
     const v = parsed.v ?? {};
-    for (const [k, val] of Object.entries(v)) {
-      const idx = parseInt(k, 10);
+    for (const [key, val] of Object.entries(v)) {
+      const idx = parseInt(key, 10);
       if (!Number.isFinite(idx) || idx < 0 || idx >= out.length) continue;
-      const kind = String(val).toLowerCase();
+      // Tolerate both the new {k, m} shape and a bare kind string.
+      const kindRaw = typeof val === "string" ? val : String(val?.k ?? "");
+      const kind = kindRaw.toLowerCase();
       if (kind === "library" || kind === "framework" || kind === "app" || kind === "experiment" || kind === "content") {
-        out[idx] = kind;
+        out[idx].kind = kind;
+      }
+      if (typeof val === "object" && val) {
+        const llmMods = coerceModalities(val.m);
+        if (llmMods.length) {
+          const merged = new Set<Modality>([...out[idx].modality, ...llmMods]);
+          out[idx].modality = [...merged];
+        }
       }
     }
   } catch (e) {
