@@ -421,6 +421,13 @@
       "when": 1779899005651,
       "tag": "0059_deadline_events",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1779902605651,
+      "tag": "0060_always_on_delivery",
+      "breakpoints": true
     }
   ]
 }

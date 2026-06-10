@@ -255,6 +255,15 @@ Env knobs the deploy script respects (all optional, defaults shown):
 
 The script excludes `.env`, `node_modules`, `.next`, `data`, and `.git` from rsync, then runs `npm install` + migrations + build remotely. You manage `.env` on the target manually so secrets never transit through your laptop sync.
 
+To warm the watch lenses on a fresh install, import the starter seeds (security aggregators + ~20 well-known vendors' changelogs/releases, ~30 pricing pages):
+
+```bash
+tsx src/cli/import-announcement-sources.ts seeds/starter-announcement-sources.json
+tsx src/cli/import-pricing-tracker.ts seeds/starter-pricing.json
+```
+
+Both importers accept any file in the same shape — point them at your own curated lists to extend coverage. See `seeds/README.md`.
+
 ## Surfaces
 
 The product is the **skills + MCP**, running inside your Claude Code / Codex session. The webapp is a settings UI for configuring them and a history viewer for browsing what surfaced over time. Optional, the skills work whether you ever sign in or not.

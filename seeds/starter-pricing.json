@@ -1,0 +1,274 @@
+[
+ {
+  "category": "Data, storage and backend",
+  "subCategory": "Database / storage",
+  "vendor": "Supabase",
+  "tool": "Supabase",
+  "pricingUrl": "https://supabase.com/pricing",
+  "notes": "Postgres BaaS"
+ },
+ {
+  "category": "Data, storage and backend",
+  "subCategory": "Database / storage",
+  "vendor": "Neon",
+  "tool": "Neon",
+  "pricingUrl": "https://neon.tech/pricing",
+  "notes": "Serverless Postgres"
+ },
+ {
+  "category": "Data, storage and backend",
+  "subCategory": "Database / storage",
+  "vendor": "MongoDB",
+  "tool": "MongoDB Atlas",
+  "pricingUrl": "https://www.mongodb.com/pricing",
+  "notes": "Managed MongoDB"
+ },
+ {
+  "category": "Data, storage and backend",
+  "subCategory": "Database / storage",
+  "vendor": "Redis",
+  "tool": "Redis Cloud",
+  "pricingUrl": "https://redis.io/pricing/",
+  "notes": "Managed Redis"
+ },
+ {
+  "category": "Data, storage and backend",
+  "subCategory": "Database / storage",
+  "vendor": "Cloudflare",
+  "tool": "Cloudflare R2",
+  "pricingUrl": "https://www.cloudflare.com/developer-platform/products/r2/pricing/",
+  "notes": "Object storage"
+ },
+ {
+  "category": "Hosting, PaaS and serverless",
+  "subCategory": "Application hosting",
+  "vendor": "Vercel",
+  "tool": "Vercel",
+  "pricingUrl": "https://vercel.com/pricing",
+  "notes": "Frontend hosting/serverless"
+ },
+ {
+  "category": "Hosting, PaaS and serverless",
+  "subCategory": "Application hosting",
+  "vendor": "Netlify",
+  "tool": "Netlify",
+  "pricingUrl": "https://www.netlify.com/pricing/",
+  "notes": "Frontend hosting/serverless"
+ },
+ {
+  "category": "Hosting, PaaS and serverless",
+  "subCategory": "Application hosting",
+  "vendor": "Cloudflare",
+  "tool": "Cloudflare Workers",
+  "pricingUrl": "https://www.cloudflare.com/developer-platform/products/workers/pricing/",
+  "notes": "Edge compute"
+ },
+ {
+  "category": "Hosting, PaaS and serverless",
+  "subCategory": "Application hosting",
+  "vendor": "Cloudflare",
+  "tool": "Cloudflare Pages",
+  "pricingUrl": "https://www.cloudflare.com/developer-platform/products/pages/pricing/",
+  "notes": "Static/frontend hosting"
+ },
+ {
+  "category": "Hosting, PaaS and serverless",
+  "subCategory": "Application hosting",
+  "vendor": "Railway",
+  "tool": "Railway",
+  "pricingUrl": "https://railway.com/pricing",
+  "notes": "PaaS"
+ },
+ {
+  "category": "Developer workflow",
+  "subCategory": "Source control, CI/CD and dev environments",
+  "vendor": "GitHub",
+  "tool": "GitHub",
+  "pricingUrl": "https://github.com/pricing",
+  "notes": "Repos, Actions, Packages, Codespaces"
+ },
+ {
+  "category": "Developer workflow",
+  "subCategory": "Source control, CI/CD and dev environments",
+  "vendor": "CircleCI",
+  "tool": "CircleCI",
+  "pricingUrl": "https://circleci.com/pricing/",
+  "notes": "CI/CD"
+ },
+ {
+  "category": "Observability and reliability",
+  "subCategory": "Monitoring, logging, incidents",
+  "vendor": "Datadog",
+  "tool": "Datadog",
+  "pricingUrl": "https://www.datadoghq.com/pricing/",
+  "notes": "Observability suite"
+ },
+ {
+  "category": "Observability and reliability",
+  "subCategory": "Monitoring, logging, incidents",
+  "vendor": "Sentry",
+  "tool": "Sentry",
+  "pricingUrl": "https://sentry.io/pricing/",
+  "notes": "Error/performance monitoring"
+ },
+ {
+  "category": "Observability and reliability",
+  "subCategory": "Monitoring, logging, incidents",
+  "vendor": "Grafana Labs",
+  "tool": "Grafana Cloud",
+  "pricingUrl": "https://grafana.com/pricing/",
+  "notes": "Observability"
+ },
+ {
+  "category": "Observability and reliability",
+  "subCategory": "Monitoring, logging, incidents",
+  "vendor": "PostHog",
+  "tool": "PostHog",
+  "pricingUrl": "https://posthog.com/pricing",
+  "notes": "Product analytics, feature flags, replay"
+ },
+ {
+  "category": "Security, identity and compliance",
+  "subCategory": "Auth, appsec and secrets",
+  "vendor": "Auth0",
+  "tool": "Auth0",
+  "pricingUrl": "https://auth0.com/pricing",
+  "notes": "Authentication"
+ },
+ {
+  "category": "Security, identity and compliance",
+  "subCategory": "Auth, appsec and secrets",
+  "vendor": "Clerk",
+  "tool": "Clerk",
+  "pricingUrl": "https://clerk.com/pricing",
+  "notes": "Authentication"
+ },
+ {
+  "category": "APIs, integration and search",
+  "subCategory": "API tooling, automation, messaging, search",
+  "vendor": "Postman",
+  "tool": "Postman",
+  "pricingUrl": "https://www.postman.com/pricing/",
+  "notes": "API development"
+ },
+ {
+  "category": "APIs, integration and search",
+  "subCategory": "API tooling, automation, messaging, search",
+  "vendor": "Tailscale",
+  "tool": "Tailscale",
+  "pricingUrl": "https://tailscale.com/pricing",
+  "notes": "Private networking"
+ },
+ {
+  "category": "APIs, integration and search",
+  "subCategory": "API tooling, automation, messaging, search",
+  "vendor": "Algolia",
+  "tool": "Algolia",
+  "pricingUrl": "https://www.algolia.com/pricing/",
+  "notes": "Search"
+ },
+ {
+  "category": "APIs, integration and search",
+  "subCategory": "API tooling, automation, messaging, search",
+  "vendor": "Pinecone",
+  "tool": "Pinecone",
+  "pricingUrl": "https://www.pinecone.io/pricing/",
+  "notes": "Vector database"
+ },
+ {
+  "category": "AI and ML developer platforms",
+  "subCategory": "Model APIs, inference and LLMOps",
+  "vendor": "OpenAI",
+  "tool": "OpenAI API",
+  "pricingUrl": "https://openai.com/api/pricing/",
+  "notes": "AI model API"
+ },
+ {
+  "category": "AI and ML developer platforms",
+  "subCategory": "Model APIs, inference and LLMOps",
+  "vendor": "Anthropic",
+  "tool": "Anthropic API",
+  "pricingUrl": "https://www.anthropic.com/pricing",
+  "notes": "AI model API"
+ },
+ {
+  "category": "AI and ML developer platforms",
+  "subCategory": "Model APIs, inference and LLMOps",
+  "vendor": "Weights & Biases",
+  "tool": "Weights & Biases",
+  "pricingUrl": "https://wandb.ai/site/pricing/",
+  "notes": "ML experiment tracking"
+ },
+ {
+  "category": "Payments and communications",
+  "subCategory": "Billing, email, SMS, notifications",
+  "vendor": "Stripe",
+  "tool": "Stripe",
+  "pricingUrl": "https://stripe.com/gb/pricing",
+  "notes": "Payments"
+ },
+ {
+  "category": "Payments and communications",
+  "subCategory": "Billing, email, SMS, notifications",
+  "vendor": "Resend",
+  "tool": "Resend",
+  "pricingUrl": "https://resend.com/pricing",
+  "notes": "Transactional email"
+ },
+ {
+  "category": "Payments and communications",
+  "subCategory": "Billing, email, SMS, notifications",
+  "vendor": "Twilio",
+  "tool": "Twilio SMS",
+  "pricingUrl": "https://www.twilio.com/en-us/sms/pricing",
+  "notes": "SMS"
+ },
+ {
+  "category": "Payments and communications",
+  "subCategory": "Billing, email, SMS, notifications",
+  "vendor": "Twilio",
+  "tool": "Twilio Verify",
+  "pricingUrl": "https://www.twilio.com/en-us/verify/pricing",
+  "notes": "OTP / verification"
+ },
+ {
+  "category": "Analytics, data and internal tools",
+  "subCategory": "Product analytics, data stack, internal tools",
+  "vendor": "Amplitude",
+  "tool": "Amplitude",
+  "pricingUrl": "https://amplitude.com/pricing",
+  "notes": "Product analytics"
+ },
+ {
+  "category": "Testing, QA and collaboration",
+  "subCategory": "Testing, design, docs and project tools",
+  "vendor": "BrowserStack",
+  "tool": "BrowserStack",
+  "pricingUrl": "https://www.browserstack.com/pricing",
+  "notes": "Browser/device testing"
+ },
+ {
+  "category": "Testing, QA and collaboration",
+  "subCategory": "Testing, design, docs and project tools",
+  "vendor": "Sentry",
+  "tool": "Sentry Mobile",
+  "pricingUrl": "https://sentry.io/pricing/",
+  "notes": "Mobile error monitoring"
+ },
+ {
+  "category": "Testing, QA and collaboration",
+  "subCategory": "Testing, design, docs and project tools",
+  "vendor": "Linear",
+  "tool": "Linear",
+  "pricingUrl": "https://linear.app/pricing",
+  "notes": "Issue tracking"
+ },
+ {
+  "category": "Testing, QA and collaboration",
+  "subCategory": "Testing, design, docs and project tools",
+  "vendor": "Notion",
+  "tool": "Notion",
+  "pricingUrl": "https://www.notion.com/pricing",
+  "notes": "Docs/workspace"
+ }
+]

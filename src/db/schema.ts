@@ -121,6 +121,10 @@ export const userSettings = sqliteTable(
     // hosted pipeline with BYO API keys, for non-CLI users). Determines
     // which code path the pipeline runs for a given user.
     subscriptionTier: text("subscription_tier").notNull().default("skill"),
+    // Always-on layer: the weekly "four questions" brief (what'll break /
+    // security / bill / upgrades, for YOUR stack). Sent only when something
+    // qualified — a quiet week sends nothing.
+    weeklyBriefEnabled: integer("weekly_brief_enabled", { mode: "boolean" }).notNull().default(true),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({
@@ -1199,6 +1203,35 @@ export const deadlineSurfaces = sqliteTable(
   },
   (t) => ({
     uniqUserDeadlinePhase: uniqueIndex("uniq_deadline_surface").on(t.userId, t.deadlineId, t.phase),
+  }),
+);
+
+// Always-on delivery logs. One brief per (user, ISO week); one critical
+// alert per (user, event) — ever. Same once-only contract as the footnote.
+export const briefLog = sqliteTable(
+  "brief_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    weekKey: text("week_key").notNull(), // e.g. "2026-W24"
+    sentAt: integer("sent_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUserWeek: uniqueIndex("uniq_brief_user_week").on(t.userId, t.weekKey),
+  }),
+);
+
+export const alertLog = sqliteTable(
+  "alert_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    eventId: integer("event_id").notNull().references(() => classifiedEvents.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(), // 'email' | 'webhook'
+    sentAt: integer("sent_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUserEventChannel: uniqueIndex("uniq_alert_user_event").on(t.userId, t.eventId, t.channel),
   }),
 );
 

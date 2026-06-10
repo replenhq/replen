@@ -193,10 +193,12 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
   const when = fmtDate(e.deadline);
   const what = e.kind === "eol" ? `${e.title} reaches end-of-life` : `${e.product}'s deadline ("${e.title}")`;
   let line: string;
-  if (phase === "t7") {
-    line = days < 0
-      ? `${what} passed on ${when} — if anything still pins it, that's now unsupported.`
-      : `${what} ${days === 0 ? "is TODAY" : `is this week (${when})`} — worth checking your pins now.`;
+  if (phase === "t7" && days < 0) {
+    line = e.kind === "eol"
+      ? `${e.title} reached end-of-life on ${when} — if anything still pins it, that's now unsupported.`
+      : `${e.product}'s deadline ("${e.title}") passed on ${when} — if anything still relies on it, that's now unsupported.`;
+  } else if (phase === "t7") {
+    line = `${what} ${days === 0 ? "is TODAY" : `is this week (${when})`} — worth checking your pins now.`;
   } else if (phase === "t30") {
     line = `reminder: ${what} on ${when} (${days} days) — you use this; worth planning the bump.`;
   } else {

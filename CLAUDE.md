@@ -33,6 +33,12 @@ Developer-tooling / AI-agent infrastructure: capability-based OSS discovery, sem
 - Don't leak user project vocabulary into the cross-user catalogue tables (no user_id, no repo names, no code).
 - Don't let one slow/hung fetcher block the pipeline — keep the per-fetcher timeout fallback.
 
+## Open-core engineering rules
+- **The engine is fully self-hostable, always.** No hosted-only code paths in matching, watching, or the graph. A single-user install runs the identical code; never add feature flags or crippleware to differentiate tiers.
+- **Cross-user features must degrade gracefully to single-user.** k-thresholds and aggregate signals simply stay silent when there's one user. Any new cross-user feature must follow this pattern (see repo-quality, modality suppression, endorsements).
+- **Curated catalogues and populated DBs never enter the repo.** `data/` is gitignored as policy, not accident. Only the small starter seeds under `seeds/` are committed; the maintained full catalogues are operational data.
+- **Calm is the contract on every surface.** One awareness line per response, once per (user, item), gated on "do they actually use this" + the four impact questions (will it break / security / bill / upgrade). Email follows the same rule: a quiet week sends nothing.
+
 ## Integration preferences
 - New discovery sources go in `src/fetchers/` as a `Fetcher` module wired into `index.ts` (discovered vs scouted), not bespoke call sites.
 - Prefer deterministic, free signals (topic→modality maps, repo-shape heuristics, eligibility rules) over LLM calls; reach for the model only where metadata genuinely can't decide (library-vs-hype classification).
