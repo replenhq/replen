@@ -30,7 +30,9 @@ const TITLE_MATCH_BLOCKLIST = new Set([
   "flaws", "bugs", "apps", "code", "users", "attack", "report", "rust", "shell",
 ]);
 
-export type AnnouncementPs = { eventId: number; line: string; severity: Severity; critical: boolean };
+// `token` — the matched detect-token (user-side tool identity) when the event
+// is vendor-anchored; null for aggregator title-matches (no single tool).
+export type AnnouncementPs = { eventId: number; line: string; severity: Severity; critical: boolean; token: string | null };
 
 export async function announcementPs(userId: number, userTokens: Set<string>): Promise<AnnouncementPs | null> {
   if (userTokens.size === 0) return null;
@@ -110,5 +112,8 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
       ? `Heads up — ${name} ${label}: "${title}". You use this${inRepos} — worth checking now.`
       : `${name} posted a ${label}: "${title}"${inRepos} — worth a look.`;
   }
-  return { eventId: e.id, line, severity, critical };
+  let eToks: string[] = [];
+  try { eToks = JSON.parse(e.detectTokens ?? "[]"); } catch { /* */ }
+  const token = AGGREGATOR_CATEGORY.test(e.category ?? "") ? null : eToks.find((t) => userTokens.has(t)) ?? null;
+  return { eventId: e.id, line, severity, critical, token };
 }

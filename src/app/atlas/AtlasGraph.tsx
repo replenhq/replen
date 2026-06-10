@@ -34,7 +34,7 @@ const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "
 
 type P = { x: number; y: number; z: number; vx: number; vy: number; vz: number };
 
-export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GEdge[]; mapPos: Record<number, { x: number; y: number; z: number }> }) {
+export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { nodes: GNode[]; edges: GEdge[]; mapPos: Record<number, { x: number; y: number; z: number }>; initialFocus?: string | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selected, setSelected] = useState<GNode | null>(null);
   const [dossier, setDossier] = useState<Dossier | null>(null);
@@ -66,6 +66,10 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
   const camRef = useRef<{ x: number; y: number; scale: number } | null>(null);
   const orbitRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
   const posRef = useRef<Map<number, { x: number; y: number; z: number }>>(new Map());
+  // Deep-link focus (?node=tool:eslint): node id awaiting a camera-center,
+  // consumed by the draw loop once projection coordinates exist for it.
+  const pendingCenterRef = useRef<number | null>(null);
+  const focusedOnceRef = useRef(false);
 
   useEffect(() => {
     const _cv = canvasRef.current; if (!_cv) return;
@@ -211,6 +215,17 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
       const r = cv.getBoundingClientRect();
       cx.clearRect(0, 0, r.width, r.height);
       projectAll();
+      // Deep-link camera center: once the focused node has projected
+      // coordinates, pan so it sits mid-canvas, then re-project this frame.
+      if (pendingCenterRef.current != null) {
+        const fp = proj.get(pendingCenterRef.current);
+        if (fp) {
+          cam.x += r.width / 2 - fp.sx;
+          cam.y += r.height / 2 - fp.sy;
+          pendingCenterRef.current = null;
+          projectAll();
+        }
+      }
       const is3d = dim3Ref.current;
       const inMap = viewRef.current === "map";
       const shown = (n: GNode) => visible(n) && (!inMap || !!mapTarget(n.id));
@@ -339,6 +354,25 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
       .finally(() => { if (!cancelled) setDossierLoading(false); });
     return () => { cancelled = true; };
   }, [selected]);
+
+  // Deep-link focus: ?node=tool:eslint selects that node on first load (one
+  // shot — never re-fires after the user moves on) and asks the draw loop to
+  // center the camera on it. Falls back to a label match so "tool:ESLint"
+  // and key-vs-label drift both still land.
+  useEffect(() => {
+    if (focusedOnceRef.current || !initialFocus) return;
+    const sep = initialFocus.indexOf(":");
+    if (sep <= 0) return;
+    const kind = initialFocus.slice(0, sep).toLowerCase();
+    const key = initialFocus.slice(sep + 1).toLowerCase();
+    const n = nodes.find((x) => x.kind.toLowerCase() === kind && x.nodeKey.toLowerCase() === key)
+      ?? nodes.find((x) => x.kind.toLowerCase() === kind && x.label.toLowerCase() === key);
+    if (!n) return;
+    focusedOnceRef.current = true;
+    selRef.current = n.id;
+    pendingCenterRef.current = n.id;
+    setSelected(n);
+  }, [nodes, initialFocus]);
 
   const toggleKind = (k: string) => {
     const next = new Set(kinds);

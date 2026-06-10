@@ -114,3 +114,23 @@ export function parseTechSummaryDeps(techSummary: string | null): Set<string> {
   }
   return out;
 }
+
+// Dependency names out of the agent-reported dep_versions map ({name: version},
+// see /api/projects/versions). The tech_summary deps line only ever existed for
+// Node projects, so for Python/Rust/Go repos THIS is the authoritative "already
+// a dependency" source. Includes runtime keys (node, python, …) — excluding a
+// candidate named after your runtime is correct, not collateral.
+export function parseDepVersionNames(depVersions: string | null): Set<string> {
+  const out = new Set<string>();
+  if (!depVersions) return out;
+  try {
+    const obj = JSON.parse(depVersions) as unknown;
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      for (const k of Object.keys(obj)) {
+        const d = k.trim().toLowerCase();
+        if (d) out.add(d);
+      }
+    }
+  } catch { /* malformed JSON — treat as no report */ }
+  return out;
+}

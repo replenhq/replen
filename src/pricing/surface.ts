@@ -15,7 +15,10 @@ const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_PRICING_SURF
 export const pricingUserTokens = (productDeps: Set<string>, tags: Set<string>): Set<string> =>
   userToolTokens(productDeps, tags);
 
-export type PricingPs = { changeId: number; line: string };
+// `token` — the matched detect-token (the user-side tool identity, e.g.
+// "supabase"); lets the caller deep-link the Atlas tool node for "where do I
+// use this". Null only if token parsing fails post-match.
+export type PricingPs = { changeId: number; line: string; token: string | null };
 
 // The most recent unseen pricing change for a tool this user uses, as a short
 // footnote line (without the "P.s. " prefix). Null when there's nothing — the
@@ -89,5 +92,7 @@ export async function pricingPs(userId: number, userTokens: Set<string>): Promis
       ? `${name} changed pricing on YOUR plan (${c.summary}) — worth a look.`
       : `${name} updated their pricing (${c.summary}) — worth a look.`
     : `${name}'s pricing page changed — worth a look.`;
-  return { changeId: c.id, line };
+  let cToks: string[] = [];
+  try { cToks = JSON.parse(c.detectTokens ?? "[]"); } catch { /* */ }
+  return { changeId: c.id, line, token: cToks.find((t) => userTokens.has(t)) ?? null };
 }

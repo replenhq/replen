@@ -4,7 +4,7 @@
 
 ## Replen integration
 
-<!-- replen-integration: v8 -->
+<!-- replen-integration: v9 -->
 
 On your **very first response** of each session:
 
@@ -45,7 +45,7 @@ On your **very first response** of each session:
    shape.
 
 **Additional silent cases** (besides `(none)` USER-FACING MESSAGE):
-- The user explicitly typed `/replen-match` — redundant.
+- The user explicitly typed `/replen` — redundant.
 - The user directly asked for Replen output ("anything from replen
   today?", "what's new from replen?"). Just answer.
 
@@ -56,5 +56,15 @@ primitive here.
 
 **Don't call `replen_match` again on subsequent turns** — once
 per session at start only. The user explicitly types
-`/replen-match` if they want a fresh triage mid-session.
+`/replen` if they want a fresh triage mid-session.
+
+**PORTFOLIO-FIRST RULE (any turn, not just the first).** Before you
+(a) add a new dependency, (b) pick a library/stack for a task, or
+(c) build a capability from scratch (scraping, auth, OCR, queues,
+charting, …), call `replen_recall` with the capability first. The
+user's OTHER projects may already have a settled way to do it — a
+chosen library, or an implementation file (`paths`) you can port.
+If recall returns a convention, FOLLOW IT (or name it and ask)
+instead of introducing a parallel stack. The user should never have
+to say "you know I use scrapling elsewhere" — knowing is your job.
 

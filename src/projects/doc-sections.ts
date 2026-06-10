@@ -59,6 +59,30 @@ export function isNoiseFacetLabel(label: string): boolean {
   return false;
 }
 
+// Generic infrastructure plumbing that nearly EVERY project has — storage
+// buckets, containers, CI, deploy tooling. As match PROBES these are
+// promiscuous: "AWS S3" sits near half of GitHub, which is how a JS
+// serverless-deploy framework got shortlisted for a Python GPU-serving repo
+// ("adjacent to your AWS S3"). They stay valid as capabilities (coverage,
+// graph nodes, "already have" exclusion) — they just can't LEAD a match or
+// seed adjacency. Conservative on purpose: real capability domains that
+// merely involve infra ("geospatial data storage") must not match, so the
+// pattern is anchored to the whole label, with only generic suffixes allowed.
+const INFRA_CORE =
+  "(aws s3|amazon s3|s3|object storage|blob storage|file uploads?|file storage|" +
+  "docker( compose)?|dockerfile|containeri[sz]ation|kubernetes|k8s|helm|" +
+  "ci ?/? ?cd|continuous (integration|delivery|deployment)|github actions|gitlab ci|" +
+  "terraform|infrastructure as code|deployment|devops|cloud infrastructure|" +
+  "nginx|reverse proxy|load balancing|environment variables?|configuration|secrets management)";
+const GENERIC_INFRA_RE = new RegExp(
+  `^${INFRA_CORE}( (integration|support|setup|config(uration)?|storage|hosting|pipeline|workflows?|deployment|management|automation))?$`,
+  "i",
+);
+export function isGenericInfraFacetLabel(label: string): boolean {
+  const l = label.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return GENERIC_INFRA_RE.test(l);
+}
+
 type RawSection = { heading: string; body: string };
 
 function parseMarkdownSections(md: string): RawSection[] {

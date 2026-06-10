@@ -79,6 +79,12 @@ and versions ONLY — never code. This is what turns Replen's deadline and
 security lines from "worth checking your pins" into "affects `acme`
 (3.10.12)" — and silences alarms for versions this repo verifiably isn't on.
 
+This step is NOT optional, and not only about deadlines: the reported
+names are also the matcher's "already a dependency" exclusion list. A
+repo that never reports versions WILL get its own dependencies suggested
+back to it as candidates (fastapi pinned in requirements.txt, fastapi in
+the shortlist) — a shipped failure this step prevents.
+
 If `candidates.length === 0`, tell the user "No new candidates today for
 `<owner/name>`. Calm-cadence working as designed — 1-3 actionable
 matches a month is the goal." Stop.
@@ -177,20 +183,40 @@ that means here.
 mismatch, security flag. Empty list is fine; don't manufacture.
 ```
 
+#### 3d. Record the verdict NOW — don't wait for the user
+
+As soon as a candidate's verdict is formed, call `replen_record_triage`
+for it — **before** you present the batch, and **without asking**.
+Recording is observation, not action: it captures what you concluded
+(verdict, score, reason code, one-liner, cosine) so the learning loop and
+re-surfacing suppression actually fire. It is non-destructive and doesn't
+foreclose anything — the user's star / hide / handoff choices in Step 4
+are a separate axis layered on top.
+
+The failure mode this rule exists to kill: a session triages four
+candidates, presents them, ends with "want me to record these?", the
+user moves on — and Replen learned NOTHING. The same four will come back.
+A triage that isn't recorded never happened.
+
+Only the user-judgment actions (star / hide / handoff / queue work) wait
+for the user. Verdicts never do.
+
 No marketing voice. No hype. The user is a working engineer; talk to
 them like a peer. Concrete > clever.
 
 ### Step 4 — Present + capture actions
 
-After all writeups, summarise:
+By this point every verdict is ALREADY recorded (3d). After all
+writeups, summarise, and ask only about the actions that genuinely need
+the user's call — skips need nothing further:
 
 ```
-3 candidates triaged for tech-news-site:
+3 candidates triaged for tech-news-site (all verdicts recorded):
   ✓ adopt: kribblo/node-ffmpeg-installer (high · quick) — ffmpeg-static swap
   ⏭ port:  tj/n (medium · moderate) — version-manager pattern
   ✗ skip:  vercel/turbo (medium · deep) — wrong runtime, already have Vite
 
-For each, what would you like to do? (star / hide / handoff / skip)
+Want the adopt wired up, or any of these starred / hidden / handed off?
 ```
 
 Then, for each candidate, capture the user's choice. For each action,

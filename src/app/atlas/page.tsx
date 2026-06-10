@@ -12,8 +12,11 @@ export const dynamic = "force-dynamic";
 // operational overlay (alerts / blind spots / queued work) is the live state;
 // the semantic map view positions everything by MEANING (PCA over the same
 // embeddings the matcher uses).
-export default async function AtlasPage() {
+export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string }> }) {
   const user = await requireUser();
+  // Deep-link target ("tool:eslint") — footnote/Brief lines link here so
+  // "where do I use this?" is one click. Resolved client-side by AtlasGraph.
+  const { node: focusNode } = await searchParams;
   const [rawNodes, rawEdges, overlay, mapPoints] = await Promise.all([
     db.select({ id: schema.graphNodes.id, kind: schema.graphNodes.kind, nodeKey: schema.graphNodes.nodeKey, label: schema.graphNodes.label, data: schema.graphNodes.data })
       .from(schema.graphNodes).where(eq(schema.graphNodes.userId, user.id)),
@@ -76,7 +79,7 @@ export default async function AtlasPage() {
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {nodes.length > 0 ? <AtlasGraph nodes={nodes} edges={edges} mapPos={mapPos} /> : null}
+        {nodes.length > 0 ? <AtlasGraph nodes={nodes} edges={edges} mapPos={mapPos} initialFocus={focusNode ?? null} /> : null}
       </div>
     </main>
   );

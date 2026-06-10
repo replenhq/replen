@@ -7,10 +7,10 @@ import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
-import { isNoiseFacetLabel } from "@/projects/doc-sections";
+import { isGenericInfraFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
-import { parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
+import { parseDepVersionNames, parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
 import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
 import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
 import { computeLeaps, type Leap } from "@/graph/leaps";
@@ -430,8 +430,13 @@ export async function GET(req: Request) {
     : [];
   let productRepoCount = 1;
   // Dep tokens across the whole product — a library the project (or a sibling)
-  // already depends on must never be suggested back.
+  // already depends on must never be suggested back. TWO sources, unioned:
+  // the legacy tech_summary deps line (Node projects only) and the
+  // agent-reported dep_versions map — the only dep source that exists for
+  // Python/Rust/Go repos. Suggesting fastapi to the project that pins it was
+  // a real shipped failure; this union is what prevents it.
   const productDeps = new Set<string>(parseTechSummaryDeps(scopedProject?.techSummary ?? null));
+  for (const d of parseDepVersionNames(scopedProject?.depVersions ?? null)) productDeps.add(d);
   // Defensive facet hygiene: a repo's OWN name/slug is a title blob, not a
   // capability, and must never be a probe. We drop these (across the whole
   // product) at READ time too — not just at generation — so legacy facets
@@ -457,7 +462,7 @@ export async function GET(req: Request) {
     const productKey = scopedProject.productKey ?? deriveProductKey(scopedProject.githubFullName);
     if (productKey) {
       const siblings = await db
-        .select({ slug: schema.projectProfiles.slug, githubFullName: schema.projectProfiles.githubFullName, facetEmbeddings: schema.projectProfiles.facetEmbeddings, productKey: schema.projectProfiles.productKey, techSummary: schema.projectProfiles.techSummary })
+        .select({ slug: schema.projectProfiles.slug, githubFullName: schema.projectProfiles.githubFullName, facetEmbeddings: schema.projectProfiles.facetEmbeddings, productKey: schema.projectProfiles.productKey, techSummary: schema.projectProfiles.techSummary, depVersions: schema.projectProfiles.depVersions })
         .from(schema.projectProfiles)
         .where(and(
           eq(schema.projectProfiles.userId, auth.userId),
@@ -474,6 +479,7 @@ export async function GET(req: Request) {
           projectFacets.push({ ...f, repo: s.slug });
         }
         for (const d of parseTechSummaryDeps(s.techSummary)) productDeps.add(d);
+        for (const d of parseDepVersionNames(s.depVersions)) productDeps.add(d);
         addDropName(s.slug);
         addDropName(s.githubFullName?.split("/")[1] ?? null);
       }
@@ -501,6 +507,17 @@ export async function GET(req: Request) {
       goalLabels.add(normFacetLabel(g.label));
     }
   }
+  // PROBE facets — the subset allowed to LEAD a match, seed adjacency, or
+  // pull catalogue suggestions. Generic infrastructure plumbing (S3, Docker,
+  // CI/CD, deployment) is excluded: it's a capability almost every project
+  // has, so as a probe it matches half of GitHub ("adjacent to your AWS S3"
+  // shortlisting a serverless framework for a GPU-serving repo). The full
+  // projectFacets list still drives coverage, modality maps, and the
+  // "already have it" adjacency exclusion. A facet the user explicitly set
+  // as a GOAL is exempt — stated intent beats the genericity heuristic.
+  const probeFacets = projectFacets.filter(
+    (f) => !isGenericInfraFacetLabel(f.label) || goalLabels.has(normFacetLabel(f.label)),
+  );
   // Modality per facet label (union across product repos) — for checking a
   // candidate's recorded modality collisions against the facet it matched.
   const facetModsByLabel = new Map<string, Modality[]>();
@@ -522,6 +539,9 @@ export async function GET(req: Request) {
     const v = vendorForDep(d);
     if (v) { knownRepoFullNames.add(v.githubRepo.toLowerCase()); coveredFacets.add(normLabel(v.name)); }
   }
+  // Punctuation-blind dep set for the exclusion check: the PyPI name
+  // "segmentation-models-pytorch" must catch the repo "segmentation_models.pytorch".
+  const productDepsNorm = new Set([...productDeps].map((d) => normLabel(d)));
   // An app whose centroid similarity clears this bar is "basically my whole
   // project" — a competitor, not a component. Suppressed unless it leads with a
   // specific capability (facet beats centroid by FACET_LEAD) or is a dep match.
@@ -597,6 +617,7 @@ export async function GET(req: Request) {
     const candOn = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
     if (productDeps.size > 0 && !isFeedSrc(c.source) && candOn) {
       if (productDeps.has(candOn.name.toLowerCase()) || productDeps.has(candOn.owner.toLowerCase())
+        || productDepsNorm.has(normLabel(candOn.name))
         || knownRepoFullNames.has(`${candOn.owner}/${candOn.name}`.toLowerCase())) continue; // already a dependency
     }
     // Recorded modality collisions for this repo: those facets are off-limits
@@ -663,7 +684,7 @@ export async function GET(req: Request) {
         let bestFacetCos = -Infinity;
         let bestFacetLabel: string | null = null;
         let bestFacetProv: Provenance | null = null;
-        for (const f of projectFacets) {
+        for (const f of probeFacets) {
           // Contextual modality suppression: agents recorded this repo as a
           // modality collision for facets of this modality — don't probe with them.
           if (suppressedMods && f.modality?.length && f.modality.some((m) => suppressedMods.has(m))) continue;
@@ -1010,13 +1031,13 @@ export async function GET(req: Request) {
   }
 
   let catalogueOut: OutEntry[] = [];
-  if (scopedProject && applyFloor && projectFacets.length >= MIN_FACETS_FOR_CATALOGUE) {
+  if (scopedProject && applyFloor && probeFacets.length >= MIN_FACETS_FOR_CATALOGUE) {
     const alreadyShown = new Set<string>(knownRepoFullNames);
     for (const o of [...ownOut, ...feedOut, ...promotedOut]) if (o.repo) alreadyShown.add(o.repo.toLowerCase());
     if (scopedProject.githubFullName) alreadyShown.add(scopedProject.githubFullName.toLowerCase());
     const matches = await catalogueMatches({
       projectEmbedding,
-      projectFacets,
+      projectFacets: probeFacets,
       minCosine: projectFloor,
       competitorCentroid: COMPETITOR_CENTROID,
       facetLead: FACET_LEAD,
@@ -1169,12 +1190,14 @@ export async function GET(req: Request) {
   // exploratory suggestions: the best library from a capability the project
   // doesn't have but is adjacent to. Calm by construction — only fills the gap
   // up to `limit`, capped at ADJ_MAX, ranks last.
-  if (scopedProject && applyFloor && projectFacets.length >= MIN_FACETS_FOR_CATALOGUE && ADJ_MAX > 0 && candidatesOut.length < ADJ_SHOW_BELOW) {
+  if (scopedProject && applyFloor && probeFacets.length >= MIN_FACETS_FOR_CATALOGUE && ADJ_MAX > 0 && candidatesOut.length < ADJ_SHOW_BELOW) {
+    // "Already have it" exclusion stays on the FULL facet list — adjacency
+    // must never propose a capability the project has, generic or not.
     const ownedCaps = new Set(projectFacets.map((f) => f.label.toLowerCase()));
     const shownNames = new Set(candidatesOut.map((c) => c.repo.toLowerCase()));
     if (scopedProject.githubFullName) shownNames.add(scopedProject.githubFullName.toLowerCase());
     const adj = await adjacentMatches({
-      projectFacets,
+      projectFacets: probeFacets,
       ownedCapabilities: ownedCaps,
       projectLanguages,
       excludeFullNames: shownNames,
@@ -1400,25 +1423,42 @@ export async function GET(req: Request) {
         .values({ userId: auth.userId, deadlineId, phase, surfacedAt: nowTs }).onConflictDoNothing();
       const recordPricing = (changeId: number) => db.insert(schema.pricingSurfaces)
         .values({ userId: auth.userId, changeId, surfacedAt: nowTs }).onConflictDoNothing();
+      // Atlas deep link — when the flagged tool exists as a node in the
+      // user's graph, the line can answer the obvious follow-up ("where do
+      // I use this?") with a click: Atlas opens focused on that tool, its
+      // USES edges lit. Still one line; the link rides on the end.
+      const atlasLink = async (token: string | null | undefined): Promise<string> => {
+        if (!token) return "";
+        const tn = await db.select({ id: schema.graphNodes.id }).from(schema.graphNodes)
+          .where(and(
+            eq(schema.graphNodes.userId, auth.userId),
+            eq(schema.graphNodes.kind, "tool"),
+            sql`LOWER(${schema.graphNodes.nodeKey}) = ${token.toLowerCase()}`,
+          )).get();
+        if (!tn) return "";
+        const base = (process.env.CLI_PUBLIC_BASE_URL ?? "https://app.replen.dev").replace(/\/+$/, "");
+        return ` Where you use it: ${base}/atlas?node=${encodeURIComponent(`tool:${token.toLowerCase()}`)}`;
+      };
       const appendPs = (line: string) => {
         displayText = displayText ? `${displayText}\n\nP.s. ${line}` : `P.s. ${line}`;
       };
       // Priority: Critical announcement (leads) > deadline this week >
       // pricing change > deadline reminder/announce > other announcement.
       if (announcement?.critical) {
-        displayText = displayText ? `${announcement.line}\n\n${displayText}` : announcement.line;
+        const lead = `${announcement.line}${await atlasLink(announcement.token)}`;
+        displayText = displayText ? `${lead}\n\n${displayText}` : lead;
         await recordAnnouncement(announcement.eventId);
       } else if (deadline?.urgent) {
-        appendPs(deadline.line);
+        appendPs(`${deadline.line}${await atlasLink(deadline.token)}`);
         await recordDeadline(deadline.deadlineId, deadline.phase);
       } else if (pricing) {
-        appendPs(pricing.line);
+        appendPs(`${pricing.line}${await atlasLink(pricing.token)}`);
         await recordPricing(pricing.changeId);
       } else if (deadline) {
-        appendPs(deadline.line);
+        appendPs(`${deadline.line}${await atlasLink(deadline.token)}`);
         await recordDeadline(deadline.deadlineId, deadline.phase);
       } else if (announcement) {
-        appendPs(announcement.line);
+        appendPs(`${announcement.line}${await atlasLink(announcement.token)}`);
         await recordAnnouncement(announcement.eventId);
       }
     } catch (e) {

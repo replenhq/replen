@@ -156,7 +156,9 @@ export async function recordAnnouncementDeadline(args: {
 
 // ── surfacing ───────────────────────────────────────────────────────────────
 
-export type DeadlinePs = { deadlineId: number; phase: "announce" | "t30" | "t7"; line: string; urgent: boolean };
+// `token` — the matched detect-token (user-side tool identity, e.g. "eslint")
+// so the caller can deep-link the Atlas tool node for "where do I use this".
+export type DeadlinePs = { deadlineId: number; phase: "announce" | "t30" | "t7"; line: string; urgent: boolean; token: string | null };
 
 const fmtDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -199,12 +201,13 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
   const done = new Set(surfaced.map((s) => `${s.deadlineId}:${s.phase}`));
   const versions = await loadUserVersions(userId);
 
-  type Candidate = { e: typeof events[number]; phase: "announce" | "t30" | "t7"; rank: number; affected: VersionEntry[] };
+  type Candidate = { e: typeof events[number]; phase: "announce" | "t30" | "t7"; rank: number; affected: VersionEntry[]; token: string | null };
   const candidates: Candidate[] = [];
   for (const e of events) {
     let toks: string[] = [];
     try { toks = JSON.parse(e.detectTokens ?? "[]"); } catch { /* */ }
-    if (!toks.some((t) => userTokens.has(t))) continue;
+    const token = toks.find((t) => userTokens.has(t)) ?? null;
+    if (token === null) continue;
     // Version awareness — precision in BOTH directions. When any project
     // reported a pinned version for this product:
     //   - EOL with a cycle: only the projects ON that cycle are affected;
@@ -226,12 +229,12 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
     const phase: Candidate["phase"] = days <= 7 ? "t7" : days <= 30 ? "t30" : "announce";
     if (done.has(`${e.id}:${phase}`)) continue;
     if (phase === "announce" && e.detectedAt.getTime() <= now - ANNOUNCE_FRESH_DAYS * 86400e3) continue;
-    candidates.push({ e, phase, rank: phase === "t7" ? 3 : phase === "t30" ? 2 : 1, affected });
+    candidates.push({ e, phase, rank: phase === "t7" ? 3 : phase === "t30" ? 2 : 1, affected, token });
   }
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.rank - a.rank || a.e.deadline.getTime() - b.e.deadline.getTime());
 
-  const { e, phase, affected } = candidates[0];
+  const { e, phase, affected, token } = candidates[0];
   const days = Math.round((e.deadline.getTime() - now) / 86400e3);
   const when = fmtDate(e.deadline);
   const what = e.kind === "eol" ? `${e.title} reaches end-of-life` : `${e.product}'s deadline ("${e.title}")`;
@@ -254,5 +257,5 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
   } else {
     line = `${what} on ${when} — ${affectedStr ?? "you use this; worth checking whether any project still pins it"}.`;
   }
-  return { deadlineId: e.id, phase, line, urgent: phase === "t7" };
+  return { deadlineId: e.id, phase, line, urgent: phase === "t7", token };
 }
