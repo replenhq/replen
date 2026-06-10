@@ -67,7 +67,7 @@ export default async function AtlasPage() {
   return (
     <main style={{ padding: 0, maxWidth: "none", width: "100vw", marginLeft: "calc(50% - 50vw)", height: "calc(100vh - 86px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ padding: "12px 24px 10px", borderBottom: "1px solid var(--border, #262626)", flexShrink: 0 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "inline" }}>Your Atlas</h1>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "inline" }}>Atlas</h1>
         <span style={{ marginLeft: 14, color: "var(--dim, #a3a3a3)", fontSize: 13 }}>
           {nodes.length} nodes · {edges.length} edges
           {alertTotal > 0 ? ` · ${alertTotal} node${alertTotal === 1 ? "" : "s"} with live alerts` : ""}

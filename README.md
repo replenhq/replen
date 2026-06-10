@@ -42,6 +42,16 @@ Replen targets a few useful suggestions a month, by design. Most days, nothing. 
 
 > By the way, `D4Vinci/Scrapling` could help your scraper get past Cloudflare. Want the full review?
 
+## Three systems, one loop
+
+Replen is **Brainstem · Watchtower · Atlas** — three systems that only work because they're one.
+
+- **🧠 Brainstem** — the matching core, and the brainstem for your coding agent. It knows what every one of your repos actually *does* (per-capability embeddings, not keywords) and sources what fits: a library to use as-is, an algorithm to port, a technique to cherry-pick, an idea to clean-room build. Every verdict your agent records tunes it — what you adopt pulls ranking toward your taste, what you skip pushes away.
+- **🔭 Watchtower** — the maintained ~1,250-source network watching everything your code and projects rely on: releases, advisories, pricing pages, licences, standards, end-of-life calendars. Gated by four questions — *will this break my app? security issue? bill increase? upgrade needed?* — so a quiet day is silent.
+- **🗺 Atlas** — the knowledge graph of your dev world: projects, capabilities, tools, decisions, goals — stitched from **Tiles** (linked markdown your agents read straight off disk). It's the memory Brainstem learns from and the map Watchtower's alerts land on.
+
+The loop: Atlas tells Brainstem what you build → Brainstem matches what Watchtower sees → your agent triages in-session → the verdict lands back in Atlas, and everything gets sharper. None of them is a feature; together they're Replen.
+
 ## Quickstart
 
 ```bash
@@ -80,9 +90,9 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 
 4. **You act on the keepers.** Star / hide / handoff PR — captured server-side via `replen_state`; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
 
-## What Replen watches
+## Watchtower
 
-Replen watches five lenses across everything your code depends on, implements, or builds on. Each is scored against your project's capabilities, not a keyword list, and surfaces the same calm way. Quietly, in your AI tool's next reply, only when there's something real.
+**Watchtower** is Replen's maintained source network — ~1,250 continuously-verified sources spanning vendor changelogs, security advisories, pricing pages, release feeds, standards trackers, and end-of-life calendars (self-hosted installs start from the committed seed catalogue and can point the same engine at their own lists). Six lenses run on it, each scored against your project's capabilities — not a keyword list — and everything surfaces the same calm way: quietly, in your AI tool's next reply, only when there's something real.
 
 - **🔭 Projects that fit a capability you have.** Scored against what your repo actually does. A CV library for your vision pipeline, a backtesting framework for your trading bot, an algorithm worth porting into a file you maintain. Drawn from a capability catalogue that sharpens with every project. *(See the example below.)*
 
@@ -95,8 +105,11 @@ Replen watches five lenses across everything your code depends on, implements, o
 - **📜 The standards you implement — spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends — matched to the standards your project actually touches.
   > *By the way — a standard your code implements just changed: ERC-5516.*
 
-- **🩺 The health of what you build on — upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …).
-  > *By the way — an upstream you depend on needs attention: `request` looks dead (no push in 654 days).*
+- **🩺 The health of what you build on — upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …). When something IS dying, the same breath names maintained alternatives from the catalogue.
+  > *By the way — an upstream you depend on needs attention: `request` looks dead (no push in 654 days). Maintained alternatives exist (`sindresorhus/got`).*
+
+- **💷 The price of what you run on — pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations — EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
+  > *P.s. python 3.10 reaches end-of-life on 31 Oct — affects `acme` (3.10.12).*
 
 Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing — no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. And the inventory learns from how people triage: a candidate enough users judge rubbish stops being shown to *anyone*, while one that proves useful for a project like yours can surface to you too — repo identity and aggregate signal only, never your code or anyone else's.
 
@@ -120,7 +133,7 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 
 The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
 
-## Your Atlas
+## Atlas
 
 Discovery brings the outside world in. Atlas is the other half, a living map of everything you have already built and the connections inside it.
 
@@ -130,9 +143,13 @@ As Replen grounds each repo it draws them all into one graph. Every project, the
 - **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.
 - **Themes and keystones.** Capabilities clustered into themes, with the load-bearing keystones that recur across projects flagged. A quiet read on what your work is made of, plus provenance on every capability (grounded / extracted / inferred) so matching trusts solid signal over soft guesses.
 
-See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas), or run `replen atlas` to write the whole map to `~/.replen/atlas/` as linked notes you can open in Obsidian.
+See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas), or run `replen atlas` to write the whole map to `~/.replen/atlas/` as **Tiles** — linked markdown notes that stitch together (open the folder in Obsidian for the graph view).
 
-The vault doubles as a **memory layer for your coding agents**: it lives on disk as plain markdown, the MCP server keeps it fresh in the background, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context — what you've built, what fills each capability, and every decision with the reason — without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
+Atlas tiles double as a **memory layer for your coding agents**: plain markdown on disk, kept fresh in the background by the MCP server, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context — what you've built, what fills each capability, and every decision with the reason — without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
+
+### Bring your knowledge graph (Graphify · Obsidian · ADRs)
+
+Replen deliberately doesn't map your code's internals — it **ingests whatever already does**. If a repo carries a **Graphify** vault, an **Obsidian** vault, or `docs/adr/` decision records, the onboarding agent uses them as its grounding source: entity notes become grounded capabilities, note bodies become descriptors, and the files they link become evidence anchors — faster and richer than a cold code-read, and the deep graph stays where it lives. Your Graphify graph makes Replen's matching smarter; Replen makes your graph actionable. Privacy is unchanged: only capability specs, paths, and tags ever leave your machine — never vault content, never code.
 
 ## Numbers
 

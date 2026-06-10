@@ -1,7 +1,7 @@
-# Starter seeds
+# Starter seeds — your Watchtower's first sources
 
-Small, curated seed data for self-hosted installs — enough to make the watch
-lenses useful on day one:
+Small, curated seed data for self-hosted installs — enough to make the
+Watchtower (Replen's maintained source network) useful on day one:
 
 - `starter-announcement-sources.json` — the cross-vendor security aggregators
   (NVD, OSV, GitHub Advisories, CISA KEV, …) plus changelog/security/release
@@ -12,5 +12,5 @@ lenses useful on day one:
 
 Both importers are idempotent (upsert by stable key), and both accept any file
 in the same shape — point them at your own curated lists to extend coverage.
-The hosted service runs a continuously-maintained catalogue (~1,250 sources,
-dead links pruned, new tools added) on top of the same engine.
+The hosted service's Watchtower runs a continuously-maintained catalogue
+(~1,250 sources, dead links pruned, new tools added) on top of the same engine.

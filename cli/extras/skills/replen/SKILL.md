@@ -5,11 +5,12 @@ description: Review Replen's suggestions for the current repo against your code.
 
 # Replen Match — in-session candidate triage
 
-You are running the matching loop locally. Replen has fetched a list of
-plausible OSS candidates from the wider ecosystem; you've got the user's
-codebase open. Your job is to decide which (if any) are worth their
-attention, write up the strong ones, and capture what they want to do
-about them.
+You are running the matching loop locally. Replen's **Watchtower** — its
+maintained network of ~1,250 sources (vendor changelogs, advisories, pricing
+pages, release feeds, standards trackers, EOL calendars) — has fetched a list
+of plausible OSS candidates and events; you've got the user's codebase open.
+Your job is to decide which (if any) are worth their attention, write up the
+strong ones, and capture what they want to do about them.
 
 **This runs entirely on the user's subscription tokens.** No API keys
 get used. Replen's hosted side did the cheap structural filtering; you
@@ -343,7 +344,7 @@ The user hasn't set up filter-mode B's tag list. Mention it once: "Heads
 up — you'd get sharper matches if you set project tags at /settings.
 Continuing with unfiltered for now."
 
-## The Atlas vault — local memory for any agent
+## Atlas tiles — local memory for any agent
 
 Replen keeps an agent-readable markdown vault at `~/.replen/atlas/` — the
 user's whole portfolio as linked notes: every project and what it does,
@@ -355,8 +356,8 @@ The MCP server refreshes it in the background (at most twice a day);
 Use it whenever you need CROSS-PROJECT context: "what else does this user
 build?", "have we solved X in another repo?", "what did we decide about
 Y last quarter?". Start at `MAP.md`, or call `replen_recall` for a direct
-query. Reading the vault beats re-deriving the portfolio from scratch —
-it's the memory layer, and it's already on disk.
+query. Reading the tiles beats re-deriving the portfolio from scratch —
+they're the memory layer, and they're already on disk.
 
 ## When NOT to run this skill
 

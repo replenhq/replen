@@ -628,6 +628,6 @@ export async function runAtlas(argv: string[]): Promise<void> {
     writeFileSync(full, f.content);
   }
   if (hasFlag(argv, "--json")) { console.log(JSON.stringify({ dir, count: data.files.length })); return; }
-  console.log(`Atlas written: ${data.files.length} notes → ${dir}`);
-  console.log(`Open ${dir} in Obsidian (or any markdown editor) to explore the graph view of your projects, capabilities, and decisions.`);
+  console.log(`Atlas: ${data.files.length} tiles written → ${dir}`);
+  console.log(`Open ${dir} in Obsidian (or any markdown editor) — the tiles stitch into the graph view of your projects, capabilities, and decisions.`);
 }

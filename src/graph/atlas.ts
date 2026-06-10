@@ -109,7 +109,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
 
   // MAP.md
   files.push({ path: "MAP.md", content: [
-    `# Your Replen Atlas`, ``,
+    `# Atlas`, ``,
     `A map of your projects, what they do, the ecosystem around them, and every decision you've made. Open this folder in Obsidian for the graph view.`, ``,
     `## Keystone capabilities`, `The capabilities that connect the most of your work.`, ``,
     ...keystones.slice(0, 12).map((c) => `- ${link(capFile(c.label), c.label)} — ${capProjs.get(c.id)?.length ?? 0} projects`), ``,

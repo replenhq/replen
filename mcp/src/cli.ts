@@ -66,7 +66,7 @@ Commands:
     (defaultRepo ? ` · scope=${defaultRepo}` : ` · scope=(no git repo detected)`),
   );
 
-  // Keep the local Atlas vault (~/.replen/atlas/) fresh in the background —
+  // Keep the local Atlas tiles (~/.replen/atlas/) fresh in the background —
   // fire-and-forget, debounced (twice a day max), never blocks the transport.
   refreshAtlasVaultInBackground({ baseUrl, token, defaultRepo });
 }

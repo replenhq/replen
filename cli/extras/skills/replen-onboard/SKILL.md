@@ -71,13 +71,37 @@ Replen — a re-run backfills versions across every repo in minutes.
 
 For each in-scope repo, do this contract:
 
+### 2a-pre. Check for an existing knowledge graph FIRST (the adapter step)
+
+Replen doesn't map code internals — it ingests whatever already does. Before
+reading raw source, look for pre-digested knowledge and use it as your primary
+grounding source (faster AND richer than a cold code-read):
+
+- **Graphify vault** — an Obsidian-compatible markdown vault with frontmatter
+  + `[[wikilinks]]` + EXTRACTED/INFERRED/AMBIGUOUS-style provenance tags
+  (commonly in-repo as `graph/`, `vault/`, `.graphify/`, or alongside the
+  repo). Its entity/concept notes ARE the capability map: distill capabilities
+  from them, take descriptors from the note bodies, and use the files each
+  note links as the capability's `paths` evidence anchors.
+- **Plain Obsidian vault / docs vault** — same treatment, lower confidence.
+- **ADRs** (`docs/adr/*.md`, `doc/decisions/`) — architecture decisions are
+  high-grade descriptor material and often name the load-bearing files.
+
+If you ground from one of these, START the report (2c) with one line:
+`Grounding source: Graphify vault at <path>` (or `Obsidian vault…` / `ADRs…`)
+— it renders into the user's Atlas tiles, linking the two tools. Then skim the
+code only to VERIFY (the vault may be stale); don't re-derive what it already
+holds. Privacy is unchanged: only capabilities/descriptors/paths/tags leave
+the machine, exactly as with a code-read — never vault content or code.
+
 ### 2a. Read the code (not just the README)
 
 Read enough source to actually understand the project: entry points, the core
 modules, manifests (`package.json`/`pyproject.toml`/`Cargo.toml`/`go.mod`),
 configs, schemas, and the files that implement its real work (the model/algo/
 pipeline files, not the glue). This is what makes the grounding accurate — a
-doc paraphrase is not enough.
+doc paraphrase is not enough. (Skip the deep read when 2a-pre found a fresh
+knowledge graph — verify instead.)
 
 ### 2b. Assess doc quality → `good` | `thin` | `none`
 

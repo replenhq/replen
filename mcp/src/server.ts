@@ -78,7 +78,7 @@ const TOOLS: Tool[] = [
   {
     name: "replen_match",
     description:
-      "Review Replen's suggestions for the current repo. Pulls the candidate inventory scoped to the cwd repo so you can triage each one against the local code. " +
+      "Review Replen's suggestions for the current repo — what Watchtower (Replen's maintained ~1,250-source network: changelogs, advisories, pricing pages, releases, standards, EOL calendars) surfaced for THIS codebase. Pulls the candidate inventory scoped to the cwd repo so you can triage each one against the local code. " +
       "\n\n" +
       "RESPONSE FORMAT — IMPORTANT:\n" +
       "The response has two sections, separated by a divider:\n" +
@@ -169,7 +169,7 @@ const TOOLS: Tool[] = [
       "  - 'what have we ported / adopted?'  → pass verdict='port' (or 'adopt') to filter\n" +
       "  - 'what do we use for <capability>, and where?'  → which projects have that capability and how grounded it is\n" +
       "  - 'how does <project> handle <thing>?'  → matching passages from the grounded project reports (architecture memory, not just verdicts)\n" +
-      "Returns { capabilities: [...] (with 'paths' evidence anchors), decisions: [...], reports: [...], notes: [...] (user-written notes anchored to capabilities/tools - treat them as the user's own voice) }. Use it to avoid suggesting something the user already rejected (and why), or to point them at a repo they already ported in another project. Spans projects and time — something a single-repo view can't. (The same memory is also on disk at ~/.replen/atlas/ as a markdown vault, auto-refreshed in the background — readable without a tool call; start at MAP.md.)",
+      "Returns { capabilities: [...] (with 'paths' evidence anchors), decisions: [...], reports: [...], notes: [...] (user-written notes anchored to capabilities/tools - treat them as the user's own voice) }. Use it to avoid suggesting something the user already rejected (and why), or to point them at a repo they already ported in another project. Spans projects and time — something a single-repo view can't. (The same memory is also on disk at ~/.replen/atlas/ as Atlas tiles — linked markdown, auto-refreshed in the background, readable without a tool call; start at MAP.md.)",
     inputSchema: {
       type: "object",
       properties: {
@@ -227,7 +227,7 @@ const TOOLS: Tool[] = [
     description:
       "Record your per-candidate triage decision back to Replen. Call ONCE per candidate during the replen_match loop, AFTER you've formed your verdict but BEFORE / alongside presenting the writeup to the user. " +
       "Captures the agent's view of each candidate (adopt / port / skip / defer) with score + effort + reasoning. Distinct from replen_state, which captures the USER's action (star / hide / handoff). Both surface on the Activity feed at the user's dashboard. " +
-      "NEVER record a bare verdict: ALWAYS include at least `oneLine` (and `cosine`), even for quick skips outside the full triage protocol — a verdict with no reasoning is illegible in the Atlas dossier and the vault later, and teaches the learning loop nothing. " +
+      "NEVER record a bare verdict: ALWAYS include at least `oneLine` (and `cosine`), even for quick skips outside the full triage protocol — a verdict with no reasoning is illegible in the Atlas dossier and tiles later, and teaches the learning loop nothing. " +
       "Append-only: re-calling for the same repo creates another event row, useful if you re-evaluate later. " +
       "Voice: oneLine should be 1 sentence the user might read in a feed (\"Drops in for annotations.py — 30 min\"). writeup is the full reasoning (up to 16 KB).",
     inputSchema: {

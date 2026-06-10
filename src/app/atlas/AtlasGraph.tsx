@@ -534,7 +534,7 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
                   placeholder="e.g. tried X here — rate limits killed it"
                   style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: "inherit" }} />
                 <button style={{ ...btnStyle, marginTop: 4 }}
-                  onClick={() => act(() => setNodeNote(selected.kind, selected.nodeKey, noteDraft), noteDraft.trim() ? "Note saved — recall and the vault carry it now." : "Note cleared.")}>save note</button>
+                  onClick={() => act(() => setNodeNote(selected.kind, selected.nodeKey, noteDraft), noteDraft.trim() ? "Note saved — recall and your Atlas tiles carry it now." : "Note cleared.")}>save note</button>
               </div>
               {actionMsg && <div style={{ marginTop: 10, color: "#67e8f9", fontSize: 12 }}>{actionMsg}</div>}
               {dossier.queueSuggestion && !queuedMsg && (
