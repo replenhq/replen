@@ -20,6 +20,26 @@ import type { Fetcher } from "./types";
 import type { UserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
 
+// A single hung source (a fetch() with no timeout against an unresponsive host)
+// must never stall the whole pipeline: Promise.all waits for ALL, so one
+// non-settling promise blocks every other fetcher AND every downstream phase
+// forever (this is what hung run 158). Cap each fetcher — on timeout it yields
+// an empty list and the run proceeds. The original promise is allowed to settle
+// late in the background; we swallow its result/rejection so it can't crash.
+const FETCHER_TIMEOUT_MS = Math.max(5_000, parseInt(process.env.REPLEN_FETCHER_TIMEOUT_MS ?? "45000", 10) || 45_000);
+
+function withFetcherTimeout<T>(p: Promise<T>, fallback: T, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`[fetch] ${label} timed out after ${FETCHER_TIMEOUT_MS}ms — skipping this source for the run`);
+      resolve(fallback);
+    }, FETCHER_TIMEOUT_MS);
+  });
+  void p.then(() => clearTimeout(timer), () => clearTimeout(timer));
+  return Promise.race([p.catch(() => fallback), timeout]);
+}
+
 // Discovered-pool fetchers: don't depend on per-project search vectors.
 // Pull candidates from broad sources (trending, news, social). Safe to
 // run before Stages 1+2 — gives new users their first inventory in
@@ -97,7 +117,7 @@ async function runFetchersInner(userId: number, cfg: UserConfig, fetchers: Fetch
   const results = await Promise.all(
     fetchers.map(async (f) => {
       try {
-        const items = await f.run(ctx);
+        const items = await withFetcherTimeout(f.run(ctx), [], `user=${userId} ${f.name}`);
         console.log(`[fetch] user=${userId} ${f.name}: ${items.length} items`);
         return items;
       } catch (e) {
