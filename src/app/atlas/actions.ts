@@ -93,6 +93,8 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     else sections.push({ heading: "Coverage", items: ["Blind spot — nothing has ever been evaluated against this capability. Blind-spot scouting searches it on the next pipeline run."] });
     if (adjacent.length) sections.push({ heading: "Adjacent capabilities", items: adjacent.slice(0, 8) });
     const mods = Array.isArray(data.modality) ? (data.modality as string[]) : [];
+    const aliases = Array.isArray(data.aliases) ? (data.aliases as string[]) : [];
+    if (aliases.length) sections.push({ heading: "Also known as", items: aliases });
     return {
       kind, title: node.label,
       subtitle: [data.themeName ? `theme: ${data.themeName}` : null, data.keystone ? "keystone" : null, mods.length ? `modality: ${mods.join(", ")}` : null].filter(Boolean).join(" · ") || null,
