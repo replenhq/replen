@@ -44,3 +44,47 @@ export async function uncoveredKeystones(userId: number, limit = 3): Promise<Bli
     .sort((a, b) => b.degree - a.degree)
     .slice(0, limit);
 }
+
+// ── ranking hints — the graph's contribution to the daily matcher ───────────
+// keystoneLabels: capabilities that connect much of the portfolio (filling one
+//   is leverage). unfilledLabels: capabilities discovery never delivered for
+//   (filling one is exploration). relatedSlugs: projects RELATES_TO the scoped
+//   one (their adoptions are a prior — fed into the taste vector).
+export type RankHints = { keystoneLabels: Set<string>; unfilledLabels: Set<string>; relatedSlugs: string[] };
+
+const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+export async function loadRankHints(userId: number, scopedSlug: string | null): Promise<RankHints> {
+  const nodes = await db.select().from(schema.graphNodes).where(eq(schema.graphNodes.userId, userId));
+  const edges = await db.select({ kind: schema.graphEdges.kind, srcId: schema.graphEdges.srcId, dstId: schema.graphEdges.dstId, weight: schema.graphEdges.weight })
+    .from(schema.graphEdges).where(eq(schema.graphEdges.userId, userId));
+  const hints: RankHints = { keystoneLabels: new Set(), unfilledLabels: new Set(), relatedSlugs: [] };
+  if (!nodes.length) return hints;
+
+  const parse = (s: string | null): Record<string, unknown> => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
+  const filled = new Set<number>();
+  for (const e of edges) if (e.kind === "FILLS") filled.add(e.dstId);
+
+  const projectIdBySlug = new Map<string, number>();
+  const slugById = new Map<number, string>();
+  for (const n of nodes) {
+    if (n.kind === "project") { projectIdBySlug.set(n.nodeKey, n.id); slugById.set(n.id, n.nodeKey); }
+    if (n.kind === "capability") {
+      const d = parse(n.data);
+      const key = normLabel(n.label);
+      if (d.keystone) hints.keystoneLabels.add(key);
+      if (!filled.has(n.id)) hints.unfilledLabels.add(key);
+    }
+  }
+  if (scopedSlug) {
+    const scopedId = projectIdBySlug.get(scopedSlug);
+    if (scopedId != null) {
+      for (const e of edges) {
+        if (e.kind !== "RELATES_TO") continue;
+        if (e.srcId === scopedId) { const s = slugById.get(e.dstId); if (s) hints.relatedSlugs.push(s); }
+        else if (e.dstId === scopedId) { const s = slugById.get(e.srcId); if (s) hints.relatedSlugs.push(s); }
+      }
+    }
+  }
+  return hints;
+}

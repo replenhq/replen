@@ -197,6 +197,7 @@ export function candidateEmbeddingText(input: {
   topics?: string[] | null;
   repoShape?: string | null;
   primaryLanguage?: string | null;
+  readmeHead?: string | null;
 }): string {
   const parts: string[] = [];
   if (input.title) parts.push(input.title.trim());
@@ -205,8 +206,27 @@ export function candidateEmbeddingText(input: {
     parts.push(`Topics: ${input.topics.join(", ")}`);
   }
   if (input.primaryLanguage) parts.push(`Language: ${input.primaryLanguage}`);
+  if (input.readmeHead) parts.push(input.readmeHead);
   if (input.repoShape) parts.push(`Kind: ${input.repoShape}`);
   return parts.join(". ");
+}
+
+// Strip a README down to the prose that actually describes the project:
+// badges, HTML, link targets, and code fences are noise to the embedding.
+export function cleanReadmeHead(md: string | null | undefined, maxChars = 1500): string | null {
+  if (!md) return null;
+  const text = md
+    .replace(/```[\s\S]*?```/g, " ")          // code fences
+    .replace(/<!--[\s\S]*?-->/g, " ")          // comments
+    .replace(/<[^>]+>/g, " ")                  // html tags
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")     // images/badges
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")   // links → anchor text
+    .replace(/^#{1,6}\s*/gm, "")               // heading markers
+    .replace(/[*_`>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length < 40) return null; // badge-wall READMEs carry no prose
+  return text.slice(0, maxChars);
 }
 
 /**

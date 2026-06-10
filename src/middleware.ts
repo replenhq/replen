@@ -171,7 +171,11 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname === "/api/state" ||
     request.nextUrl.pathname === "/api/triage" ||
     request.nextUrl.pathname.startsWith("/api/projects/") ||
-    request.nextUrl.pathname.startsWith("/api/graph/")
+    request.nextUrl.pathname.startsWith("/api/graph/") ||
+    // /api/queue: token auth in the POST handler; /api/queue/add (email
+    // links) authorises via its own HMAC signature — see queue-sign.ts.
+    request.nextUrl.pathname === "/api/queue" ||
+    request.nextUrl.pathname.startsWith("/api/queue/")
   ) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }

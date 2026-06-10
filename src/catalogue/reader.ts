@@ -40,6 +40,7 @@ export type CatalogueMatch = {
   matchedRepo: string | null; // sibling repo this is for, when cross-repo (multi-repo products)
   ageDays: number | null;   // repo age; null when unknown
   rising: boolean;          // recent + relevant → "rising in your space"
+  tasteAdj?: number;        // Rocchio taste boost applied at ranking time
 };
 
 // Language/runtime compatibility. A library is only useful if you can actually
@@ -141,8 +142,12 @@ export async function catalogueMatches(opts: {
   knownDeps: Set<string>;         // lowercased dep tokens the project already uses — don't suggest back
   coveredFacets: Set<string>;     // normLabel'd capability facets the project already has a dep for
   limit: number;
+  // Rocchio taste vector (src/lib/taste.ts) — candidates similar to what this
+  // project (and its relatives) actually adopted get a small additive boost.
+  tasteVec?: number[] | null;
 }): Promise<CatalogueMatch[]> {
-  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, projectLanguages, knownDeps, coveredFacets, limit } = opts;
+  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, projectLanguages, knownDeps, coveredFacets, limit, tasteVec } = opts;
+  const TASTE_W = Math.max(0, parseFloat(process.env.REPLEN_TASTE_BOOST ?? "0.05"));
   if (!projectEmbedding && projectFacets.length === 0) return [];
 
   const rows = await db
@@ -235,11 +240,18 @@ export async function catalogueMatches(opts: {
 
     const ageDays = r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null;
     const recencyEligible = RISING_KINDS.has(kind);
+    // Taste: small boost for similarity to this project's adopted history.
+    let tasteAdj = 0;
+    if (tasteVec) {
+      const t = cosineSimilarity(tasteVec, emb);
+      if (Number.isFinite(t)) tasteAdj = Math.max(0, t) * TASTE_W;
+    }
     out.push({
       fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
       topics, repoShape: r.repoShape, cosine, matchedFacet, matchedProvenance, matchedRepo,
       ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
+      tasteAdj,
     });
   }
 
@@ -250,6 +262,7 @@ export async function catalogueMatches(opts: {
   // ignores is exactly what we want to surface.
   const score = (m: CatalogueMatch) =>
     m.cosine
+    + (m.tasteAdj ?? 0)
     + (m.rising ? recencyBoost(m.ageDays) : 0)
     - languagePenalty(projectLanguages, m.language)
     - commodityPenalty(m.name, m.description, m.topics)

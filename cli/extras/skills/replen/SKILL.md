@@ -311,8 +311,11 @@ on the candidate repo name in a curl payload.
 When you call `replen_record_triage`, **pass the contextual fields** so Replen
 learns: `matchedFacet` (copy the `matchedFacet` from the candidate's
 replen_match data), `facetModality` (the data modality of that capability —
-e.g. `"timeseries"`, `"image"`), and `reasonCode` (`fit` / `modality-collision`
-/ `task-collision` / `covered` / `wrong-posture` / `low-quality` / `other`).
+e.g. `"timeseries"`, `"image"`), `reasonCode` (`fit` / `modality-collision`
+/ `task-collision` / `covered` / `wrong-posture` / `low-quality` / `other`),
+and `cosine` (copy the candidate's `cosine` value verbatim — paired with your
+verdict it calibrates the relevance floor for this project, and your
+adopt/skip pattern continuously tunes the ranking via the taste vector).
 A skip coded `modality-collision` teaches Replen that this repo fits a
 *different* modality — so it stays available for the right project but stops
 colliding with this one.

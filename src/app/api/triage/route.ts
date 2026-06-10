@@ -44,6 +44,9 @@ type TriageBody = {
   matchedFacet?: string;
   facetModality?: string;
   reasonCode?: string;
+  // The cosine the candidate surfaced at (from replen_match data) — pairs with
+  // the verdict to calibrate the relevance floor per project.
+  cosine?: number;
 };
 
 const VALID_VERDICTS = ["adopt", "port", "skip", "defer"] as const;
@@ -154,6 +157,7 @@ export async function POST(req: Request) {
       matchedFacet: typeof body.matchedFacet === "string" ? body.matchedFacet.slice(0, 120) : null,
       facetModality: typeof body.facetModality === "string" ? body.facetModality.slice(0, 120) : null,
       reasonCode: body.reasonCode ?? null,
+      matchedCosine: typeof body.cosine === "number" && body.cosine >= -1 && body.cosine <= 1 ? body.cosine : null,
       createdAt: new Date(),
     })
     .returning({ id: schema.triageEvents.id })

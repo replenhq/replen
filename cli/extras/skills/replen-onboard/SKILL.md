@@ -62,6 +62,13 @@ already onboarded (it already has capabilities/facets). Re-running is always
 safe — pushing again just overwrites — so an interrupted sweep resumes cleanly by
 re-running and skipping repos already done.
 
+**"Done" includes a version report.** A repo that has capabilities but has
+never reported versions is NOT done — give it the lightweight backfill pass:
+skip the doc work and re-profiling entirely, just read the lockfile + runtime
+pins and call `replen_set_versions` (Step 2e.4). This is how an existing
+portfolio gets version-aware deadlines/security awareness after upgrading
+Replen — a re-run backfills versions across every repo in minutes.
+
 For each in-scope repo, do this contract:
 
 ### 2a. Read the code (not just the README)

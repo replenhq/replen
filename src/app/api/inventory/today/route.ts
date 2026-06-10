@@ -18,6 +18,10 @@ import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import { announcementPs } from "@/announcements/surface";
 import { deadlinePs } from "@/announcements/deadlines";
 import { alternativesFor, type Alternative } from "@/lib/alternatives";
+import { loadTasteVector, tasteBoost } from "@/lib/taste";
+import { loadOutcomePriors, priorBoost, sourcePrefix } from "@/lib/outcome-priors";
+import { calibratedFloor } from "@/lib/calibration";
+import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
@@ -330,6 +334,17 @@ export async function GET(req: Request) {
   //     ("you already cover X with Y") so in-session triage starts with memory.
   const modalitySuppress = await loadModalitySuppressions(auth.userId);
   const prior = await loadTriageContext(auth.userId);
+  // The learning trio + graph hints (all degrade silently with no history):
+  //   hints  — keystone/blind-spot capability labels + related projects (graph)
+  //   taste  — Rocchio vector over this project's (and relatives') verdicts
+  //   priors — Laplace hit-rates per source / per facet from triage outcomes
+  const hints: RankHints = scopedProject
+    ? await loadRankHints(auth.userId, scopedProject.slug)
+    : { keystoneLabels: new Set<string>(), unfilledLabels: new Set<string>(), relatedSlugs: [] };
+  const taste = scopedProject ? await loadTasteVector(auth.userId, scopedProjectId, hints.relatedSlugs) : null;
+  const outcomePriors = await loadOutcomePriors(auth.userId);
+  const KEYSTONE_BOOST = Math.max(0, parseFloat(process.env.REPLEN_KEYSTONE_BOOST ?? "0.02"));
+  const BLINDSPOT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_BLINDSPOT_BOOST ?? "0.02"));
 
   // Apply eligibility filter (cheap, deterministic). Reuses the same
   // structural rules the hosted pipeline runs at Stage 2.
@@ -514,6 +529,10 @@ export async function GET(req: Request) {
   // firehose (repo='') opt out — there the user has asked to see everything.
   const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.48")));
   const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
+  // Calibrated floor: once a project has enough (cosine, verdict) pairs, the
+  // floor moves to just under where its adoptions actually happen. Only ever
+  // tightens above the global default, never loosens.
+  const projectFloor = applyFloor ? await calibratedFloor(auth.userId, scopedProjectId, MIN_COSINE) : MIN_COSINE;
   // Provenance gating: a facet the server merely INFERRED from docs (or worse,
   // an ambiguous doc-section facet) is the least trustworthy kind of match
   // probe — it pays a cosine premium on top of the floor before it's allowed
@@ -535,6 +554,7 @@ export async function GET(req: Request) {
     matchedFacet: string | null; // which capability this hit, when facet-led (else null)
     matchedProvenance: Provenance | null; // how grounded that facet is, when facet-led
     depMatch: boolean;        // Pattern A: release of a vendor this project depends on
+    rank: number;             // cosine + learning boosts (sorting only; cosine stays raw)
   };
   const filtered: ScoredRow[] = [];
   // Feed sources (releases / specs / advisories) are INTENTIONALLY about deps
@@ -595,8 +615,10 @@ export async function GET(req: Request) {
     let matchedFacet: string | null = null;
     let matchedProvenance: Provenance | null = null;
     let facetLeadsCentroid = false; // a capability beats the whole-project match by a margin
+    let candVec: number[] | null = null; // kept for the taste boost below
     if (projectEmbedding) {
       const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
+      candVec = candEmbedding;
       if (candEmbedding) {
         const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
         if (Number.isFinite(cSim)) centroidCos = cSim;
@@ -663,7 +685,7 @@ export async function GET(req: Request) {
     // dependency match is exempt — it's the strongest signal we have. A match
     // LED by an inferred/ambiguous facet pays the provenance premium on top.
     if (applyFloor && !depMatch) {
-      const bar = MIN_COSINE + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
+      const bar = projectFloor + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
       const clears = cosine !== null ? cosine >= bar : relevance > 0;
       if (!clears) continue;
     }
@@ -688,6 +710,19 @@ export async function GET(req: Request) {
       continue;
     }
 
+    // Rank = cosine + the learning boosts. Displayed cosine stays raw; the
+    // boosts only reorder (taste, source/facet hit-rate priors, keystone and
+    // blind-spot graph hints). All zero with no history.
+    let rank = cosine ?? -1;
+    rank += tasteBoost(candVec, taste);
+    rank += priorBoost(outcomePriors.source, sourcePrefix(c.source));
+    if (matchedFacet) {
+      rank += priorBoost(outcomePriors.facet, matchedFacet);
+      const nf = normFacetLabel(matchedFacet);
+      if (hints.keystoneLabels.has(nf)) rank += KEYSTONE_BOOST;
+      if (hints.unfilledLabels.has(nf)) rank += BLINDSPOT_BOOST;
+    }
+
     filtered.push({
       ...c,
       whyShortlisted: reasons.join("; ") || "candidate eligible",
@@ -696,6 +731,7 @@ export async function GET(req: Request) {
       matchedFacet,
       matchedProvenance,
       depMatch,
+      rank,
     });
   }
 
@@ -705,8 +741,8 @@ export async function GET(req: Request) {
   // their tag-overlap relevance — they aren't penalised vs. embedded
   // ones until the embedding lands.
   filtered.sort((a, b) => {
-    // Both have cosine: pure cosine ordering.
-    if (a.cosine !== null && b.cosine !== null) return b.cosine - a.cosine;
+    // Both have cosine: rank ordering (cosine + learning boosts).
+    if (a.cosine !== null && b.cosine !== null) return b.rank - a.rank;
     // One has cosine, other doesn't: prefer the one WITH cosine —
     // a known semantic fit beats an unknown.
     if (a.cosine !== null) return -1;
@@ -799,6 +835,16 @@ export async function GET(req: Request) {
     alternatives?: Alternative[];
   };
 
+  // Rank per entry (cosine + learning boosts) — used by the merged sort only;
+  // the JSON keeps raw cosine so the agent sees the honest similarity.
+  const entryRank = new Map<OutEntry, number>();
+  // Copyleft flag: fine for reading/ideas, but adopting/vendoring needs a
+  // compatibility check — say so up front instead of letting the agent find
+  // out at integration time.
+  const isCopyleft = (license: string | null) =>
+    !!license && /^(agpl|gpl|sspl)/i.test(license) && !/^lgpl/i.test(license);
+  const copyleftNote = "; copyleft licence — check compatibility before adopting/vendoring";
+
   // Normalised own-pool entries (this user's candidates), full list pre-merge.
   const ownOut: OutEntry[] = dedup.map(({ c, r }) => ({
     candidateId: c.id as number | null,
@@ -815,7 +861,7 @@ export async function GET(req: Request) {
     source: c.source,
     postedAt: c.postedAt?.toISOString() ?? null,
     pushedAt: r!.pushedAt?.toISOString() ?? null,
-    whyShortlisted: c.whyShortlisted,
+    whyShortlisted: c.whyShortlisted + (isCopyleft(r!.license) ? copyleftNote : ""),
     cosine: c.cosine as number | null,
     matchedFacet: c.matchedFacet,
     matchedProvenance: c.matchedProvenance,
@@ -823,6 +869,7 @@ export async function GET(req: Request) {
     dependencyMatch: c.depMatch,
     projectMatch: scopedProject?.slug ?? null,
   }));
+  ownOut.forEach((e, i) => entryRank.set(e, dedup[i].c.rank));
 
   // Feed candidates (Pattern A / B), hydrated directly from the candidate row.
   // We still best-effort resolve a repoId when the item has a GitHub repo (for
@@ -932,7 +979,7 @@ export async function GET(req: Request) {
     const matches = await catalogueMatches({
       projectEmbedding,
       projectFacets,
-      minCosine: MIN_COSINE,
+      minCosine: projectFloor,
       competitorCentroid: COMPETITOR_CENTROID,
       facetLead: FACET_LEAD,
       excludeFullNames: alreadyShown,
@@ -940,6 +987,7 @@ export async function GET(req: Request) {
       knownDeps: productDeps,
       coveredFacets,
       limit,
+      tasteVec: taste,
     });
     // Resolve repoIds (for exclusion + state-keying) where the repo is already
     // known; catalogue-only repos keep repoId null (state writes resolve by name).
@@ -962,7 +1010,7 @@ export async function GET(req: Request) {
       // Provenance premium: an inferred/ambiguous facet must clear a higher bar
       // to pull a catalogue suggestion (the reader already nudges ranking by
       // provenance; this is the hard gate at the surfacing boundary).
-      if (needsProvenancePremium(m.matchedProvenance) && m.cosine < MIN_COSINE + INFERRED_PREMIUM) continue;
+      if (needsProvenancePremium(m.matchedProvenance) && m.cosine < projectFloor + INFERRED_PREMIUM) continue;
       catalogueOut.push({
         candidateId: null,
         repoId,
@@ -996,6 +1044,16 @@ export async function GET(req: Request) {
         // target the right repo (multi-repo products).
         projectMatch: m.matchedRepo ?? scopedProject.slug,
       });
+      const pushed = catalogueOut[catalogueOut.length - 1];
+      if (isCopyleft(m.license)) pushed.whyShortlisted += copyleftNote;
+      let cRank = m.cosine + (m.tasteAdj ?? 0) + priorBoost(outcomePriors.source, "catalogue");
+      if (m.matchedFacet) {
+        cRank += priorBoost(outcomePriors.facet, m.matchedFacet);
+        const nf = normFacetLabel(m.matchedFacet);
+        if (hints.keystoneLabels.has(nf)) cRank += KEYSTONE_BOOST;
+        if (hints.unfilledLabels.has(nf)) cRank += BLINDSPOT_BOOST;
+      }
+      entryRank.set(pushed, cRank);
     }
   }
 
@@ -1031,14 +1089,23 @@ export async function GET(req: Request) {
   // sink to the bottom but keep their relevance order via stable sort). Dedup by
   // repoId; repo-less feed items (chrome-status) are inherently unique and
   // always pass. Cap to limit.
+  // Staleness: a non-stake candidate whose repo hasn't been pushed in 18
+  // months pays a small ranking penalty — adoptability matters as much as fit.
+  const STALE_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_STALE_PENALTY ?? "0.04"));
+  const staleCutoff = Date.now() - 18 * 30 * 86400e3;
+  const isStale = (e: OutEntry) =>
+    !e.dependencyMatch && e.pushedAt != null && Date.parse(e.pushedAt) < staleCutoff;
+  const rankOf = (e: OutEntry) =>
+    (entryRank.get(e) ?? (e.cosine ?? -1))
+    - (coveredEntries.has(e) ? COVERED_SORT_PENALTY : 0)
+    - (isStale(e) ? STALE_PENALTY : 0);
+
   const mergedSeen = new Set<number>();
   const mergedNameSeen = new Set<string>();
   const candidatesOut = [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]
     .sort((a, b) => {
       if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
-      const ac = (a.cosine ?? -1) - (coveredEntries.has(a) ? COVERED_SORT_PENALTY : 0);
-      const bc = (b.cosine ?? -1) - (coveredEntries.has(b) ? COVERED_SORT_PENALTY : 0);
-      return bc - ac;
+      return rankOf(b) - rankOf(a);
     })
     .filter((e) => {
       // Dedup catalogue / repo-less entries by full name too (they carry no
@@ -1354,7 +1421,7 @@ export async function GET(req: Request) {
       productRepos: productRepoCount, // repos in this product whose capabilities are unioned
       days,
       windowReason,
-      minCosine: applyFloor ? MIN_COSINE : null,
+      minCosine: applyFloor ? projectFloor : null,
       totalConsidered,
       afterEligibility,
       afterFilter,

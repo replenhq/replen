@@ -245,6 +245,7 @@ const TOOLS: Tool[] = [
         matchedFacet: { type: "string", description: "The capability facet this candidate matched (the 'matchedFacet' field from replen_match). Lets Replen learn collisions contextually." },
         facetModality: { type: "string", description: "Data modality of the matched capability (e.g. 'timeseries', 'image'). Helps learn that a repo fits one modality but not another." },
         reasonCode: { type: "string", enum: ["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"], description: "Structured reason for the verdict. Use 'modality-collision' / 'task-collision' for word-collisions where the candidate's real domain diverges from the matched capability." },
+        cosine: { type: "number", minimum: -1, maximum: 1, description: "Copy the candidate's `cosine` from the replen_match data. Pairs with your verdict so the relevance floor calibrates itself per project." },
       },
       required: ["verdict"],
     },
@@ -263,6 +264,7 @@ const TOOLS: Tool[] = [
         matchedFacet: z.string().max(120).optional(),
         facetModality: z.string().max(120).optional(),
         reasonCode: z.enum(["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"]).optional(),
+        cosine: z.number().min(-1).max(1).optional(),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");

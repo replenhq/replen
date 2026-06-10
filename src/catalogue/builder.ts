@@ -11,7 +11,7 @@
 
 import { db, schema } from "../db/client";
 import { eq } from "drizzle-orm";
-import { embed, embedBatch, candidateEmbeddingText, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
+import { embed, embedBatch, candidateEmbeddingText, cleanReadmeHead, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { looksLikeHype } from "./derive-capabilities";
 import { classifyRepos, KEEP_KINDS, type RepoKind } from "./classify";
@@ -94,11 +94,20 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
       const cls = await classifyRepos(hits.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
       const keep = hits.map((h, i) => ({ h, kind: cls[i].kind, modality: cls[i].modality })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
       if (keep.length > 0) {
-        const vecs = await embedBatch(keep.map(({ h }) =>
-          candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language }),
+        // README head per kept repo: reuse a stored one, else fetch (one API
+        // call per NEW repo). The README is the difference between matching
+        // ~50 words of metadata and matching what the project actually does.
+        const readmeHeads: Array<string | null> = [];
+        for (const { h } of keep) {
+          const existing = await db.select({ readmeHead: schema.catalogueRepos.readmeHead })
+            .from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
+          readmeHeads.push(existing?.readmeHead ?? await fetchReadmeHead(h.fullName, ghToken));
+        }
+        const vecs = await embedBatch(keep.map(({ h }, i) =>
+          candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language, readmeHead: readmeHeads[i] }),
         ));
         for (let i = 0; i < keep.length; i++) {
-          await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind, keep[i].modality);
+          await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind, keep[i].modality, readmeHeads[i]);
           upserted++;
         }
       }
@@ -124,7 +133,7 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
   return { searched: toRefresh.length, upserted };
 }
 
-async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind, modality: Modality[]): Promise<void> {
+async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind, modality: Modality[], readmeHead: string | null): Promise<void> {
   const now = new Date();
   const modalityJson = modality.length ? JSON.stringify(modality) : null;
   const existing = await db.select().from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
@@ -139,6 +148,7 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, ki
       kind: kind === "unknown" ? existing.kind : kind,
       // Keep a known modality if the new pass came back empty (unknown).
       modality: modalityJson ?? existing.modality,
+      readmeHead: readmeHead ?? existing.readmeHead,
       // Re-embed only when we have a fresh vector; keep the old one otherwise.
       embedding: vector ? serialiseEmbedding(vector) : existing.embedding,
       capabilities: JSON.stringify(caps.slice(0, 20)), lastSeen: now, updatedAt: now,
@@ -148,9 +158,32 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, ki
       fullName: h.fullName, owner: h.owner, name: h.name, description: h.description, url: h.url,
       topics: JSON.stringify(h.topics), stars: h.stars, primaryLanguage: h.language, repoShape: h.shape,
       license: null, pushedAt: h.pushedAt, createdAt: h.createdAt, kind, modality: modalityJson,
+      readmeHead,
       embedding: vector ? serialiseEmbedding(vector) : null,
       capabilities: JSON.stringify([label]), firstSeen: now, lastSeen: now, updatedAt: now,
     });
+  }
+}
+
+// Fetch a repo's README head (cleaned prose, ~1.5k chars). Best-effort: a 404
+// (no README) or a rate-limit just yields null — the embed falls back to
+// title/description/topics, same as before.
+export async function fetchReadmeHead(fullName: string, token: string | undefined): Promise<string | null> {
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github.raw+json",
+    "user-agent": "replen/catalogue",
+    "x-github-api-version": "2022-11-28",
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    const res = await fetch(`https://api.github.com/repos/${fullName}/readme`, { headers, signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return cleanReadmeHead(await res.text());
+  } catch {
+    return null;
   }
 }
 

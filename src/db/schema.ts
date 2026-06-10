@@ -464,6 +464,10 @@ export const triageEvents = sqliteTable(
     matchedFacet: text("matched_facet"),
     facetModality: text("facet_modality"),
     reasonCode: text("reason_code"),
+    // The cosine this candidate surfaced at (from replen_match data). Paired
+    // with the verdict it becomes a labeled example for calibrating the
+    // relevance floor per project. Nullable — older events lack it.
+    matchedCosine: real("matched_cosine"),
     // Short summary the agent wrote for the user. Like a commit subject.
     oneLine: text("one_line"),
     // Optional full reasoning. Can be 0-5KB. Replen stores this server-
@@ -868,6 +872,10 @@ export const catalogueRepos = sqliteTable(
     // than getting buried under the all-time star leader.
     createdAt: integer("created_at", { mode: "timestamp" }),
     embedding: text("embedding"), // serialised vector (matched against project facets)
+    // Cleaned first ~1.5k chars of the repo README — embedded alongside
+    // title/description/topics. Title+description alone was the retrieval
+    // ceiling: ~50 words of text per candidate.
+    readmeHead: text("readme_head"),
     capabilities: text("capabilities"), // JSON string[] — capability labels that sourced this repo
     // library | framework | app | experiment | content | unknown (classify.ts).
     // Only library/framework/app are kept; experiment/content (viral hype,
