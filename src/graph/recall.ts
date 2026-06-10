@@ -32,7 +32,10 @@ export type RecallDecision = {
 // write-up) that matches the query — answers ARCHITECTURE questions ("how does
 // X handle auth?", "which repo does its own scraping?") that verdicts can't.
 export type RecallReport = { project: string; snippet: string; relevance: number };
-export type RecallResult = { query: string; capabilities: RecallCapability[]; decisions: RecallDecision[]; reports: RecallReport[] };
+// User-anchored notes (set on Atlas nodes) — institutional memory tied to a
+// capability/tool/project, not free-floating text.
+export type RecallNote = { kind: string; nodeKey: string; note: string };
+export type RecallResult = { query: string; capabilities: RecallCapability[]; decisions: RecallDecision[]; reports: RecallReport[]; notes: RecallNote[] };
 
 export async function recall(userId: number, opts: { query: string; verdict?: string; limit?: number }): Promise<RecallResult> {
   const limit = opts.limit ?? 8;
@@ -138,5 +141,14 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   }
   decisions.sort((a, b) => b.relevance - a.relevance).splice(limit);
 
-  return { query: opts.query, capabilities, decisions, reports };
+  // ── anchored notes: user-written, node-tied, keyword-matched ──
+  const noteRows = await db.select().from(schema.nodeNotes).where(eq(schema.nodeNotes.userId, userId));
+  const notes: RecallNote[] = noteRows
+    .map((n) => ({ n, rel: keywordHits(n.note, toks) + keywordHits(n.nodeKey, toks) * 2 }))
+    .filter((x) => x.rel > 0)
+    .sort((a, b) => b.rel - a.rel)
+    .slice(0, 4)
+    .map((x) => ({ kind: x.n.kind, nodeKey: x.n.nodeKey, note: x.n.note }));
+
+  return { query: opts.query, capabilities, decisions, reports, notes };
 }

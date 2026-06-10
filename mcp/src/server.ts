@@ -169,7 +169,7 @@ const TOOLS: Tool[] = [
       "  - 'what have we ported / adopted?'  → pass verdict='port' (or 'adopt') to filter\n" +
       "  - 'what do we use for <capability>, and where?'  → which projects have that capability and how grounded it is\n" +
       "  - 'how does <project> handle <thing>?'  → matching passages from the grounded project reports (architecture memory, not just verdicts)\n" +
-      "Returns { capabilities: [...], decisions: [...], reports: [...] }. Use it to avoid suggesting something the user already rejected (and why), or to point them at a repo they already ported in another project. Spans projects and time — something a single-repo view can't. (The same memory is also on disk at ~/.replen/atlas/ as a markdown vault, auto-refreshed in the background — readable without a tool call; start at MAP.md.)",
+      "Returns { capabilities: [...] (with 'paths' evidence anchors), decisions: [...], reports: [...], notes: [...] (user-written notes anchored to capabilities/tools - treat them as the user's own voice) }. Use it to avoid suggesting something the user already rejected (and why), or to point them at a repo they already ported in another project. Spans projects and time — something a single-repo view can't. (The same memory is also on disk at ~/.replen/atlas/ as a markdown vault, auto-refreshed in the background — readable without a tool call; start at MAP.md.)",
     inputSchema: {
       type: "object",
       properties: {

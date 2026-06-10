@@ -1245,6 +1245,76 @@ export const queuedActions = sqliteTable(
   }),
 );
 
+// ============================================================================
+// Atlas as INPUT — user judgment flowing back into the engine (all written
+// from the webapp dossiers via server actions; all consumed by the matcher,
+// the watch lenses, recall, and the vault).
+// ============================================================================
+
+// Plan/tier per external tool ("we're on Supabase Pro") + migrate-off intent.
+export const toolPrefs = sqliteTable(
+  "tool_prefs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tool: text("tool").notNull(), // lowercased tool node key (dep name)
+    plan: text("plan"),
+    migrateOff: integer("migrate_off", { mode: "boolean" }).notNull().default(false),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({ uniqUserTool: uniqueIndex("uniq_tool_pref").on(t.userId, t.tool) }),
+);
+
+// What the user WANTS to build — aspirational capabilities. Embedded once at
+// creation; they act as goal facets in matching (never "covered"), steer the
+// scouted searches, and render as goal nodes on the graph.
+export const capabilityGoals = sqliteTable(
+  "capability_goals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectSlug: text("project_slug"), // null = portfolio-wide
+    label: text("label").notNull(),
+    descriptor: text("descriptor"),
+    status: text("status").notNull().default("active"), // active | done | dropped
+    embedding: text("embedding"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  },
+  (t) => ({ idxUserStatus: index("idx_capability_goals_user").on(t.userId, t.status) }),
+);
+
+// Curation rules: rename / merge / delete / confirm on capabilities. Applied
+// to stored facets immediately AND re-applied at graph build + inventory read,
+// so a regenerated facet can't resurrect a deleted/renamed label.
+export const capabilityCurations = sqliteTable(
+  "capability_curations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    normLabel: text("norm_label").notNull(),
+    action: text("action").notNull(), // delete | rename | merge | confirm
+    target: text("target"),           // new label (rename) / target label (merge)
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({ uniqUserLabel: uniqueIndex("uniq_capability_curation").on(t.userId, t.normLabel) }),
+);
+
+// Anchored notes — institutional memory tied to a graph node, surfaced via
+// recall and the vault. Deliberately NOT free-floating memory.
+export const nodeNotes = sqliteTable(
+  "node_notes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    nodeKey: text("node_key").notNull(),
+    note: text("note").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({ uniqUserNode: uniqueIndex("uniq_node_note").on(t.userId, t.kind, t.nodeKey) }),
+);
+
 // Always-on delivery logs. One brief per (user, ISO week); one critical
 // alert per (user, event) — ever. Same once-only contract as the footnote.
 export const briefLog = sqliteTable(

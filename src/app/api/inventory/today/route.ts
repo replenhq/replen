@@ -345,6 +345,22 @@ export async function GET(req: Request) {
   const outcomePriors = await loadOutcomePriors(auth.userId);
   const KEYSTONE_BOOST = Math.max(0, parseFloat(process.env.REPLEN_KEYSTONE_BOOST ?? "0.02"));
   const BLINDSPOT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_BLINDSPOT_BOOST ?? "0.02"));
+  const GOAL_BOOST = Math.max(0, parseFloat(process.env.REPLEN_GOAL_BOOST ?? "0.04"));
+  // Tools the user declared they're migrating off — that vendor's release
+  // stream is noise on the way out, and matches reinforcing the dependency
+  // shouldn't surface.
+  const migrateOffTools = new Set(
+    (await db.select({ tool: schema.toolPrefs.tool }).from(schema.toolPrefs)
+      .where(and(eq(schema.toolPrefs.userId, auth.userId), eq(schema.toolPrefs.migrateOff, true))))
+      .map((t) => t.tool),
+  );
+  // Curation rules: deleted labels must never act as match probes again,
+  // even if a facet regeneration resurrects them in storage.
+  const curatedDeletes = new Set(
+    (await db.select({ normLabel: schema.capabilityCurations.normLabel, action: schema.capabilityCurations.action })
+      .from(schema.capabilityCurations).where(eq(schema.capabilityCurations.userId, auth.userId)))
+      .filter((c) => c.action === "delete").map((c) => c.normLabel),
+  );
 
   // Apply eligibility filter (cheap, deterministic). Reuses the same
   // structural rules the hosted pipeline runs at Stage 2.
@@ -468,7 +484,22 @@ export async function GET(req: Request) {
   // slugs) that legacy generation let through.
   for (let i = projectFacets.length - 1; i >= 0; i--) {
     const label = projectFacets[i].label;
-    if (isNoiseFacetLabel(label) || dropFacetNorms.has(normName(label))) projectFacets.splice(i, 1);
+    if (isNoiseFacetLabel(label) || dropFacetNorms.has(normName(label)) || curatedDeletes.has(normName(label))) projectFacets.splice(i, 1);
+  }
+  // GOALS — aspirational facets. Embedded like capabilities but flagged: a
+  // match that advances a goal gets a ranking boost and is exempt from the
+  // covered-facet penalty (you can't already "cover" something you want).
+  const goalLabels = new Set<string>();
+  if (scopedProject) {
+    const goalRows = await db.select().from(schema.capabilityGoals)
+      .where(and(eq(schema.capabilityGoals.userId, auth.userId), eq(schema.capabilityGoals.status, "active")));
+    for (const g of goalRows) {
+      if (g.projectSlug != null && !productSlugs.has(g.projectSlug)) continue;
+      const vec = parseStoredEmbedding(g.embedding ?? null);
+      if (!vec) continue;
+      projectFacets.push({ label: g.label, vec, modality: [], provenance: "grounded" });
+      goalLabels.add(normFacetLabel(g.label));
+    }
   }
   // Modality per facet label (union across product repos) — for checking a
   // candidate's recorded modality collisions against the facet it matched.
@@ -571,6 +602,12 @@ export async function GET(req: Request) {
     // Recorded modality collisions for this repo: those facets are off-limits
     // as match probes (the repo can still match via other facets / centroid).
     const suppressedMods = candOn ? modalitySuppress.get(`${candOn.owner}/${candOn.name}`.toLowerCase()) : undefined;
+    // Migrate-off mute: releases/news for a vendor the user is leaving.
+    if (migrateOffTools.size > 0 && isFeedSrc(c.source)) {
+      let candTopics: string[] = [];
+      try { candTopics = c.topics ? JSON.parse(c.topics) : []; } catch { /* */ }
+      if (candTopics.some((t) => typeof t === "string" && migrateOffTools.has(t.toLowerCase()))) continue;
+    }
     const reasons: string[] = [];
     let relevance = 0;
     let topicHits: string[] = [];
@@ -721,6 +758,7 @@ export async function GET(req: Request) {
       const nf = normFacetLabel(matchedFacet);
       if (hints.keystoneLabels.has(nf)) rank += KEYSTONE_BOOST;
       if (hints.unfilledLabels.has(nf)) rank += BLINDSPOT_BOOST;
+      if (goalLabels.has(nf)) { rank += GOAL_BOOST; reasons.push(`advances your goal: ${matchedFacet}`); }
     }
 
     filtered.push({
@@ -1052,6 +1090,7 @@ export async function GET(req: Request) {
         const nf = normFacetLabel(m.matchedFacet);
         if (hints.keystoneLabels.has(nf)) cRank += KEYSTONE_BOOST;
         if (hints.unfilledLabels.has(nf)) cRank += BLINDSPOT_BOOST;
+        if (goalLabels.has(nf)) { cRank += GOAL_BOOST; pushed.whyShortlisted += `; advances your goal: ${m.matchedFacet}`; }
       }
       entryRank.set(pushed, cRank);
     }
@@ -1072,7 +1111,8 @@ export async function GET(req: Request) {
     for (const h of prior.repoHistory.get(e.repo.toLowerCase()) ?? []) {
       notes.push(`you ${pastTense[h.verdict] ?? h.verdict} this${h.project ? ` for ${h.project}` : ""} (${fmtMonth(h.at)})${h.oneLine ? ` — ${h.oneLine}` : ""}`);
     }
-    if (e.matchedFacet) {
+    if (e.matchedFacet && !goalLabels.has(normFacetLabel(e.matchedFacet))) {
+      // (goal facets are exempt — you can't already cover what you WANT)
       const cov = prior.coverage.get(normFacetLabel(e.matchedFacet));
       if (cov && cov.repo.toLowerCase() !== e.repo.toLowerCase()) {
         notes.push(`you already cover '${e.matchedFacet}' with ${cov.repo} (${pastTense[cov.verdict] ?? cov.verdict} ${fmtMonth(cov.at)}${cov.project ? ` for ${cov.project}` : ""})`);
@@ -1393,9 +1433,13 @@ export async function GET(req: Request) {
   let queuedOut: Array<{ id: number; kind: string; title: string; note: string | null; project: string | null; queuedAt: string }> = [];
   if (scopedProject) {
     try {
-      const pending = await db.select().from(schema.queuedActions)
+      const allPending = await db.select().from(schema.queuedActions)
         .where(and(eq(schema.queuedActions.userId, auth.userId), eq(schema.queuedActions.status, "queued")))
         .orderBy(asc(schema.queuedActions.createdAt));
+      // Project routing: an item queued FOR a project only surfaces in
+      // sessions scoped to that project (or its product siblings); items
+      // with no project are fair game in any repo.
+      const pending = allPending.filter((q) => q.projectSlug == null || productSlugs.has(q.projectSlug));
       queuedOut = pending.map((q) => ({
         id: q.id, kind: q.kind, title: q.title, note: q.note,
         project: q.projectSlug, queuedAt: q.createdAt.toISOString(),

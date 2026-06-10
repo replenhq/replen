@@ -9,7 +9,10 @@
 // queue button. Search, kind filters, and depth focus keep big graphs legible.
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import { getNodeDossier, queueFromAtlas, type Dossier } from "./actions";
+import {
+  getNodeDossier, queueFromAtlas, suggestionAction, setToolPref, addGoal, resolveGoal,
+  curateCapability, setNodeNote, type Dossier,
+} from "./actions";
 
 export type GNode = {
   id: number; kind: string; nodeKey: string; label: string; theme: string | null;
@@ -19,15 +22,15 @@ export type GNode = {
 export type GEdge = { kind: string; src: number; dst: number; weight: number | null };
 
 const KIND_COLOR: Record<string, string> = {
-  project: "#ffc857", capability: "#5eb0ef", candidate: "#65a30d", product: "#c084fc", tool: "#f472b6", suggestion: "#2dd4bf", modality: "#888",
+  project: "#ffc857", capability: "#5eb0ef", candidate: "#65a30d", product: "#c084fc", tool: "#f472b6", suggestion: "#2dd4bf", goal: "#f43f5e", modality: "#888",
 };
 const EDGE_COLOR: Record<string, string> = {
   HAS_CAPABILITY: "rgba(94,176,239,0.18)", ADJACENT_TO: "rgba(120,120,140,0.14)", FILLS: "rgba(101,163,13,0.3)",
   EVALUATED: "rgba(217,119,6,0.35)", MEMBER_OF: "rgba(192,132,252,0.3)", RELATES_TO: "rgba(120,120,140,0.10)",
-  USES: "rgba(244,114,182,0.12)", SUGGESTED: "rgba(45,212,191,0.30)",
+  USES: "rgba(244,114,182,0.12)", SUGGESTED: "rgba(45,212,191,0.30)", GOAL_OF: "rgba(244,63,94,0.35)",
 };
 const ALERT_COLOR: Record<string, string> = { security: "#ef4444", breaking: "#f97316", pricing: "#eab308" };
-const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "tool", "product"];
+const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "tool", "product"];
 
 type P = { x: number; y: number; z: number; vx: number; vy: number; vz: number };
 
@@ -330,6 +333,32 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
       setQueuedMsg(res.ok ? "Queued — it'll come up in your next coding session." : "Couldn't queue that.");
     });
   };
+  // Input controls state (dossier edits + the panel's portfolio-goal box).
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [planDraft, setPlanDraft] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [goalDraft, setGoalDraft] = useState("");
+  const [panelGoalDraft, setPanelGoalDraft] = useState("");
+  useEffect(() => {
+    setActionMsg(null);
+    setNoteDraft(dossier?.note ?? "");
+    setPlanDraft(dossier?.tool?.plan ?? "");
+    setRenameDraft("");
+    setGoalDraft("");
+  }, [dossier]);
+  const act = (fn: () => Promise<{ ok: boolean } | { ok: boolean; id?: number } | { ok: boolean; touched: number }>, doneMsg: string) => {
+    startTransition(async () => {
+      try {
+        const res = await fn();
+        setActionMsg(res.ok ? doneMsg : "That didn't save — try again.");
+      } catch {
+        setActionMsg("That didn't save — try again.");
+      }
+    });
+  };
+  const inputStyle: CSSProperties = { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 6, color: "#f1f1f1", padding: "4px 9px", fontSize: 12, outline: "none" };
+  const btnStyle: CSSProperties = { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)", color: "#ddd", borderRadius: 5, padding: "4px 10px", cursor: "pointer", fontSize: 12 };
 
   const chip = (active: boolean): CSSProperties => ({
     padding: "3px 10px", borderRadius: 10, fontSize: 12, cursor: "pointer", userSelect: "none",
@@ -381,6 +410,13 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
                 <span><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: "#22d3ee", marginRight: 5 }} />queued work</span>
                 <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px dashed #888", marginRight: 5 }} />hover = links</span>
               </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <input value={panelGoalDraft} onChange={(e) => setPanelGoalDraft(e.target.value)}
+                  placeholder="add a portfolio goal (e.g. real-time collab)…" style={{ ...inputStyle, flex: 1 }} />
+                <button style={btnStyle} disabled={!panelGoalDraft.trim()}
+                  onClick={() => { const g = panelGoalDraft; setPanelGoalDraft(""); act(() => addGoal(g), `Goal "${g}" added — it'll appear on the graph and steer matching + scouting.`); }}>+ goal</button>
+              </div>
+              {actionMsg && !selected && <div style={{ marginTop: 8, color: "#67e8f9", fontSize: 12 }}>{actionMsg}</div>}
             </>
           )}
         </div>
@@ -411,6 +447,70 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
                   </ul>
                 </div>
               ))}
+              {/* ── actions: judgment flowing back into the engine ── */}
+              {dossier.suggestion && (
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button style={{ ...btnStyle, color: "#fbbf24", borderColor: "#7c5e10" }}
+                    onClick={() => act(() => suggestionAction(dossier.suggestion!.fullName, "star", dossier.suggestion!.projectSlug), "Starred — it won't re-surface, and it's saved for later.")}>★ Star</button>
+                  <button style={{ ...btnStyle, color: "#f87171", borderColor: "#7f1d1d" }}
+                    onClick={() => act(() => suggestionAction(dossier.suggestion!.fullName, "dismiss", dossier.suggestion!.projectSlug), "Dismissed — it won't be suggested again.")}>Dismiss</button>
+                </div>
+              )}
+              {dossier.tool && (
+                <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={planDraft} onChange={(e) => setPlanDraft(e.target.value)} placeholder="your plan/tier (e.g. Pro)" style={{ ...inputStyle, flex: 1 }} />
+                    <button style={btnStyle} onClick={() => act(() => setToolPref(dossier.tool!.key, { plan: planDraft }), "Plan saved — pricing alerts are now personal to it.")}>save</button>
+                  </div>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", color: "#bbb", fontSize: 12, cursor: "pointer" }}>
+                    <input type="checkbox" defaultChecked={dossier.tool.migrateOff}
+                      onChange={(e) => act(() => setToolPref(dossier.tool!.key, { migrateOff: e.target.checked }), e.target.checked ? "Marked migrating-off — its release noise is muted." : "Unmarked.")} />
+                    we're migrating off this
+                  </label>
+                </div>
+              )}
+              {dossier.capability && (
+                <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} placeholder="rename / merge into…" style={{ ...inputStyle, flex: 1 }} />
+                    <button style={btnStyle} disabled={!renameDraft.trim()}
+                      onClick={() => act(() => curateCapability(dossier.capability!.label, "merge", renameDraft), "Merged/renamed — applied everywhere, regeneration-proof.")}>apply</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {dossier.capability.provenance !== "grounded" && (
+                      <button style={{ ...btnStyle, color: "#86efac", borderColor: "#14532d" }}
+                        onClick={() => act(() => curateCapability(dossier.capability!.label, "confirm"), "Confirmed — now trusted as grounded; the inferred-facet premium no longer applies.")}>✓ confirm real</button>
+                    )}
+                    <button style={{ ...btnStyle, color: "#f87171", borderColor: "#7f1d1d" }}
+                      onClick={() => { if (window.confirm(`Remove "${dossier.capability!.label}" as a capability everywhere? This also blocks regeneration from re-adding it.`)) act(() => curateCapability(dossier.capability!.label, "delete"), "Removed — it can't come back via regeneration."); }}>not a capability</button>
+                  </div>
+                </div>
+              )}
+              {dossier.project && (
+                <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+                  <input value={goalDraft} onChange={(e) => setGoalDraft(e.target.value)} placeholder="add a goal for this project…" style={{ ...inputStyle, flex: 1 }} />
+                  <button style={btnStyle} disabled={!goalDraft.trim()}
+                    onClick={() => act(() => addGoal(goalDraft, { projectSlug: dossier.project!.slug }), "Goal added — matching boosts it and scouting hunts for it from the next run.")}>+ goal</button>
+                </div>
+              )}
+              {dossier.goal && (
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button style={{ ...btnStyle, color: "#86efac", borderColor: "#14532d" }}
+                    onClick={() => act(() => resolveGoal(dossier.goal!.id, "done"), "Marked done 🎉")}>done</button>
+                  <button style={btnStyle}
+                    onClick={() => act(() => resolveGoal(dossier.goal!.id, "dropped"), "Dropped — it stops steering matching and scouting.")}>drop</button>
+                </div>
+              )}
+              {/* anchored note — flows into recall + the vault */}
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>Note (agents see this via recall)</div>
+                <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} rows={2}
+                  placeholder="e.g. tried X here — rate limits killed it"
+                  style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: "inherit" }} />
+                <button style={{ ...btnStyle, marginTop: 4 }}
+                  onClick={() => act(() => setNodeNote(selected.kind, selected.nodeKey, noteDraft), noteDraft.trim() ? "Note saved — recall and the vault carry it now." : "Note cleared.")}>save note</button>
+              </div>
+              {actionMsg && <div style={{ marginTop: 10, color: "#67e8f9", fontSize: 12 }}>{actionMsg}</div>}
               {dossier.queueSuggestion && !queuedMsg && (
                 <button onClick={() => queueIt(dossier.queueSuggestion!)} style={{ marginTop: 14, background: "rgba(34,211,238,0.12)", border: "1px solid #155e6b", color: "#67e8f9", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12 }}>
                   Queue for next session →

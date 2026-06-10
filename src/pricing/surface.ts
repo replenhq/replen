@@ -52,6 +52,22 @@ export async function pricingPs(userId: number, userTokens: Set<string>): Promis
   );
   for (const s of seen) allSeen.add(s);
 
+  // Declared plans ("we're on Supabase Pro" — tool_prefs, set from the Atlas
+  // tool dossier) personalise ranking and wording: a change touching YOUR
+  // plan leads; a tier you're verifiably NOT on demotes.
+  const prefs = await db.select().from(schema.toolPrefs).where(eq(schema.toolPrefs.userId, userId));
+  const planByToken = new Map<string, string>();
+  for (const p of prefs) if (p.plan) planByToken.set(p.tool, p.plan.toLowerCase());
+  const planScore = (c: typeof changes[number]): number => {
+    let toks: string[] = [];
+    try { toks = JSON.parse(c.detectTokens ?? "[]"); } catch { /* */ }
+    const declared = toks.map((t) => planByToken.get(t)).find(Boolean);
+    if (!declared) return 0;
+    if (c.plan && declared.includes(c.plan.toLowerCase())) return 2; // their plan moved
+    if (c.plan) return -1; // a tier they're verifiably not on
+    return 1; // their tool, plan unclear
+  };
+
   const eligible = changes
     .filter((c) => !allSeen.has(c.id))
     .filter((c) => {
@@ -59,7 +75,7 @@ export async function pricingPs(userId: number, userTokens: Set<string>): Promis
       try { toks = JSON.parse(c.detectTokens ?? "[]"); } catch { /* */ }
       return toks.some((t) => userTokens.has(t));
     })
-    .sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
+    .sort((a, b) => planScore(b) - planScore(a) || b.detectedAt.getTime() - a.detectedAt.getTime());
   if (!eligible.length) return null;
 
   const c = eligible[0];
@@ -69,7 +85,9 @@ export async function pricingPs(userId: number, userTokens: Set<string>): Promis
     ? c.tool
     : `${c.vendor} ${c.tool}`;
   const line = c.plan
-    ? `${name} updated their pricing (${c.summary}) — worth a look.`
+    ? planScore(c) === 2
+      ? `${name} changed pricing on YOUR plan (${c.summary}) — worth a look.`
+      : `${name} updated their pricing (${c.summary}) — worth a look.`
     : `${name}'s pricing page changed — worth a look.`;
   return { changeId: c.id, line };
 }

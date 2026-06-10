@@ -177,6 +177,65 @@ export const ghTargetedSearchFetcher: Fetcher = {
       }
     }
 
+    // GOAL scouting — what the user said they WANT to build searches FIRST
+    // (a stated goal outranks an inferred gap for budget).
+    if (budgetRemaining > 0) {
+      const goals = await db.select().from(schema.capabilityGoals)
+        .where(and(eq(schema.capabilityGoals.userId, userId), eq(schema.capabilityGoals.status, "active")))
+        .limit(3);
+      for (const goal of goals) {
+        if (budgetRemaining <= 0) break;
+        const q = buildSingleTermQuery(goal.label, null, pushedAfter);
+        if (!q) continue;
+        budgetRemaining--;
+        let items: Array<Record<string, unknown>> = [];
+        try {
+          const res = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=${PER_TERM_RESULTS}`, { headers });
+          if (!res.ok) { console.warn(`[gh-targeted] goal "${goal.label}": HTTP ${res.status}`); continue; }
+          items = ((await res.json()) as { items?: Array<Record<string, unknown>> }).items ?? [];
+        } catch (e) {
+          console.warn(`[gh-targeted] goal "${goal.label}": fetch failed`, e);
+          continue;
+        }
+        let kept = 0;
+        const attributionSlug = goal.projectSlug ?? projects[0]?.slug;
+        if (!attributionSlug) break;
+        for (const item of items) {
+          const fullName = String(item.full_name ?? "");
+          const [owner, name] = fullName.split("/");
+          if (!owner || !name || seenOwnerName.has(fullName)) continue;
+          const stars = typeof item.stargazers_count === "number" ? item.stargazers_count : null;
+          if (shouldSkip(owner, stars).skip) continue;
+          seenOwnerName.add(fullName);
+          out.push({
+            source: `gh-targeted:${attributionSlug}`,
+            sourceItemId: fullName,
+            title: `${fullName} - ${String(item.description ?? "").trim()}`.slice(0, 280),
+            url: `https://github.com/${fullName}`,
+            githubUrl: `https://github.com/${fullName}`,
+            author: owner,
+            score: stars,
+            postedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
+            raw: {
+              owner, name,
+              description: String(item.description ?? "").trim(),
+              stars,
+              primaryLanguage: typeof item.language === "string" ? item.language : null,
+              projectSlug: attributionSlug,
+              outcome: `user goal: ${goal.label}${goal.descriptor ? ` — ${goal.descriptor}` : ""}`,
+              outcomeSource: "user-goal",
+              outcomeConfidence: "high",
+              matchedTerm: goal.label,
+              query: q,
+              goalId: goal.id,
+            },
+          });
+          kept++;
+        }
+        console.log(`[gh-targeted] user=${userId} goal "${goal.label}": ${kept} kept`);
+      }
+    }
+
     // Blind-spot scouting — coverage feeding acquisition. Uncovered keystone
     // capabilities get one search each with the remaining budget; candidates
     // attribute to the first project that has the capability so downstream

@@ -49,6 +49,10 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
     if (e.kind === "MEMBER_OF") { projProduct.set(s.id, d); }
   }
 
+  // Anchored notes render into their node's vault file.
+  const noteRows = await db.select().from(schema.nodeNotes).where(eq(schema.nodeNotes.userId, userId));
+  const noteFor = new Map(noteRows.map((n) => [`${n.kind} ${n.nodeKey}`, n.note]));
+
   const reports = new Map<string, { report: string | null; purpose: string | null }>();
   const rows = await db.select({ slug: schema.projectProfiles.slug, agentReport: schema.projectProfiles.agentReport, summaryJson: schema.projectProfiles.summaryJson })
     .from(schema.projectProfiles).where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
@@ -96,7 +100,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
     const rep = reports.get(p.nodeKey);
     files.push({ path: `${projFile(p.nodeKey)}.md`, content: [
       `---`, `type: project`, `slug: ${p.nodeKey}`, product ? `product: ${product.label}` : ``, `---`, ``,
-      `# ${p.label}`, ``, rep?.purpose ? `> ${rep.purpose}` : ``, ``,
+      `# ${p.label}`, ``, rep?.purpose ? `> ${rep.purpose}` : ``, noteFor.has(`project ${p.nodeKey}`) ? `\n> **Note:** ${noteFor.get(`project ${p.nodeKey}`)}\n` : ``, ``,
       `## Capabilities`, ...myCaps.map(({ cap, provenance, paths }) => `- ${link(capFile(cap.label), cap.label)} \`${provenance}\`${paths.length ? ` — \`${paths[0]}\`` : ""}`), ``,
       decisions.length ? `## Decisions` : ``, ...decisions.map((d) => `- **${d.verdict}** ${link(candFile(String(d.cand.data.fullName ?? d.cand.label)), String(d.cand.data.fullName ?? d.cand.label))}${d.reasonCode ? ` \`${d.reasonCode}\`` : ""}${d.oneLine ? ` — ${d.oneLine}` : ""}`),
       rep?.report ? `\n## Report\n\n${rep.report}` : ``,
@@ -111,7 +115,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
     files.push({ path: `${capFile(c.label)}.md`, content: [
       `---`, `type: capability`, mods.length ? `modality: [${mods.join(", ")}]` : ``, c.data.themeName ? `theme: ${c.data.themeName}` : ``, c.data.keystone ? `keystone: true` : ``, `---`, ``,
       `# ${c.label}`, ``,
-      projs.length ? `Used in: ${projs.map((p) => link(projFile(p.nodeKey), p.label)).join(", ")}` : ``, ``,
+      projs.length ? `Used in: ${projs.map((p) => link(projFile(p.nodeKey), p.label)).join(", ")}` : ``, noteFor.has(`capability ${c.nodeKey}`) ? `\n> **Note:** ${noteFor.get(`capability ${c.nodeKey}`)}\n` : ``, ``,
       neigh.length ? `## Adjacent capabilities` : ``, ...neigh.map((n) => `- ${link(capFile(n.cap.label), n.cap.label)} (${n.w.toFixed(2)})`),
       c.data.themeName ? `\nTheme: ${link(themeFile(String(c.data.themeName)), String(c.data.themeName))}` : ``,
     ].filter((l) => l !== ``).join("\n") + "\n" });

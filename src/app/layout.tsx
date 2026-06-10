@@ -148,6 +148,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Icon name="graph" size={13} />
               Atlas
             </a>
+            <a className="counter" href={`${navPrefix}/queue`} title="Queued work — items waiting for a coding session">
+              Queue
+            </a>
             <div className="spacer" />
             <UserMenu email={user.email} isAdmin={user.role === "admin"} demoMode={isDemoUser(user)} />
           </header>
