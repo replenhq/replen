@@ -36,6 +36,10 @@ const SKILLS: SkillSpec[] = [
     name: "replen",
     files: ["replen/SKILL.md"],
   },
+  {
+    name: "replen-onboard",
+    files: ["replen-onboard/SKILL.md"],
+  },
 ];
 
 // Old skill name, removed on setup so the renamed `/replen` is the single

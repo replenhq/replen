@@ -11,7 +11,7 @@
 //   3. cross-user endorsement — a repo that scored adopt/port across ≥K other
 //      users whose projects look like yours, that you haven't evaluated. k-anon.
 
-import { eq, and, gte } from "drizzle-orm";
+import { eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { cosineSimilarity, parseStoredEmbedding } from "../lib/embeddings";
 import { KEEP_KINDS, type RepoKind } from "../catalogue/classify";
@@ -103,6 +103,13 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
     if (verdict === "adopt" || verdict === "port") { const a = projAdopted.get(e.srcId) ?? []; a.push({ cand: e.dstId, verdict }); projAdopted.set(e.srcId, a); }
   }
 
+  // Prebuild the catalogue capability index ONCE. This used to be a full
+  // catalogueRepos scan + JSON parse per wanted capability per project, which
+  // made the portfolio-wide path (every project) time out. One pass now.
+  const catByCap = await buildCatalogueCapIndex(evaluatedFullNames);
+  // Prebuild every project's facet vectors ONCE (was one query per project).
+  const facetVecsBySlug = await allProjectFacetVecs(userId);
+
   const scopeId = opts.scopeProject ? projectIdBySlug.get(opts.scopeProject) ?? null : null;
   const projectIds = scopeId != null ? [scopeId] : [...projectIdBySlug.values()];
   const slugOf = (id: number) => byId.get(id)?.nodeKey ?? "?";
@@ -164,7 +171,7 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
     }
     for (const [yId, { fromLabel, w }] of wantCaps) {
       const yLabel = capById.get(yId)?.label; if (!yLabel) continue;
-      const cand = await bestCatalogueRepoFor(yLabel, evaluatedFullNames);
+      const cand = catByCap.get(yLabel.toLowerCase());
       if (!cand) continue;
       const key = `adj:${pid}:${norm(cand.fullName)}`;
       if (seen.has(key)) continue; seen.add(key);
@@ -182,7 +189,7 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
   if (endorsed.length) {
     for (const pid of projectIds) {
       const slug = slugOf(pid);
-      const projRow = await projectFacetVecs(userId, slug);
+      const projRow = facetVecsBySlug.get(slug) ?? [];
       if (!projRow.length) continue;
       for (const cand of endorsed) {
         if (evaluatedFullNames.has(norm(cand.fullName))) continue;
@@ -224,23 +231,27 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
 
 function safeJson(s: string | null): Record<string, unknown> { try { return s ? JSON.parse(s) : {}; } catch { return {}; } }
 
-// Best catalogue repo whose capabilities include `label`, adoptable kind, not
-// already evaluated by the user. Ranked by stars.
-async function bestCatalogueRepoFor(label: string, exclude: Set<string>): Promise<{ fullName: string; url: string | null; stars: number | null } | null> {
-  const lc = label.toLowerCase();
+// One pass over the catalogue → a map of capability label (lowercased) to the
+// best adoptable repo that fills it (highest stars, not already evaluated).
+// Replaces a per-capability full table scan; built once per computeLeaps call.
+type CatHit = { fullName: string; url: string | null; stars: number | null };
+async function buildCatalogueCapIndex(exclude: Set<string>): Promise<Map<string, CatHit>> {
   const rows = await db
     .select({ fullName: schema.catalogueRepos.fullName, url: schema.catalogueRepos.url, stars: schema.catalogueRepos.stars, capabilities: schema.catalogueRepos.capabilities, kind: schema.catalogueRepos.kind })
-    .from(schema.catalogueRepos)
-    .orderBy(schema.catalogueRepos.stars);
-  const matches = rows.filter((r) => {
-    if (exclude.has(norm(r.fullName))) return false;
-    if (r.kind && !KEEP_KINDS.has(r.kind as RepoKind)) return false;
+    .from(schema.catalogueRepos);
+  const idx = new Map<string, CatHit>();
+  for (const r of rows) {
+    if (exclude.has(norm(r.fullName))) continue;
+    if (r.kind && !KEEP_KINDS.has(r.kind as RepoKind)) continue;
     let caps: string[] = []; try { caps = r.capabilities ? JSON.parse(r.capabilities) : []; } catch { /* */ }
-    return caps.some((c) => c.toLowerCase() === lc);
-  });
-  if (!matches.length) return null;
-  matches.sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0));
-  return { fullName: matches[0].fullName, url: matches[0].url, stars: matches[0].stars };
+    for (const c of caps) {
+      if (typeof c !== "string") continue;
+      const k = c.toLowerCase();
+      const prev = idx.get(k);
+      if (!prev || (r.stars ?? 0) > (prev.stars ?? 0)) idx.set(k, { fullName: r.fullName, url: r.url, stars: r.stars });
+    }
+  }
+  return idx;
 }
 
 // Candidates adopt/port-endorsed by ≥K distinct users (k-anon), joined to the
@@ -265,11 +276,16 @@ async function endorsedCandidates(): Promise<Array<{ fullName: string; embedding
   return out;
 }
 
-// The facet vectors for a user's project (to match cross-user candidates against).
-async function projectFacetVecs(userId: number, slug: string): Promise<number[][]> {
-  const p = await db.select({ facetEmbeddings: schema.projectProfiles.facetEmbeddings })
+// All of a user's projects' facet vectors, keyed by slug, in one query (to
+// match cross-user candidates against). Was one query per project.
+async function allProjectFacetVecs(userId: number): Promise<Map<string, number[][]>> {
+  const rows = await db.select({ slug: schema.projectProfiles.slug, facetEmbeddings: schema.projectProfiles.facetEmbeddings })
     .from(schema.projectProfiles)
-    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.slug, slug))).get();
-  if (!p?.facetEmbeddings) return [];
-  try { const o = JSON.parse(p.facetEmbeddings) as { facets?: Array<{ vec: number[] }> }; return (o.facets ?? []).map((f) => f.vec).filter(Array.isArray); } catch { return []; }
+    .where(eq(schema.projectProfiles.userId, userId));
+  const m = new Map<string, number[][]>();
+  for (const p of rows) {
+    if (!p.facetEmbeddings) continue;
+    try { const o = JSON.parse(p.facetEmbeddings) as { facets?: Array<{ vec: number[] }> }; m.set(p.slug, (o.facets ?? []).map((f) => f.vec).filter(Array.isArray)); } catch { /* */ }
+  }
+  return m;
 }

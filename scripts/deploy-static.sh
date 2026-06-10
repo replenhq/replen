@@ -31,6 +31,9 @@ rsync_site() {
     --exclude='.git/' \
     --exclude='.DS_Store' \
     --exclude='*.log' \
+    --exclude='AGENTS.md' \
+    --exclude='CLAUDE.md' \
+    --exclude='GEMINI.md' \
     "$src/" "$REMOTE:$dest/"
   echo "[$label] done"
 }

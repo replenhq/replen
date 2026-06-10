@@ -87,6 +87,16 @@ export async function setupMcp(token: string, base: string): Promise<void> {
   const outcome = await injectInstructions();
   const summary = summariseOutcome(outcome);
   if (summary) console.log(summary);
+
+  // Point the user at the onboarding sweep — the highest-leverage next step,
+  // and otherwise invisible (it's a separately-invoked skill, not part of this
+  // CLI flow). Without grounded, per-repo profiles the matcher leans on thin
+  // server-side inference; the sweep is what makes matches genuinely relevant.
+  console.log("");
+  console.log("  ▸ Next: open Claude Code and run  /replen-onboard");
+  console.log("    It sets Replen up across your active repos in the background —");
+  console.log("    reading each one and building a tailored profile so matches are");
+  console.log("    relevant, not generic. Runs autonomously; nothing to wait on.");
 }
 
 // ============================================================================
