@@ -14,6 +14,7 @@ import { parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/regis
 import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
 import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
 import { computeLeaps, type Leap } from "@/graph/leaps";
+import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
@@ -1234,6 +1235,24 @@ export async function GET(req: Request) {
       } catch (e) {
         console.warn("[inventory] quiet-day leap failed (non-fatal):", e);
       }
+    }
+  }
+
+  // Pricing watch P.s. — one short line when a tool this product actually
+  // uses (deps + tags) changed its pricing. Once per (user, change), at most
+  // one per response, appended after whatever the footnote already says (or
+  // standing alone on a quiet day). Never a candidate, never a writeup.
+  if (scopedProject) {
+    try {
+      const ps = await pricingPs(auth.userId, pricingUserTokens(productDeps, userTagSet));
+      if (ps) {
+        displayText = displayText ? `${displayText}\n\nP.s. ${ps.line}` : `P.s. ${ps.line}`;
+        await db.insert(schema.pricingSurfaces)
+          .values({ userId: auth.userId, changeId: ps.changeId, surfacedAt: new Date() })
+          .onConflictDoNothing();
+      }
+    } catch (e) {
+      console.warn("[inventory] pricing P.s. failed (non-fatal):", e);
     }
   }
 

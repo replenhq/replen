@@ -947,6 +947,93 @@ export const userGraphMeta = sqliteTable("user_graph_meta", {
   builtAt: integer("built_at", { mode: "timestamp" }),
 });
 
+// ============================================================================
+// Pricing watch — track the pricing pages of ~255 paid developer tools and
+// surface "P.s. <vendor> updated their pricing" when a tool a user actually
+// uses changes price. Seeded from the curated tracker (vendor/tool/URL);
+// snapshots come from the Scrapling-based scraper (scripts/pricing-scrape.py,
+// driven by src/pricing/scrape.ts on the cron). No prices are stored at seed
+// time — the first successful scrape is the baseline, diffs after that.
+// ============================================================================
+
+export const pricingTools = sqliteTable(
+  "pricing_tools",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    category: text("category"),
+    subCategory: text("sub_category"),
+    vendor: text("vendor").notNull(),
+    tool: text("tool").notNull(),
+    pricingUrl: text("pricing_url").notNull(),
+    notes: text("notes"),
+    // JSON string[] of normalized tokens used to decide "does this user use
+    // this tool" against their deps + tags (e.g. ["supabase"]). Derived at
+    // import; generic words (cloud, api, platform…) are excluded.
+    detectTokens: text("detect_tokens"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    lastScrapedAt: integer("last_scraped_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUrl: uniqueIndex("uniq_pricing_tool_url").on(t.pricingUrl),
+    idxDue: index("idx_pricing_tools_due").on(t.active, t.lastScrapedAt),
+  }),
+);
+
+export const pricingSnapshots = sqliteTable(
+  "pricing_snapshots",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    toolId: integer("tool_id").notNull().references(() => pricingTools.id, { onDelete: "cascade" }),
+    capturedAt: integer("captured_at", { mode: "timestamp" }).notNull(),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(false),
+    // JSON string[] of normalized price points found on the page ("$25/mo").
+    amounts: text("amounts"),
+    // JSON Record<planName, string[]> — price points anchored to a plan word
+    // (pro/team/business/…). The stable subset we diff on for volatile pages.
+    plans: text("plans"),
+    hash: text("hash"),
+    error: text("error"),
+  },
+  (t) => ({
+    idxToolTime: index("idx_pricing_snapshots_tool").on(t.toolId, t.capturedAt),
+  }),
+);
+
+export const pricingChanges = sqliteTable(
+  "pricing_changes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    toolId: integer("tool_id").notNull().references(() => pricingTools.id, { onDelete: "cascade" }),
+    detectedAt: integer("detected_at", { mode: "timestamp" }).notNull(),
+    // Human one-liner, built deterministically from the diff:
+    // "Pro: $25/mo → $29/mo" or "price points changed".
+    summary: text("summary").notNull(),
+    // The plan whose price moved, when a single plan accounts for the diff.
+    plan: text("plan"),
+    beforeJson: text("before_json"),
+    afterJson: text("after_json"),
+  },
+  (t) => ({
+    idxTime: index("idx_pricing_changes_time").on(t.detectedAt),
+  }),
+);
+
+// One "P.s." per (user, change), ever — the footnote never repeats itself.
+export const pricingSurfaces = sqliteTable(
+  "pricing_surfaces",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    changeId: integer("change_id").notNull().references(() => pricingChanges.id, { onDelete: "cascade" }),
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUserChange: uniqueIndex("uniq_pricing_surface").on(t.userId, t.changeId),
+  }),
+);
+
 // Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
 // so the calm cadence holds: at most one leap per project per
 // REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.
