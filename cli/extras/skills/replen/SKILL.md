@@ -52,6 +52,29 @@ Parse the JSON response. Note:
 - `leap` — on quiet days the response may carry ONE portfolio connection
   (a cross-project / adjacency / cross-user leap) instead of candidates.
   `displayText` already words it; relay that and offer to explore it.
+- `queuedActions` — work the user queued from their weekly brief / alert
+  emails (or a past session). The footnote offers the oldest one; if the
+  user says yes, DO the work (bump the dep, handle the deprecation,
+  evaluate the repo), then call `replen_queue` with `action: "done"` and
+  the item's id. If they decline for good, `action: "dismiss"`. Never
+  leave a handled item queued — it will keep reminding.
+- `candidates[].alternatives` — on health/security stakes ("your upstream
+  is dying / has a CVE"), maintained catalogue libraries similar to the
+  flagged repo, with cross-user adoption counts. Use them in the writeup:
+  the verdict isn't just "X is risky" but "X is risky; Y is the maintained
+  replacement, N similar projects adopted it".
+
+### Step 2b — Keep the version picture fresh (cheap, do it)
+
+If `git status` shows the lockfile changed since you last reported, or you
+have never reported for this repo, call `replen_set_versions` with the
+resolved DIRECT dependency versions from the lockfile (package-lock.json /
+poetry.lock / uv.lock / Cargo.lock) plus runtimes under canonical keys
+(`node` from .nvmrc/engines/Dockerfile, `python` from .python-version /
+requires-python, `postgres`/`redis` when pinned in docker-compose). Names
+and versions ONLY — never code. This is what turns Replen's deadline and
+security lines from "worth checking your pins" into "affects `acme`
+(3.10.12)" — and silences alarms for versions this repo verifiably isn't on.
 
 If `candidates.length === 0`, tell the user "No new candidates today for
 `<owner/name>`. Calm-cadence working as designed — 1-3 actionable

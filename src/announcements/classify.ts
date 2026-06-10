@@ -29,6 +29,7 @@ const RULES: Rule[] = [
   { eventType: "breaking_change", severity: "High", re: /breaking change|migration required|no longer supported|incompatible|major version|upgrade guide|required action/i },
   { eventType: "deprecation", severity: "High", re: /deprecat|sunset|end[- ]of[- ]life|\bEOL\b|retirement|will be removed|support ends/i },
   { eventType: "service_outage", severity: "High", re: /major outage|partial outage|degraded performance|service disruption|elevated errors/i },
+  { eventType: "license_change", severity: "High", re: /relicens|license change|chang(?:e[ds]?|ing) (?:its |the |our )?license|switch(?:ed|ing)? to (?:the )?(?:bsl|sspl|agpl|elastic license|business source|server side public)|now licensed under|moving to (?:the )?(?:bsl|sspl|agpl|fair.?source)|no longer (?:mit|apache|open.?source)[- ]licensed|adopt(?:s|ed|ing) the (?:bsl|sspl|business source|elastic) license/i },
   { eventType: "pricing_change", severity: "Medium", re: /pricing|price (change|increase|update)|billing change|free tier|usage limit|metering|plan change|seat price|egress fees|storage fees/i },
   { eventType: "cve_update", severity: "Medium", re: /cvss score|advisory updated|affected[- ]version range|remediation guidance/i },
   { eventType: "compliance_or_trust_change", severity: "Medium", re: /soc ?2|iso ?27001|compliance certification|trust cent(re|er)|data processing agreement|\bdpa\b/i },
@@ -49,6 +50,7 @@ const IMPACTS: Record<string, EventImpacts> = {
   breaking_change: { willBreakApp: true, securityIssue: false, billIncrease: false, upgradeNeeded: true },
   deprecation: { willBreakApp: true, securityIssue: false, billIncrease: false, upgradeNeeded: true },
   service_outage: { willBreakApp: true, securityIssue: false, billIncrease: false, upgradeNeeded: false },
+  license_change: { willBreakApp: false, securityIssue: false, billIncrease: true, upgradeNeeded: true },
   pricing_change: { willBreakApp: false, securityIssue: false, billIncrease: true, upgradeNeeded: false },
   cve_update: { willBreakApp: false, securityIssue: true, billIncrease: false, upgradeNeeded: false },
   compliance_or_trust_change: { willBreakApp: false, securityIssue: false, billIncrease: false, upgradeNeeded: false },
@@ -60,12 +62,18 @@ export type Classification = { eventType: string; severity: Severity; impacts: E
 // priors. Rules whose event type the source declares are accepted at any
 // severity; rules outside the priors only when Critical. Returns null when
 // nothing matches — the common, correct case.
+// Event types trusted on ANY source regardless of its declared priors:
+// Critical rules (a breach is a breach wherever you read it) and license
+// changes — no source in the seed declares license_change, yet a relicensing
+// notice on a changelog or blog is exactly where the news breaks.
+const ALWAYS_TRUST = new Set(["license_change"]);
+
 export function classifyAnnouncement(text: string, sourceEventTypes: string[]): Classification | null {
   const priors = new Set(sourceEventTypes);
   let fallback: Rule | null = null;
   for (const rule of RULES) {
     if (!rule.re.test(text)) continue;
-    if (priors.size === 0 || priors.has(rule.eventType)) {
+    if (priors.size === 0 || priors.has(rule.eventType) || ALWAYS_TRUST.has(rule.eventType)) {
       return { eventType: rule.eventType, severity: rule.severity, impacts: IMPACTS[rule.eventType] };
     }
     if (rule.severity === "Critical" && !fallback) fallback = rule;
@@ -86,6 +94,7 @@ export const EVENT_LABELS: Record<string, string> = {
   deprecation: "deprecation notice",
   service_outage: "service incident",
   pricing_change: "pricing change",
+  license_change: "license change",
   cve_update: "advisory update",
   compliance_or_trust_change: "compliance update",
 };

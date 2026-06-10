@@ -14,6 +14,7 @@
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { EVENT_LABELS, SEVERITY_ORDER, type Severity } from "./classify";
+import { loadUserVersions } from "./deadlines";
 
 const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_ANNOUNCE_SURFACE_DAYS ?? "10", 10) || 10);
 
@@ -87,19 +88,27 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
   const critical = severity === "Critical";
   const label = EVENT_LABELS[e.eventType] ?? "announcement";
   const title = e.title.replace(/\s+/g, " ").trim().slice(0, 120);
+  // Version reports give name-level attribution: which repos use the tool.
+  let inRepos = "";
+  try {
+    const versions = await loadUserVersions(userId);
+    const toks: string[] = JSON.parse(e.detectTokens ?? "[]");
+    const slugs = [...new Set(toks.flatMap((t) => (versions.get(t) ?? []).map((v) => v.slug)))];
+    if (slugs.length) inRepos = ` (in ${slugs.slice(0, 3).map((s) => `\`${s}\``).join(", ")})`;
+  } catch { /* attribution is best-effort */ }
   let line: string;
   if (AGGREGATOR_CATEGORY.test(e.category ?? "")) {
     // The headline names the affected vendor; the aggregator's name is noise.
     line = critical
-      ? `Heads up — ${label}: "${title}". This touches your stack — worth checking now.`
-      : `${label} in the news: "${title}" — touches your stack, worth a look.`;
+      ? `Heads up — ${label}: "${title}". This touches your stack${inRepos} — worth checking now.`
+      : `${label} in the news: "${title}" — touches your stack${inRepos}, worth a look.`;
   } else {
     const name = e.product.toLowerCase().includes(e.vendor.toLowerCase().split(" ")[0]) || e.product === e.vendor
       ? e.product
       : `${e.vendor} ${e.product}`;
     line = critical
-      ? `Heads up — ${name} ${label}: "${title}". You use this — worth checking now.`
-      : `${name} posted a ${label}: "${title}" — worth a look.`;
+      ? `Heads up — ${name} ${label}: "${title}". You use this${inRepos} — worth checking now.`
+      : `${name} posted a ${label}: "${title}"${inRepos} — worth a look.`;
   }
   return { eventId: e.id, line, severity, critical };
 }

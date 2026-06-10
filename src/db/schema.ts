@@ -274,6 +274,12 @@ export const projectProfiles = sqliteTable(
     // KNOWS from reading the source), and an additional input to the server's
     // safety-net summarization. NULL until the onboarding sweep runs.
     agentReport: text("agent_report"),
+    // Version reporting: JSON Record<depName, version> sent by the in-session
+    // agent from the lockfile/manifest (names + versions ONLY, never code).
+    // Runtimes use canonical keys (node, python, postgres, …). Turns "worth
+    // checking your pins" into "affects acme (3.10.12)" across deadlines,
+    // alerts, and the weekly brief. NULL until the agent reports.
+    depVersions: text("dep_versions"),
     // Sprint 5 loader expansion: structured project-shape blob captured at
     // loader time. JSON object: { fileTree: string[], structured: string }.
     // - fileTree: sorted repo paths (denylist-filtered, lockfiles + build
@@ -1203,6 +1209,31 @@ export const deadlineSurfaces = sqliteTable(
   },
   (t) => ({
     uniqUserDeadlinePhase: uniqueIndex("uniq_deadline_surface").on(t.userId, t.deadlineId, t.phase),
+  }),
+);
+
+// Click-to-queue — the awareness→action bridge. A brief/alert item (or the
+// in-session agent) queues a piece of work; the next coding session's
+// footnote offers to handle it, and the agent resolves it via replen_queue.
+export const queuedActions = sqliteTable(
+  "queued_actions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    // What kind of thing was queued: 'deadline' | 'event' | 'pricing' | 'custom'
+    kind: text("kind").notNull(),
+    refId: integer("ref_id"), // id in the kind's table (null for custom)
+    title: text("title").notNull(),
+    note: text("note"),
+    projectSlug: text("project_slug"),
+    status: text("status").notNull().default("queued"), // 'queued' | 'done' | 'dismissed'
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+    // Footnote nag throttle: remind at most once a day until resolved.
+    lastRemindedAt: integer("last_reminded_at", { mode: "timestamp" }),
+  },
+  (t) => ({
+    idxUserStatus: index("idx_queued_actions_user").on(t.userId, t.status),
   }),
 );
 

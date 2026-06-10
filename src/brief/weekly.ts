@@ -10,19 +10,24 @@
 // four-questions gate, each item appears in exactly ONE section (most urgent
 // wins), and A QUIET WEEK SENDS NOTHING — no "nothing happened!" filler mail.
 
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, like } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { pickEmailProvider } from "../email/providers";
 import { escapeHtml, escapeHref } from "../email/escape";
 import { userToolTokens } from "../lib/detect-tokens";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 import { SEVERITY_ORDER, type Severity } from "../announcements/classify";
+import { loadUserVersions, versionMatchesCycle } from "../announcements/deadlines";
+import { queueAddUrl } from "../lib/queue-sign";
 
 const LOOKBACK_DAYS = Math.max(1, parseInt(process.env.REPLEN_BRIEF_LOOKBACK_DAYS ?? "7", 10) || 7);
 const DEADLINE_AHEAD_DAYS = Math.max(7, parseInt(process.env.REPLEN_BRIEF_DEADLINE_DAYS ?? "30", 10) || 30);
 const MAX_PER_SECTION = Math.max(1, parseInt(process.env.REPLEN_BRIEF_MAX_PER_SECTION ?? "5", 10) || 5);
+// "N majors behind" only counts as debt at this distance — one major behind
+// is normal life, not a brief item.
+const DEBT_MAJORS_BEHIND = Math.max(1, parseInt(process.env.REPLEN_BRIEF_DEBT_MAJORS ?? "2", 10) || 2);
 
-type BriefItem = { line: string; url: string | null };
+type BriefItem = { line: string; url: string | null; queueUrl: string | null };
 type Brief = {
   security: BriefItem[];
   breaking: BriefItem[];
@@ -69,16 +74,29 @@ const tokensMatch = (detectTokens: string | null, userTokens: Set<string>): bool
   }
 };
 
+// Email queue links are best-effort: signing needs ENCRYPTION_KEY, which a
+// minimal self-host might not set — the brief still sends, just without links.
+function tryQueueUrl(userId: number, kind: string, refId: number | null, title: string): string | null {
+  try { return queueAddUrl(userId, kind, refId, title); } catch { return null; }
+}
+
+const majorOf = (v: string): number | null => {
+  const m = v.replace(/^v/i, "").match(/^(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+};
+
 // Build the brief content for one user. Exported for the --dry CLI path.
 export async function buildBrief(userId: number, now: Date = new Date()): Promise<Brief> {
   const userTokens = await userTokensFor(userId);
   const brief: Brief = { security: [], breaking: [], bill: [], upgrade: [], total: 0 };
   if (userTokens.size === 0) return brief;
   const since = new Date(now.getTime() - LOOKBACK_DAYS * 86400e3);
+  const versions = await loadUserVersions(userId);
 
   // Classified events of the week — each lands in ONE section (most urgent).
   const events = await db
     .select({
+      id: schema.classifiedEvents.id,
       severity: schema.classifiedEvents.severity,
       title: schema.classifiedEvents.title,
       url: schema.classifiedEvents.url,
@@ -99,7 +117,8 @@ export async function buildBrief(userId: number, now: Date = new Date()): Promis
     .sort((a, b) => (SEVERITY_ORDER[b.severity as Severity] ?? 0) - (SEVERITY_ORDER[a.severity as Severity] ?? 0));
   for (const e of matchedEvents) {
     const name = e.product === e.vendor ? e.vendor : `${e.vendor} ${e.product}`;
-    const item = { line: `${name}: ${e.title}`, url: e.url };
+    const line = `${name}: ${e.title}`;
+    const item = { line, url: e.url, queueUrl: tryQueueUrl(userId, "event", e.id, line) };
     if (e.securityIssue) brief.security.push(item);
     else if (e.willBreakApp) brief.breaking.push(item);
     else if (e.billIncrease) brief.bill.push(item);
@@ -109,6 +128,7 @@ export async function buildBrief(userId: number, now: Date = new Date()): Promis
   // Pricing changes of the week.
   const priceChanges = await db
     .select({
+      id: schema.pricingChanges.id,
       summary: schema.pricingChanges.summary,
       vendor: schema.pricingTools.vendor,
       tool: schema.pricingTools.tool,
@@ -121,19 +141,76 @@ export async function buildBrief(userId: number, now: Date = new Date()): Promis
   for (const c of priceChanges) {
     if (!tokensMatch(c.detectTokens, userTokens)) continue;
     const name = c.tool === c.vendor ? c.vendor : `${c.vendor} ${c.tool}`;
-    brief.bill.push({ line: `${name}: ${c.summary}`, url: c.url });
+    const line = `${name}: ${c.summary}`;
+    brief.bill.push({ line, url: c.url, queueUrl: tryQueueUrl(userId, "pricing", c.id, line) });
   }
 
   // Deadlines inside the horizon (incl. just-passed within the grace window).
+  // Version-aware, same rules as the footnote: reported versions give
+  // per-repo attribution; an EOL whose cycle no reported version matches is
+  // verified-unaffected and excluded.
   const deadlines = await db.select().from(schema.deadlineEvents)
     .where(gte(schema.deadlineEvents.deadline, new Date(now.getTime() - 14 * 86400e3)));
   for (const d of deadlines) {
     if (d.deadline.getTime() > now.getTime() + DEADLINE_AHEAD_DAYS * 86400e3) continue;
     if (!tokensMatch(d.detectTokens, userTokens)) continue;
+    let affectedStr = "";
+    try {
+      const toks: string[] = JSON.parse(d.detectTokens ?? "[]");
+      const reported = toks.flatMap((t) => versions.get(t) ?? []);
+      if (reported.length > 0) {
+        const affected = d.kind === "eol" && d.cycle
+          ? reported.filter((v) => versionMatchesCycle(v.version, d.cycle!))
+          : reported;
+        if (affected.length === 0 && d.kind === "eol" && d.cycle) continue; // verified unaffected
+        if (affected.length) affectedStr = ` — affects ${affected.slice(0, 3).map((a) => `${a.slug} (${a.version})`).join(", ")}`;
+      }
+    } catch { /* attribution is best-effort */ }
     const days = Math.round((d.deadline.getTime() - now.getTime()) / 86400e3);
     const what = d.kind === "eol" ? `${d.title} end-of-life` : `${d.product}: ${d.title}`;
     const whenStr = days < 0 ? `passed ${fmtDate(d.deadline)}` : days === 0 ? "TODAY" : `${fmtDate(d.deadline)} (${days}d)`;
-    brief.upgrade.push({ line: `${what} — ${whenStr}`, url: d.url });
+    const line = `${what} — ${whenStr}${affectedStr}`;
+    brief.upgrade.push({ line, url: d.url, queueUrl: tryQueueUrl(userId, "deadline", d.id, line) });
+  }
+
+  // Upgrade debt — only possible with version reports: compare the user's
+  // pinned major against the latest stable release stack-watch saw for the
+  // same dependency. Two+ majors behind qualifies; one behind is normal life.
+  const releases = await db
+    .select({ rawJson: schema.candidates.rawJson, postedAt: schema.candidates.postedAt })
+    .from(schema.candidates)
+    .where(and(
+      eq(schema.candidates.userId, userId),
+      like(schema.candidates.source, "stack-watch:%"),
+      gte(schema.candidates.fetchedAt, new Date(now.getTime() - 60 * 86400e3)),
+    ));
+  const latestByDep = new Map<string, { tag: string; vendor: string; at: number }>();
+  for (const r of releases) {
+    try {
+      const raw = JSON.parse(r.rawJson ?? "{}") as { depNames?: string[]; tag?: string; vendor?: string };
+      if (!raw.tag || !Array.isArray(raw.depNames)) continue;
+      const at = r.postedAt?.getTime() ?? 0;
+      for (const dep of raw.depNames) {
+        const prev = latestByDep.get(dep.toLowerCase());
+        if (!prev || at > prev.at) latestByDep.set(dep.toLowerCase(), { tag: raw.tag, vendor: raw.vendor ?? dep, at });
+      }
+    } catch { /* malformed raw — skip */ }
+  }
+  const debtSeen = new Set<string>();
+  for (const [dep, rel] of latestByDep) {
+    const pinned = versions.get(dep);
+    if (!pinned?.length) continue;
+    const latestMajor = majorOf(rel.tag);
+    if (latestMajor == null) continue;
+    for (const p of pinned) {
+      const userMajor = majorOf(p.version);
+      if (userMajor == null || latestMajor - userMajor < DEBT_MAJORS_BEHIND) continue;
+      const key = `${dep}:${p.slug}`;
+      if (debtSeen.has(key)) continue;
+      debtSeen.add(key);
+      const line = `${rel.vendor}: ${p.slug} pins ${dep}@${p.version} — latest stable is ${rel.tag} (${latestMajor - userMajor} majors behind)`;
+      brief.upgrade.push({ line, url: null, queueUrl: tryQueueUrl(userId, "custom", null, line) });
+    }
   }
 
   for (const k of ["security", "breaking", "bill", "upgrade"] as const) brief[k].splice(MAX_PER_SECTION);
@@ -153,7 +230,9 @@ export function renderBriefText(brief: Brief, weekKey: string): string {
   for (const s of SECTIONS) {
     if (!brief[s.key].length) continue;
     lines.push(s.q);
-    for (const it of brief[s.key]) lines.push(`  - ${it.line}${it.url ? `\n    ${it.url}` : ""}`);
+    for (const it of brief[s.key]) {
+      lines.push(`  - ${it.line}${it.url ? `\n    ${it.url}` : ""}${it.queueUrl ? `\n    queue for next session: ${it.queueUrl}` : ""}`);
+    }
     lines.push("");
   }
   lines.push("Everything above passed the gate: a tool your stack actually uses, answering at least one of the four questions.");
@@ -171,7 +250,8 @@ export function renderBriefHtml(brief: Brief, weekKey: string): string {
     parts.push(`<h3 style="margin-bottom:4px">${escapeHtml(s.q)}</h3><ul style="margin-top:4px">`);
     for (const it of brief[s.key]) {
       const body = escapeHtml(it.line);
-      parts.push(`<li style="margin:4px 0">${it.url ? `<a href="${escapeHref(it.url)}" style="color:#1a1a1a">${body}</a>` : body}</li>`);
+      const queue = it.queueUrl ? ` <a href="${escapeHref(it.queueUrl)}" style="color:#6b7280;font-size:12px">queue&nbsp;→</a>` : "";
+      parts.push(`<li style="margin:4px 0">${it.url ? `<a href="${escapeHref(it.url)}" style="color:#1a1a1a">${body}</a>` : body}${queue}</li>`);
     }
     parts.push(`</ul>`);
   }

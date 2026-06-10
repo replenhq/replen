@@ -428,6 +428,20 @@
       "when": 1779902605651,
       "tag": "0060_always_on_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1779906205651,
+      "tag": "0061_dep_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1779909805651,
+      "tag": "0062_queued_actions",
+      "breakpoints": true
     }
   ]
 }

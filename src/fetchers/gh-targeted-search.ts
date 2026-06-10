@@ -21,6 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../analyzer/run-context";
 import { shouldSkip } from "./big-co";
 import type { ProjectSearchVectors } from "../projects/search-vectors";
+import { uncoveredKeystones } from "../graph/coverage";
 
 // Conservative caps.
 const PER_TERM_RESULTS = parseInt(process.env.GH_TARGETED_PER_TERM ?? "5", 10);
@@ -33,6 +34,10 @@ const PER_USER_SEARCH_BUDGET = parseInt(process.env.GH_TARGETED_BUDGET ?? "25", 
 // gets eaten fast — 3 vectors × 3 terms = 9 queries/project. Adjust upward
 // only when budget allows.
 const MAX_PROJECTS = parseInt(process.env.GH_TARGETED_MAX_PROJECTS ?? "10", 10);
+// Blind-spot scouting: uncovered KEYSTONE capabilities (no candidate has ever
+// been evaluated against them — see src/graph/coverage.ts) each get one
+// search per run, after the outcome vectors have spent their budget share.
+const BLINDSPOT_MAX = Math.max(0, parseInt(process.env.GH_TARGETED_BLINDSPOTS ?? "3", 10) || 3);
 
 export const ghTargetedSearchFetcher: Fetcher = {
   name: "gh-targeted",
@@ -169,6 +174,71 @@ export const ghTargetedSearchFetcher: Fetcher = {
           }
         }
         console.log(`[gh-targeted] user=${userId} ${project.slug} "${vector.outcome.slice(0, 60)}…": ${keptForVector} kept across ${queriesForVector.length} terms`);
+      }
+    }
+
+    // Blind-spot scouting — coverage feeding acquisition. Uncovered keystone
+    // capabilities get one search each with the remaining budget; candidates
+    // attribute to the first project that has the capability so downstream
+    // scoring/eligibility treat them like any other targeted result.
+    if (budgetRemaining > 0 && BLINDSPOT_MAX > 0) {
+      let spots: Awaited<ReturnType<typeof uncoveredKeystones>> = [];
+      try {
+        spots = await uncoveredKeystones(userId, BLINDSPOT_MAX);
+      } catch (e) {
+        console.warn(`[gh-targeted] user=${userId} blind-spot lookup failed:`, e);
+      }
+      for (const spot of spots) {
+        if (budgetRemaining <= 0) break;
+        const q = buildSingleTermQuery(spot.label, null, pushedAfter);
+        if (!q) continue;
+        budgetRemaining--;
+        let items: Array<Record<string, unknown>> = [];
+        try {
+          const res = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=${PER_TERM_RESULTS}`, { headers });
+          if (!res.ok) {
+            console.warn(`[gh-targeted] blind spot "${spot.label}": HTTP ${res.status}`);
+            continue;
+          }
+          items = ((await res.json()) as { items?: Array<Record<string, unknown>> }).items ?? [];
+        } catch (e) {
+          console.warn(`[gh-targeted] blind spot "${spot.label}": fetch failed`, e);
+          continue;
+        }
+        let kept = 0;
+        for (const item of items) {
+          const fullName = String(item.full_name ?? "");
+          const [owner, name] = fullName.split("/");
+          if (!owner || !name || seenOwnerName.has(fullName)) continue;
+          const stars = typeof item.stargazers_count === "number" ? item.stargazers_count : null;
+          if (shouldSkip(owner, stars).skip) continue;
+          seenOwnerName.add(fullName);
+          out.push({
+            source: `gh-targeted:${spot.projectSlugs[0]}`,
+            sourceItemId: fullName,
+            title: `${fullName} - ${String(item.description ?? "").trim()}`.slice(0, 280),
+            url: `https://github.com/${fullName}`,
+            githubUrl: `https://github.com/${fullName}`,
+            author: owner,
+            score: stars,
+            postedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
+            raw: {
+              owner, name,
+              description: String(item.description ?? "").trim(),
+              stars,
+              primaryLanguage: typeof item.language === "string" ? item.language : null,
+              projectSlug: spot.projectSlugs[0],
+              outcome: `coverage blind spot: nothing has ever been evaluated against "${spot.label}" (a keystone capability)`,
+              outcomeSource: "graph-coverage",
+              outcomeConfidence: "medium",
+              matchedTerm: spot.label,
+              query: q,
+              blindspot: true,
+            },
+          });
+          kept++;
+        }
+        console.log(`[gh-targeted] user=${userId} blind spot "${spot.label}": ${kept} kept (projects: ${spot.projectSlugs.join(", ")})`);
       }
     }
 

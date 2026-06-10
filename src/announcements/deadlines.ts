@@ -160,6 +160,34 @@ export type DeadlinePs = { deadlineId: number; phase: "announce" | "t30" | "t7";
 
 const fmtDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
+// dep/runtime name → projects that reported a pinned version for it.
+export type VersionEntry = { slug: string; version: string };
+export async function loadUserVersions(userId: number): Promise<Map<string, VersionEntry[]>> {
+  const rows = await db.select({ slug: schema.projectProfiles.slug, depVersions: schema.projectProfiles.depVersions })
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true), eq(schema.projectProfiles.included, true)));
+  const map = new Map<string, VersionEntry[]>();
+  for (const r of rows) {
+    if (!r.depVersions) continue;
+    try {
+      const obj = JSON.parse(r.depVersions) as Record<string, string>;
+      for (const [name, version] of Object.entries(obj)) {
+        if (typeof version !== "string") continue;
+        const arr = map.get(name) ?? [];
+        arr.push({ slug: r.slug, version });
+        map.set(name, arr);
+      }
+    } catch { /* malformed — skip project */ }
+  }
+  return map;
+}
+
+// "18.19.0" matches cycle "18"; "3.10.12" matches "3.10".
+export function versionMatchesCycle(version: string, cycle: string): boolean {
+  const v = version.replace(/^v/i, "");
+  return v === cycle || v.startsWith(`${cycle}.`);
+}
+
 export async function deadlinePs(userId: number, userTokens: Set<string>): Promise<DeadlinePs | null> {
   if (userTokens.size === 0) return null;
   const now = Date.now();
@@ -169,13 +197,28 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
   const surfaced = await db.select({ deadlineId: schema.deadlineSurfaces.deadlineId, phase: schema.deadlineSurfaces.phase })
     .from(schema.deadlineSurfaces).where(eq(schema.deadlineSurfaces.userId, userId));
   const done = new Set(surfaced.map((s) => `${s.deadlineId}:${s.phase}`));
+  const versions = await loadUserVersions(userId);
 
-  type Candidate = { e: typeof events[number]; phase: "announce" | "t30" | "t7"; rank: number };
+  type Candidate = { e: typeof events[number]; phase: "announce" | "t30" | "t7"; rank: number; affected: VersionEntry[] };
   const candidates: Candidate[] = [];
   for (const e of events) {
     let toks: string[] = [];
     try { toks = JSON.parse(e.detectTokens ?? "[]"); } catch { /* */ }
     if (!toks.some((t) => userTokens.has(t))) continue;
+    // Version awareness — precision in BOTH directions. When any project
+    // reported a pinned version for this product:
+    //   - EOL with a cycle: only the projects ON that cycle are affected;
+    //     if none are, the deadline is suppressed entirely for this user.
+    //   - deprecations (no cycle): name-level attribution ("in acme, drone").
+    // No version data → the generic "worth checking your pins" wording.
+    const reported = toks.flatMap((t) => versions.get(t) ?? []);
+    let affected: VersionEntry[] = [];
+    if (reported.length > 0) {
+      affected = e.kind === "eol" && e.cycle
+        ? reported.filter((v) => versionMatchesCycle(v.version, e.cycle!))
+        : reported;
+      if (affected.length === 0 && e.kind === "eol" && e.cycle) continue; // verified unaffected
+    }
     const days = Math.round((e.deadline.getTime() - now) / 86400e3);
     // The phase is a function of time-to-deadline ONLY — once the current
     // phase has been shown, the deadline stays quiet until the next phase
@@ -183,26 +226,33 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
     const phase: Candidate["phase"] = days <= 7 ? "t7" : days <= 30 ? "t30" : "announce";
     if (done.has(`${e.id}:${phase}`)) continue;
     if (phase === "announce" && e.detectedAt.getTime() <= now - ANNOUNCE_FRESH_DAYS * 86400e3) continue;
-    candidates.push({ e, phase, rank: phase === "t7" ? 3 : phase === "t30" ? 2 : 1 });
+    candidates.push({ e, phase, rank: phase === "t7" ? 3 : phase === "t30" ? 2 : 1, affected });
   }
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.rank - a.rank || a.e.deadline.getTime() - b.e.deadline.getTime());
 
-  const { e, phase } = candidates[0];
+  const { e, phase, affected } = candidates[0];
   const days = Math.round((e.deadline.getTime() - now) / 86400e3);
   const when = fmtDate(e.deadline);
   const what = e.kind === "eol" ? `${e.title} reaches end-of-life` : `${e.product}'s deadline ("${e.title}")`;
+  // With version reports the line names the affected repos; without, it hedges.
+  const affectedStr = affected.length
+    ? `affects ${affected.slice(0, 3).map((a) => `\`${a.slug}\` (${a.version})`).join(", ")}${affected.length > 3 ? ` +${affected.length - 3} more` : ""}`
+    : null;
   let line: string;
   if (phase === "t7" && days < 0) {
-    line = e.kind === "eol"
-      ? `${e.title} reached end-of-life on ${when} — if anything still pins it, that's now unsupported.`
-      : `${e.product}'s deadline ("${e.title}") passed on ${when} — if anything still relies on it, that's now unsupported.`;
+    const head = e.kind === "eol"
+      ? `${e.title} reached end-of-life on ${when}`
+      : `${e.product}'s deadline ("${e.title}") passed on ${when}`;
+    line = affectedStr
+      ? `${head} — ${affectedStr}; that's now unsupported.`
+      : `${head} — if anything still ${e.kind === "eol" ? "pins it" : "relies on it"}, that's now unsupported.`;
   } else if (phase === "t7") {
-    line = `${what} ${days === 0 ? "is TODAY" : `is this week (${when})`} — worth checking your pins now.`;
+    line = `${what} ${days === 0 ? "is TODAY" : `is this week (${when})`} — ${affectedStr ?? "worth checking your pins now"}.`;
   } else if (phase === "t30") {
-    line = `reminder: ${what} on ${when} (${days} days) — you use this; worth planning the bump.`;
+    line = `reminder: ${what} on ${when} (${days} days) — ${affectedStr ?? "you use this; worth planning the bump"}.`;
   } else {
-    line = `${what} on ${when} — you use this; worth checking whether any project still pins it.`;
+    line = `${what} on ${when} — ${affectedStr ?? "you use this; worth checking whether any project still pins it"}.`;
   }
   return { deadlineId: e.id, phase, line, urgent: phase === "t7" };
 }

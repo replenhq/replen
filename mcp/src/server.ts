@@ -403,6 +403,74 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_set_versions",
+    description:
+      "Report the project's PINNED dependency/runtime versions to Replen — names + versions ONLY, never code. " +
+      "This is what turns vague awareness ('worth checking your pins') into certainty ('python 3.10 EOL affects `acme` (3.10.12)') " +
+      "across deadline reminders, security alerts, and the weekly brief — and it SUPPRESSES alarms for versions you're verifiably not on. " +
+      "Read the LOCKFILE (package-lock.json / poetry.lock / uv.lock / Cargo.lock) for resolved direct-dependency versions, plus runtimes " +
+      "under canonical keys: node (from .nvmrc / engines / Dockerfile), python (.python-version / pyproject requires-python), " +
+      "postgres / redis / etc. when pinned in docker-compose. Full replace per call — send the complete current picture. " +
+      "Call during onboarding and again whenever you notice the lockfile changed (cheap, no LLM).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/name of the project (defaults to the cwd repo)" },
+        versions: {
+          type: "object",
+          description: "Map of dependency/runtime name → pinned version, e.g. {\"next\": \"14.2.3\", \"node\": \"20.11.1\", \"python\": \"3.11.4\"}. Direct deps only; range operators are stripped server-side.",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: ["versions"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        repo: z.string().optional(),
+        versions: z.record(z.string(), z.string()),
+      }).parse(args);
+      const repo = parsed.repo ?? cfg.defaultRepo ?? undefined;
+      if (!repo) throw new Error("no repo given and none detected from cwd — pass repo='owner/name'");
+      const data = await apiPost(cfg, "/api/projects/versions", { repo, versions: parsed.versions });
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
+    name: "replen_queue",
+    description:
+      "The awareness→action queue. Items land here from the user's weekly brief / alert emails ('queue for next session') " +
+      "or from you. replen_match returns pending items as `queuedActions` and its footnote offers the oldest one — " +
+      "when the user says yes, DO the work (bump the dep, handle the deprecation, evaluate the repo), then mark it done. " +
+      "Actions:\n" +
+      "  - list                     → pending items\n" +
+      "  - add {title, note?, project?} → queue something for a future session ('remind me to migrate off X next week')\n" +
+      "  - done {id}                → you handled it\n" +
+      "  - dismiss {id}             → user decided to drop it\n" +
+      "Resolving stops the session reminders — never leave a handled item queued.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "add", "done", "dismiss"] },
+        id: { type: "number", description: "Item id (for done / dismiss)" },
+        title: { type: "string", description: "What to queue (for add)" },
+        note: { type: "string", description: "Optional context for the future session (for add)" },
+        project: { type: "string", description: "Optional project slug this belongs to (for add)" },
+      },
+      required: ["action"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        action: z.enum(["list", "add", "done", "dismiss"]),
+        id: z.number().int().positive().optional(),
+        title: z.string().optional(),
+        note: z.string().optional(),
+        project: z.string().optional(),
+      }).parse(args);
+      const data = await apiPost(cfg, "/api/queue", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_check_new",
     description:
       "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +

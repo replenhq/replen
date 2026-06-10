@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
@@ -17,6 +17,7 @@ import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import { announcementPs } from "@/announcements/surface";
 import { deadlinePs } from "@/announcements/deadlines";
+import { alternativesFor, type Alternative } from "@/lib/alternatives";
 import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
@@ -793,6 +794,9 @@ export async function GET(req: Request) {
     // triages with history instead of from scratch: earlier verdicts on this
     // repo, and whether the matched facet is already covered by an adopt/port.
     priorContext?: string | null;
+    // Risk + replacement (health/security stakes only): maintained catalogue
+    // libraries similar to the flagged repo, with cross-user adoption counts.
+    alternatives?: Alternative[];
   };
 
   // Normalised own-pool entries (this user's candidates), full list pre-merge.
@@ -1158,6 +1162,28 @@ export async function GET(req: Request) {
     }
   }
 
+  // Risk + replacement. A health/security stake says "this thing you depend
+  // on is in trouble" — the catalogue can answer the next question in the
+  // same breath: maintained, embedding-similar libraries, ranked with
+  // cross-user adoption. Attached to at most two entries per response.
+  let altAttached = 0;
+  for (const e of candidatesOut) {
+    if (altAttached >= 2) break;
+    if (!e.dependencyMatch) continue;
+    if (!e.source.startsWith("health-watch:") && !e.source.startsWith("security-watch:")) continue;
+    if (!/^[^/]+\/[^/]+$/.test(e.repo)) continue; // repo-less feed items have nothing to compare
+    try {
+      const alts = await alternativesFor(e.repo, 3);
+      if (alts.length) {
+        e.alternatives = alts;
+        e.whyShortlisted += `; maintained alternatives: ${alts.map((a) => a.fullName).join(", ")}`;
+        altAttached++;
+      }
+    } catch (err) {
+      console.warn(`[inventory] alternatives lookup failed for ${e.repo} (non-fatal):`, err);
+    }
+  }
+
   // Pre-formatted user-facing footnote string. Built server-side so the
   // agent doesn't have to derive it from the JSON (which has historically
   // been the unreliable bit — agents inconsistently formatted or skipped
@@ -1177,7 +1203,12 @@ export async function GET(req: Request) {
         : top.source.startsWith("security-watch:")
         ? `a security advisory affects a dependency you use — ${top.title}`
         : `a dependency you use just shipped — ${top.title}`;
-      displayText = `By the way — ${lead}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+      // Risk + replacement in one breath: when the stake is bad news about an
+      // upstream and the catalogue knows maintained stand-ins, say so.
+      const altNote = top.alternatives?.length
+        ? ` Maintained alternatives exist (${top.alternatives.slice(0, 2).map((a) => `\`${a.fullName}\``).join(", ")}).`
+        : "";
+      displayText = `By the way — ${lead}.${altNote} ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else if (top.source === "catalogue-adjacent") {
       // Exploratory adjacency: a capability the project doesn't have but is
       // near. Frame it as a suggestion, not a fit.
@@ -1288,6 +1319,34 @@ export async function GET(req: Request) {
     }
   }
 
+  // Click-to-queue, the surfacing half: pending queued work (from brief/alert
+  // links or replen_queue) rides into the session. The full list goes in the
+  // JSON for the agent; the footnote reminds about ONE item, at most once a
+  // day, until it's done or dismissed.
+  let queuedOut: Array<{ id: number; kind: string; title: string; note: string | null; project: string | null; queuedAt: string }> = [];
+  if (scopedProject) {
+    try {
+      const pending = await db.select().from(schema.queuedActions)
+        .where(and(eq(schema.queuedActions.userId, auth.userId), eq(schema.queuedActions.status, "queued")))
+        .orderBy(asc(schema.queuedActions.createdAt));
+      queuedOut = pending.map((q) => ({
+        id: q.id, kind: q.kind, title: q.title, note: q.note,
+        project: q.projectSlug, queuedAt: q.createdAt.toISOString(),
+      }));
+      const dayAgo = Date.now() - 24 * 3600 * 1000;
+      const due = pending.find((q) => !q.lastRemindedAt || q.lastRemindedAt.getTime() < dayAgo);
+      if (due) {
+        const more = pending.length > 1 ? ` (+${pending.length - 1} more queued)` : "";
+        const remindLine = `Also — you queued “${due.title}”${due.kind !== "custom" ? " from your brief" : ""}${more}. Want me to handle it now?`;
+        displayText = displayText ? `${displayText}\n\n${remindLine}` : remindLine;
+        await db.update(schema.queuedActions).set({ lastRemindedAt: new Date() })
+          .where(eq(schema.queuedActions.id, due.id));
+      }
+    } catch (e) {
+      console.warn("[inventory] queued-actions reminder failed (non-fatal):", e);
+    }
+  }
+
   return NextResponse.json(
     {
       filterMode,
@@ -1304,6 +1363,9 @@ export async function GET(req: Request) {
       candidates: candidatesOut,
       // Quiet-day leap (when set, displayText already carries its message).
       leap: leapOut,
+      // Pending queued work (from brief/alert links or replen_queue). The
+      // agent handles items the user accepts, then resolves via replen_queue.
+      queuedActions: queuedOut,
     },
     { headers: corsHeaders },
   );

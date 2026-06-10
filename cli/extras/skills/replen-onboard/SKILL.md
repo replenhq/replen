@@ -128,6 +128,14 @@ specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
    grounded `capabilities` array AND the `report` from 2c. The server builds the
    facet vectors immediately and stores the report as grounding for its own
    summarization. Use the MCP tools, not hand-rolled `curl`.
+4. **Report pinned versions** with `replen_set_versions` — the resolved DIRECT
+   dependency versions from the lockfile (package-lock.json / poetry.lock /
+   uv.lock / Cargo.lock), plus runtimes under canonical keys (`node` from
+   .nvmrc/engines/Dockerfile, `python` from .python-version/requires-python,
+   `postgres`/`redis` when pinned in docker-compose). Names + versions ONLY,
+   never code. This makes EOL/deprecation/security awareness name the affected
+   repos with certainty — and suppresses alarms for versions the repo
+   verifiably isn't on.
 
 ## Step 3 — Group multi-repo products
 
