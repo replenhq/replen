@@ -52,6 +52,11 @@ export type CapabilitySpec = {
   descriptor: string;
   modality: Modality[];
   provenance?: Provenance;
+  // Evidence anchors: file paths that implement this capability (e.g.
+  // ["src/cv/transformations.py"]). Paths only — never code. They make
+  // cross-project leaps actionable ("acme solved this — see src/cv/…")
+  // and ground the Atlas dossier in real locations.
+  paths?: string[];
 };
 
 /** Validate arbitrary LLM/API input into a clean Modality[] (dedup, drop unknown values). */

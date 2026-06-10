@@ -1,6 +1,6 @@
 {
   "name": "replen",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Make your AI coding tools smarter. One command, no API keys, free. Replen watches what your projects actually do and surfaces a few things worth bringing in each month. Use one as is, port a piece of another, cherry pick an idea, or build it clean room. The match happens inside your AI tool's session. A few actionable matches a month, by design.",
   "type": "module",
   "bin": {

@@ -14,7 +14,7 @@ import {
 import { extractDocSections } from "./doc-sections";
 import { inferCapabilityModality, type CapabilitySpec, type Modality, type Provenance } from "./modality";
 
-export type FacetInput = { label: string; text: string; modality: Modality[]; provenance: Provenance };
+export type FacetInput = { label: string; text: string; modality: Modality[]; provenance: Provenance; paths?: string[] };
 
 /**
  * Plan a project's facet inputs (cheap — no embedding). Returns the content
@@ -61,7 +61,7 @@ export function facetInputsFor(input: {
     // Provenance comes from the spec when set; otherwise a grounded descriptor
     // implies grounded, and a bare tag with no spec is inferred.
     const provenance: Provenance = spec?.provenance ?? (descriptor ? "grounded" : "inferred");
-    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor), modality, provenance });
+    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
   }
   for (const s of sections) {
     const k = s.label.toLowerCase();
@@ -82,7 +82,7 @@ export async function embedFacets(inputs: FacetInput[]): Promise<FacetEmbedding[
   const facets: FacetEmbedding[] = [];
   for (let i = 0; i < inputs.length; i++) {
     const r = vecs[i];
-    if (r) facets.push({ label: inputs[i].label, vec: r.vector, modality: inputs[i].modality, provenance: inputs[i].provenance });
+    if (r) facets.push({ label: inputs[i].label, vec: r.vector, modality: inputs[i].modality, provenance: inputs[i].provenance, paths: inputs[i].paths });
   }
   return facets;
 }

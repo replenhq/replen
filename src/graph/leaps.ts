@@ -65,12 +65,14 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
   // ── index the graph ──
   const projectIdBySlug = new Map<string, number>();
   for (const n of nodes) if (n.kind === "project") projectIdBySlug.set(n.nodeKey, n.id);
-  const projHasCap = new Map<number, Map<number, { provenance: string }>>(); // projId → capId → meta
+  const projHasCap = new Map<number, Map<number, { provenance: string; paths: string[] }>>(); // projId → capId → meta
   const capById = new Map<number, GNode>();
   for (const n of nodes) if (n.kind === "capability") capById.set(n.id, n);
   for (const e of edges) {
     if (e.kind === "HAS_CAPABILITY") {
-      const m = projHasCap.get(e.srcId) ?? new Map(); m.set(e.dstId, { provenance: String(e.data.provenance ?? "inferred") }); projHasCap.set(e.srcId, m);
+      const m = projHasCap.get(e.srcId) ?? new Map();
+      m.set(e.dstId, { provenance: String(e.data.provenance ?? "inferred"), paths: Array.isArray(e.data.paths) ? (e.data.paths as string[]) : [] });
+      projHasCap.set(e.srcId, m);
     }
   }
   const capHasProj = new Map<number, Set<number>>(); // capId → projIds
@@ -141,9 +143,12 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
         const candNode = adoptedHere ? candNodeById.get(adoptedHere.cand) : null;
         const key = `xp:${dst}:${candNode ? candNode.nodeKey : capId}`;
         if (seen.has(key)) continue; seen.add(key);
+        // Evidence anchor: when the source project recorded WHERE the
+        // capability lives, the leap points straight at the file to port.
+        const anchor = meta.paths.length ? ` (see ${slugOf(src)}: ${meta.paths[0]})` : "";
         const via = candNode
           ? `you ${adoptedHere!.verdict}ed ${candNode.label} for ${cap.label} in ${slugOf(src)}; ${slugOf(dst)} is closely related and doesn't have ${cap.label} yet`
-          : `you use ${cap.label} in ${slugOf(src)}; ${slugOf(dst)} is closely related and could too`;
+          : `you use ${cap.label} in ${slugOf(src)}${anchor}; ${slugOf(dst)} is closely related and could too`;
         leaps.push({
           kind: "cross-project", forProject: slugOf(dst), capability: cap.label,
           candidate: candNode ? String(candNode.data.fullName ?? candNode.label) : null,

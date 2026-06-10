@@ -267,7 +267,7 @@ export function projectEmbeddingText(input: {
 // `repo` is set only for facets borrowed from a SIBLING repo in the same
 // multi-repo product (for attribution — "this match is for your acme-cv").
 // Undefined for the scoped repo's own facets.
-export type FacetEmbedding = { label: string; vec: number[]; repo?: string; modality?: import("../projects/modality").Modality[]; provenance?: import("../projects/modality").Provenance };
+export type FacetEmbedding = { label: string; vec: number[]; repo?: string; modality?: import("../projects/modality").Modality[]; provenance?: import("../projects/modality").Provenance; paths?: string[] };
 export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[] };
 
 // Capability labels too generic to be useful probes — they'd match almost any

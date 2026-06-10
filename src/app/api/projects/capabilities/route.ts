@@ -55,8 +55,17 @@ export async function POST(req: Request) {
       if (!tag) continue;
       const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim() : "";
       const modality = coerceModalities(cc.modality);
+      // Evidence anchors: file PATHS implementing this capability (≤5, paths
+      // only — never code). They flow into the graph + leaps + dossier.
+      const paths = Array.isArray(cc.paths)
+        ? (cc.paths as unknown[])
+            .filter((x): x is string => typeof x === "string")
+            .map((x) => x.trim().replace(/^\/+/, "").slice(0, 200))
+            .filter(Boolean)
+            .slice(0, 5)
+        : undefined;
       agentTags.push(tag);
-      agentSpecs.push({ tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "grounded" });
+      agentSpecs.push({ tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "grounded", paths: paths?.length ? paths : undefined });
     }
   }
 

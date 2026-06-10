@@ -51,11 +51,12 @@ export default async function AtlasPage() {
   for (const n of nodes) n.degree = deg.get(n.id) ?? 0;
 
   // Semantic-map coordinates keyed by node id (only kinds the map covers).
+  // z is the third principal component — the 3D view's depth axis.
   const idByKindKey = new Map(nodes.map((n) => [`${n.kind} ${n.nodeKey}`, n.id]));
-  const mapPos: Record<number, { x: number; y: number }> = {};
+  const mapPos: Record<number, { x: number; y: number; z: number }> = {};
   for (const p of mapPoints) {
     const id = idByKindKey.get(`${p.kind} ${p.nodeKey}`);
-    if (id != null) mapPos[id] = { x: p.x, y: p.y };
+    if (id != null) mapPos[id] = { x: p.x, y: p.y, z: p.z };
   }
 
   const alertTotal = nodes.reduce((s, n) => s + (n.alertCount > 0 ? 1 : 0), 0);

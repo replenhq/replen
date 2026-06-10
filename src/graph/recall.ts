@@ -20,7 +20,10 @@ function keywordHits(text: string | null | undefined, toks: string[]): number {
   return toks.reduce((n, t) => n + (lc.includes(t) ? 1 : 0), 0);
 }
 
-export type RecallCapability = { capability: string; projects: string[]; provenance: string; score: number };
+// `paths` are the evidence anchors — where the capability is implemented,
+// attributed per project ("acme: src/cv/transformations.py"). This is what
+// lets an agent FOLLOW a portfolio convention instead of re-deriving it.
+export type RecallCapability = { capability: string; projects: string[]; provenance: string; score: number; paths: string[] };
 export type RecallDecision = {
   repo: string; project: string | null; verdict: string; reasonCode: string | null;
   score: number | null; effort: string | null; oneLine: string | null; at: string | null; relevance: number;
@@ -43,7 +46,7 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   const slugById = new Map(projects.map((p) => [p.id, p.slug]));
 
   // ── capabilities: which the user has that match the query, and where ──
-  const capAgg = new Map<string, { projects: Set<string>; best: number; provenance: string }>();
+  const capAgg = new Map<string, { projects: Set<string>; best: number; provenance: string; paths: string[] }>();
   for (const p of projects) {
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
       const kw = keywordHits(f.label, toks);
@@ -51,17 +54,22 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
       const score = kw * 0.5 + (Number.isFinite(sem) ? Math.max(0, sem) : 0);
       if (kw === 0 && sem < 0.45) continue; // not relevant
       const key = norm(f.label);
-      const cur = capAgg.get(key) ?? { projects: new Set<string>(), best: 0, provenance: f.provenance ?? "inferred" };
+      const cur = capAgg.get(key) ?? { projects: new Set<string>(), best: 0, provenance: f.provenance ?? "inferred", paths: [] };
       cur.projects.add(p.slug);
       cur.best = Math.max(cur.best, score);
       // prefer the strongest provenance seen
       const order: Record<string, number> = { grounded: 3, extracted: 2, inferred: 1, ambiguous: 0 };
       if ((order[f.provenance ?? "inferred"] ?? 1) > (order[cur.provenance] ?? 1)) cur.provenance = f.provenance ?? "inferred";
+      // evidence anchors, attributed per project, capped to stay scannable
+      for (const path of f.paths ?? []) {
+        const entry = `${p.slug}: ${path}`;
+        if (cur.paths.length < 6 && !cur.paths.includes(entry)) cur.paths.push(entry);
+      }
       capAgg.set(key, cur);
     }
   }
   const capabilities: RecallCapability[] = [...capAgg.entries()]
-    .map(([label, v]) => ({ capability: label, projects: [...v.projects], provenance: v.provenance, score: v.best }))
+    .map(([label, v]) => ({ capability: label, projects: [...v.projects], provenance: v.provenance, score: v.best, paths: v.paths }))
     .sort((a, b) => b.score - a.score).slice(0, limit);
 
   // ── reports: passages from the grounded agent write-ups that match ──

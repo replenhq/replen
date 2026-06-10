@@ -135,6 +135,11 @@ specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
    grounded `capabilities` array AND the `report` from 2c. The server builds the
    facet vectors immediately and stores the report as grounding for its own
    summarization. Use the MCP tools, not hand-rolled `curl`.
+   **Include `paths` on each capability** — up to 5 file paths that implement
+   it (e.g. `{tag: "computer vision", …, paths: ["src/cv/transformations.py"]}`).
+   Paths only, never code. You just read these files; recording WHERE each
+   capability lives lets Replen point another of the user's projects straight
+   at the implementation worth porting ("acme solved this — see src/cv/…").
 4. **Report pinned versions** with `replen_set_versions` — the resolved DIRECT
    dependency versions from the lockfile (package-lock.json / poetry.lock /
    uv.lock / Cargo.lock), plus runtimes under canonical keys (`node` from

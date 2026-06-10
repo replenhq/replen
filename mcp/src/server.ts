@@ -340,6 +340,7 @@ const TOOLS: Tool[] = [
                   tag: { type: "string", description: "Short GitHub-searchable term (1-4 words)" },
                   descriptor: { type: "string", description: "One grounded sentence: the data it operates on, the task, key constraints — read from the code" },
                   modality: { type: "array", items: { type: "string" }, description: "From: image, video, timeseries, tabular, text, audio, geospatial, graph, 3d, code, network" },
+                  paths: { type: "array", items: { type: "string" }, description: "Evidence anchors: up to 5 file paths that implement this capability (e.g. ['src/cv/transformations.py']). Paths only, never code. They make cross-project leaps actionable ('see acme: src/cv/…') and ground the Atlas dossier." },
                 },
                 required: ["tag"],
               },

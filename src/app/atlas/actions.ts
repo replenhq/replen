@@ -46,7 +46,10 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
       const dst = byId.get(e.dstId);
       if (!dst) continue;
       const ed = j(e.data);
-      if (e.kind === "HAS_CAPABILITY") caps.push(`${dst.label} · ${ed.provenance ?? "inferred"}`);
+      if (e.kind === "HAS_CAPABILITY") {
+        const paths = Array.isArray(ed.paths) ? (ed.paths as string[]) : [];
+        caps.push(`${dst.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths[0]}` : ""}`);
+      }
       if (e.kind === "EVALUATED") decisions.push(`${ed.verdict} — ${dst.label}${ed.reasonCode ? ` (${ed.reasonCode})` : ""}${ed.oneLine ? `: ${ed.oneLine}` : ""}${ed.at ? ` · ${fmtDate(String(ed.at))}` : ""}`);
       if (e.kind === "USES") tools.push(`${dst.label}${ed.version ? `@${ed.version}` : ""}`);
     }
@@ -75,7 +78,9 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     for (const e of edges) {
       if (e.kind === "HAS_CAPABILITY" && e.dstId === node.id) {
         const src = byId.get(e.srcId);
-        if (src) usedIn.push(`${src.label} · ${j(e.data).provenance ?? "inferred"}`);
+        const ed = j(e.data);
+        const paths = Array.isArray(ed.paths) ? (ed.paths as string[]) : [];
+        if (src) usedIn.push(`${src.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths.join(", ")}` : ""}`);
       }
       if (e.kind === "ADJACENT_TO" && (e.srcId === node.id || e.dstId === node.id)) {
         const other = byId.get(e.srcId === node.id ? e.dstId : e.srcId);
@@ -149,6 +154,35 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
       kind, title: node.label, subtitle: "external tool / dependency",
       sections,
       queueSuggestion: o?.alerts?.length ? `Review ${node.label}: ${o.alerts[0].title.slice(0, 80)}` : null,
+    };
+  }
+
+  if (kind === "suggestion") {
+    const fullName = String(data.fullName ?? node.label);
+    const suggestedFor: string[] = [];
+    for (const e of edges) {
+      if (e.kind === "SUGGESTED" && e.dstId === node.id) {
+        const proj = byId.get(e.srcId);
+        const ed = j(e.data);
+        if (proj) suggestedFor.push(`${proj.label}${ed.status === "starred" ? " · ★ starred" : ""}`);
+      }
+    }
+    const projected = String(data.projected ?? "unknown");
+    const alts = await alternativesFor(fullName, 3).catch(() => []);
+    const sections: Dossier["sections"] = [
+      { heading: "Suggested for", items: suggestedFor.length ? suggestedFor : ["—"] },
+      {
+        heading: `Projected: ${projected}`,
+        items: ["Heuristic from language + licence fit — the real verdict comes from an in-session triage (run /replen in the repo). After triage this node graduates to a candidate with your verdict."],
+      },
+    ];
+    if (alts.length) sections.push({ heading: "Similar maintained libraries", items: alts.map((a) => `${a.fullName}${a.stars ? ` · ${a.stars}★` : ""}${a.adoptedBy ? ` · adopted by ${a.adoptedBy}` : ""}`) });
+    return {
+      kind, title: fullName,
+      subtitle: `suggested · projected ${projected}${data.stars != null ? ` · ${data.stars}★` : ""}`,
+      url: (data.url as string) ?? `https://github.com/${fullName}`,
+      sections,
+      queueSuggestion: `Triage suggestion ${fullName} (projected: ${projected})`,
     };
   }
 

@@ -53,6 +53,9 @@ export function isNoiseFacetLabel(label: string): boolean {
   if (/^\d{1,3}\s*[-.)]/.test(l)) return true;            // numbered-section prefix (01-, 2., 3))
   if ((l.match(/[a-z]/gi) ?? []).length < 3) return true; // codes/slugs with no real words
   if (NARRATION_NOISE.test(l)) return true;               // video/script meta doc
+  if (/\(\d+[^)]*\)\s*$/.test(l)) return true;            // trailing tally — "Case Studies (5 pages)", "Pages to Delete (1)"
+  if (/\b(pages?|posts?|articles?)\s+(to|at|already)\b/i.test(l)) return true; // content-audit/TODO headings
+  if (/\b(to delete|to create|to remove|already present|wrong url|needs? (relocation|review|update))\b/i.test(l)) return true;
   return false;
 }
 

@@ -47,7 +47,7 @@ Developer-tooling / AI-agent infrastructure: capability-based OSS discovery, sem
 
 ## Replen integration
 
-<!-- replen-integration: v8 -->
+<!-- replen-integration: v9 -->
 
 On your **very first response** of each session:
 
@@ -100,4 +100,15 @@ primitive here.
 **Don't call `replen_match` again on subsequent turns** — once
 per session at start only. The user explicitly types
 `/replen` if they want a fresh triage mid-session.
+
+**PORTFOLIO-FIRST RULE (any turn, not just the first).** Before you
+(a) add a new dependency, (b) pick a library/stack for a task, or
+(c) build a capability from scratch (scraping, auth, OCR, queues,
+charting, …), call `replen_recall` with the capability first. The
+user's OTHER projects may already have a settled way to do it — a
+chosen library, or an implementation file (`paths`) you can port.
+If recall returns a convention, FOLLOW IT (or name it and ask)
+instead of introducing a parallel stack. The user should never have
+to say "you know I use scrapling elsewhere" — knowing is your job.
+
 

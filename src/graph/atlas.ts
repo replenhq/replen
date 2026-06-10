@@ -33,7 +33,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
   const cands = nodes.filter((n) => n.kind === "candidate");
 
   // index edges
-  const projCaps = new Map<number, Array<{ cap: GNode; provenance: string }>>();
+  const projCaps = new Map<number, Array<{ cap: GNode; provenance: string; paths: string[] }>>();
   const capProjs = new Map<number, GNode[]>();
   const adj = new Map<number, Array<{ cap: GNode; w: number }>>();
   const evaluated = new Map<number, Array<{ cand: GNode; verdict: string; reasonCode: string; oneLine: string }>>(); // projId → decisions
@@ -42,7 +42,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
   const projProduct = new Map<number, GNode>();
   for (const e of edges) {
     const s = byId.get(e.srcId), d = byId.get(e.dstId); if (!s || !d) continue;
-    if (e.kind === "HAS_CAPABILITY") { (projCaps.get(s.id) ?? projCaps.set(s.id, []).get(s.id)!).push({ cap: d, provenance: String(e.data.provenance ?? "inferred") }); (capProjs.get(d.id) ?? capProjs.set(d.id, []).get(d.id)!).push(s); }
+    if (e.kind === "HAS_CAPABILITY") { (projCaps.get(s.id) ?? projCaps.set(s.id, []).get(s.id)!).push({ cap: d, provenance: String(e.data.provenance ?? "inferred"), paths: Array.isArray(e.data.paths) ? (e.data.paths as string[]) : [] }); (capProjs.get(d.id) ?? capProjs.set(d.id, []).get(d.id)!).push(s); }
     if (e.kind === "ADJACENT_TO") { (adj.get(e.srcId) ?? adj.set(e.srcId, []).get(e.srcId)!).push({ cap: d, w: e.weight ?? 0 }); (adj.get(e.dstId) ?? adj.set(e.dstId, []).get(e.dstId)!).push({ cap: s, w: e.weight ?? 0 }); }
     if (e.kind === "EVALUATED") { const rec = { verdict: String(e.data.verdict ?? ""), reasonCode: String(e.data.reasonCode ?? ""), oneLine: String(e.data.oneLine ?? "") }; (evaluated.get(s.id) ?? evaluated.set(s.id, []).get(s.id)!).push({ cand: d, ...rec }); (candDecisions.get(d.id) ?? candDecisions.set(d.id, []).get(d.id)!).push({ proj: s, ...rec }); }
     if (e.kind === "FILLS") { (candFills.get(s.id) ?? candFills.set(s.id, []).get(s.id)!).push(d); }
@@ -97,7 +97,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
     files.push({ path: `${projFile(p.nodeKey)}.md`, content: [
       `---`, `type: project`, `slug: ${p.nodeKey}`, product ? `product: ${product.label}` : ``, `---`, ``,
       `# ${p.label}`, ``, rep?.purpose ? `> ${rep.purpose}` : ``, ``,
-      `## Capabilities`, ...myCaps.map(({ cap, provenance }) => `- ${link(capFile(cap.label), cap.label)} \`${provenance}\``), ``,
+      `## Capabilities`, ...myCaps.map(({ cap, provenance, paths }) => `- ${link(capFile(cap.label), cap.label)} \`${provenance}\`${paths.length ? ` — \`${paths[0]}\`` : ""}`), ``,
       decisions.length ? `## Decisions` : ``, ...decisions.map((d) => `- **${d.verdict}** ${link(candFile(String(d.cand.data.fullName ?? d.cand.label)), String(d.cand.data.fullName ?? d.cand.label))}${d.reasonCode ? ` \`${d.reasonCode}\`` : ""}${d.oneLine ? ` — ${d.oneLine}` : ""}`),
       rep?.report ? `\n## Report\n\n${rep.report}` : ``,
     ].filter((l) => l !== ``).join("\n") + "\n" });
