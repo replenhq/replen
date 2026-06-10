@@ -11,6 +11,10 @@ import { isNoiseFacetLabel } from "@/projects/doc-sections";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
+import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
+import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
+import { computeLeaps, type Leap } from "@/graph/leaps";
+import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
 //
@@ -45,6 +49,10 @@ export async function GET(req: Request) {
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
   }
+
+  // Tell stale clients to refresh (npx caches old builds; the old build can't
+  // self-detect, so the server does). Appended to the footnote below.
+  const upgradeNudge = await clientUpgradeNudge(req.headers.get("x-replen-client"));
 
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "20", 10) || 20, 1), 50);
@@ -144,7 +152,7 @@ export async function GET(req: Request) {
           afterEligibility: 0,
           afterFilter: 0,
           candidates: [],
-          displayText: null,
+          displayText: withUpgradeNudge(null, upgradeNudge),
           note: p
             ? "project is excluded from matching on /projects; pass repo='' for the global firehose"
             : "repo not in your project list — this project isn't set up with Replen. Do NOT triage the global firehose (it's noise for this codebase). Instead, offer to onboard it: (1) git init + create the GitHub repo via `gh` if there's no remote, (2) write a README + a Replen-optimised CLAUDE.md so the scorer can read the project, (3) register it + add domain tags at app.replen.dev/projects, then re-run. Lead with a one-line offer.",
@@ -248,14 +256,21 @@ export async function GET(req: Request) {
     .from(schema.userMatchState)
     .where(eq(schema.userMatchState.userId, auth.userId));
   const excludedRepoIds = new Set<number>();
+  // Kept separately for the defer re-check path, which bypasses the surfacing
+  // cool-off (a re-check is deliberate re-surfacing) but must still honour the
+  // user's terminal actions and not nag (own, longer cool-off via surfacedAt).
+  const terminalRepoIds = new Set<number>();
+  const lastSurfacedByRepo = new Map<number, number>();
   for (const r of stateRows) {
     if (r.status === "starred" || r.status === "hidden" || r.status === "handed_off") {
       excludedRepoIds.add(r.repoId);
+      terminalRepoIds.add(r.repoId);
     } else if (r.status === "surfaced") {
       const tooMany = r.surfacedCount >= MAX_SURFACES;
       const tooRecent = r.surfacedAt != null && r.surfacedAt > cooloffSince;
       if (tooMany || tooRecent) excludedRepoIds.add(r.repoId);
     }
+    if (r.surfacedAt != null) lastSurfacedByRepo.set(r.repoId, r.surfacedAt.getTime());
   }
 
   // Per-user triage suppression. When the in-session agent (Claude / Codex /
@@ -302,6 +317,15 @@ export async function GET(req: Request) {
   for (const q of demoteRows) {
     if (isGloballyDemoted(q)) excludedRepoIds.add(q.repoId);
   }
+
+  // Contextual triage memory (the learning loop, read side):
+  //   modalitySuppress — (repo × modality) collisions agents recorded. Sharper
+  //     than global demote: anomalib stays great for image projects and stops
+  //     surfacing against timeseries facets.
+  //   prior — this user's decision log, attached to candidates as priorContext
+  //     ("you already cover X with Y") so in-session triage starts with memory.
+  const modalitySuppress = await loadModalitySuppressions(auth.userId);
+  const prior = await loadTriageContext(auth.userId);
 
   // Apply eligibility filter (cheap, deterministic). Reuses the same
   // structural rules the hosted pipeline runs at Stage 2.
@@ -389,6 +413,11 @@ export async function GET(req: Request) {
   };
   addDropName(scopedProject?.name);
   addDropName(scopedProject?.slug);
+  // Slugs in the scoped product (the scoped repo + its siblings) — used to
+  // scope defer re-checks to decisions made for THIS product, not the whole
+  // portfolio.
+  const productSlugs = new Set<string>();
+  if (scopedProject) productSlugs.add(scopedProject.slug);
   if (scopedProject) {
     const productKey = scopedProject.productKey ?? deriveProductKey(scopedProject.githubFullName);
     if (productKey) {
@@ -405,6 +434,7 @@ export async function GET(req: Request) {
         const sKey = s.productKey ?? deriveProductKey(s.githubFullName);
         if (sKey !== productKey) continue;
         productRepoCount++;
+        productSlugs.add(s.slug);
         for (const f of parseStoredFacetEmbeddings(s.facetEmbeddings ?? null)) {
           projectFacets.push({ ...f, repo: s.slug });
         }
@@ -420,6 +450,14 @@ export async function GET(req: Request) {
   for (let i = projectFacets.length - 1; i >= 0; i--) {
     const label = projectFacets[i].label;
     if (isNoiseFacetLabel(label) || dropFacetNorms.has(normName(label))) projectFacets.splice(i, 1);
+  }
+  // Modality per facet label (union across product repos) — for checking a
+  // candidate's recorded modality collisions against the facet it matched.
+  const facetModsByLabel = new Map<string, Modality[]>();
+  for (const f of projectFacets) {
+    if (!f.modality?.length) continue;
+    const k = normFacetLabel(f.label);
+    facetModsByLabel.set(k, [...new Set([...(facetModsByLabel.get(k) ?? []), ...f.modality])]);
   }
   // Map deps to their canonical GitHub repos (next → vercel/next.js), so the
   // exclusion catches libraries whose package name ≠ repo name.
@@ -472,6 +510,12 @@ export async function GET(req: Request) {
   // firehose (repo='') opt out — there the user has asked to see everything.
   const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.48")));
   const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
+  // Provenance gating: a facet the server merely INFERRED from docs (or worse,
+  // an ambiguous doc-section facet) is the least trustworthy kind of match
+  // probe — it pays a cosine premium on top of the floor before it's allowed
+  // to lead a surfaced match. Grounded/extracted facets pay nothing.
+  const INFERRED_PREMIUM = Math.max(0, parseFloat(process.env.REPLEN_INFERRED_FACET_PREMIUM ?? "0.07"));
+  const needsProvenancePremium = (p: Provenance | null | undefined) => p === "inferred" || p === "ambiguous";
 
   // Pattern A — "watch your stack". A release from a vendor the SCOPED project
   // actually depends on is the strongest possible signal ("a thing you depend
@@ -485,6 +529,7 @@ export async function GET(req: Request) {
     relevance: number;        // tag-overlap fallback score
     cosine: number | null;    // BEST of centroid / facet similarity (null when unavailable)
     matchedFacet: string | null; // which capability this hit, when facet-led (else null)
+    matchedProvenance: Provenance | null; // how grounded that facet is, when facet-led
     depMatch: boolean;        // Pattern A: release of a vendor this project depends on
   };
   const filtered: ScoredRow[] = [];
@@ -494,11 +539,14 @@ export async function GET(req: Request) {
   const isFeedSrc = (src: string) =>
     src.startsWith("stack-watch:") || src.startsWith("spec-watch:") || src.startsWith("health-watch:") || src.startsWith("security-watch:");
   for (const c of eligible) {
-    if (productDeps.size > 0 && !isFeedSrc(c.source)) {
-      const on = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
-      if (on && (productDeps.has(on.name.toLowerCase()) || productDeps.has(on.owner.toLowerCase())
-        || knownRepoFullNames.has(`${on.owner}/${on.name}`.toLowerCase()))) continue; // already a dependency
+    const candOn = c.githubUrl ? extractOwnerName(c.githubUrl) : null;
+    if (productDeps.size > 0 && !isFeedSrc(c.source) && candOn) {
+      if (productDeps.has(candOn.name.toLowerCase()) || productDeps.has(candOn.owner.toLowerCase())
+        || knownRepoFullNames.has(`${candOn.owner}/${candOn.name}`.toLowerCase())) continue; // already a dependency
     }
+    // Recorded modality collisions for this repo: those facets are off-limits
+    // as match probes (the repo can still match via other facets / centroid).
+    const suppressedMods = candOn ? modalitySuppress.get(`${candOn.owner}/${candOn.name}`.toLowerCase()) : undefined;
     const reasons: string[] = [];
     let relevance = 0;
     let topicHits: string[] = [];
@@ -541,6 +589,7 @@ export async function GET(req: Request) {
     let cosine: number | null = null;
     let centroidCos: number | null = null;
     let matchedFacet: string | null = null;
+    let matchedProvenance: Provenance | null = null;
     let facetLeadsCentroid = false; // a capability beats the whole-project match by a margin
     if (projectEmbedding) {
       const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
@@ -550,11 +599,16 @@ export async function GET(req: Request) {
 
         let bestFacetCos = -Infinity;
         let bestFacetLabel: string | null = null;
+        let bestFacetProv: Provenance | null = null;
         for (const f of projectFacets) {
+          // Contextual modality suppression: agents recorded this repo as a
+          // modality collision for facets of this modality — don't probe with them.
+          if (suppressedMods && f.modality?.length && f.modality.some((m) => suppressedMods.has(m))) continue;
           const fSim = cosineSimilarity(f.vec, candEmbedding);
           if (Number.isFinite(fSim) && fSim > bestFacetCos) {
             bestFacetCos = fSim;
             bestFacetLabel = f.label;
+            bestFacetProv = f.provenance ?? null;
           }
         }
 
@@ -567,6 +621,7 @@ export async function GET(req: Request) {
           // "fills a part of my project" signal we want to surface and label.
           if (bestFacetLabel !== null && bestFacetCos >= cVal) {
             matchedFacet = bestFacetLabel;
+            matchedProvenance = bestFacetProv;
             reasons.push(`fits your ${bestFacetLabel} capability: ${(bestFacetCos * 100).toFixed(0)}%`);
           } else {
             reasons.push(`semantic similarity: ${(best * 100).toFixed(0)}%`);
@@ -601,9 +656,11 @@ export async function GET(req: Request) {
 
     // Relevance floor: drop candidates that don't clear the bar so weak
     // matches never reach the user (and an all-weak result stays silent). A
-    // dependency match is exempt — it's the strongest signal we have.
+    // dependency match is exempt — it's the strongest signal we have. A match
+    // LED by an inferred/ambiguous facet pays the provenance premium on top.
     if (applyFloor && !depMatch) {
-      const clears = cosine !== null ? cosine >= MIN_COSINE : relevance > 0;
+      const bar = MIN_COSINE + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
+      const clears = cosine !== null ? cosine >= bar : relevance > 0;
       if (!clears) continue;
     }
 
@@ -633,6 +690,7 @@ export async function GET(req: Request) {
       relevance,
       cosine,
       matchedFacet,
+      matchedProvenance,
       depMatch,
     });
   }
@@ -728,6 +786,10 @@ export async function GET(req: Request) {
     promoted: boolean;
     dependencyMatch: boolean;
     projectMatch: string | null;
+    // Prior-decision memory, attached server-side so the in-session agent
+    // triages with history instead of from scratch: earlier verdicts on this
+    // repo, and whether the matched facet is already covered by an adopt/port.
+    priorContext?: string | null;
   };
 
   // Normalised own-pool entries (this user's candidates), full list pre-merge.
@@ -749,6 +811,7 @@ export async function GET(req: Request) {
     whyShortlisted: c.whyShortlisted,
     cosine: c.cosine as number | null,
     matchedFacet: c.matchedFacet,
+    matchedProvenance: c.matchedProvenance,
     promoted: false,
     dependencyMatch: c.depMatch,
     projectMatch: scopedProject?.slug ?? null,
@@ -880,6 +943,19 @@ export async function GET(req: Request) {
     }));
     for (const { m, repoId } of resolved) {
       if (repoId !== null && excludedRepoIds.has(repoId)) continue;
+      // Contextual modality suppression: this repo collided with facets of this
+      // modality before — don't surface it via such a facet again.
+      if (m.matchedFacet) {
+        const sup = modalitySuppress.get(m.fullName.toLowerCase());
+        if (sup) {
+          const mods = facetModsByLabel.get(normFacetLabel(m.matchedFacet)) ?? [];
+          if (mods.some((x) => sup.has(x))) continue;
+        }
+      }
+      // Provenance premium: an inferred/ambiguous facet must clear a higher bar
+      // to pull a catalogue suggestion (the reader already nudges ranking by
+      // provenance; this is the hard gate at the surfacing boundary).
+      if (needsProvenancePremium(m.matchedProvenance) && m.cosine < MIN_COSINE + INFERRED_PREMIUM) continue;
       catalogueOut.push({
         candidateId: null,
         repoId,
@@ -916,6 +992,32 @@ export async function GET(req: Request) {
     }
   }
 
+  // Prior-decision context (memory in the daily loop). Each candidate carries
+  // what this user already decided: earlier verdicts on the SAME repo (any
+  // project), and whether the matched facet is already covered by something
+  // they adopted/ported. The in-session agent gets this for free — no extra
+  // tokens — and a covered candidate is down-ranked (not dropped: a materially
+  // better library should still be able to surface; the agent judges that).
+  const COVERED_SORT_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_COVERED_SORT_PENALTY ?? "0.06"));
+  const pastTense: Record<string, string> = { adopt: "adopted", port: "ported", skip: "skipped", defer: "deferred" };
+  const fmtMonth = (d: Date | null) => d ? d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : "earlier";
+  const coveredEntries = new Set<OutEntry>();
+  const annotatePrior = (e: OutEntry) => {
+    const notes: string[] = [];
+    for (const h of prior.repoHistory.get(e.repo.toLowerCase()) ?? []) {
+      notes.push(`you ${pastTense[h.verdict] ?? h.verdict} this${h.project ? ` for ${h.project}` : ""} (${fmtMonth(h.at)})${h.oneLine ? ` — ${h.oneLine}` : ""}`);
+    }
+    if (e.matchedFacet) {
+      const cov = prior.coverage.get(normFacetLabel(e.matchedFacet));
+      if (cov && cov.repo.toLowerCase() !== e.repo.toLowerCase()) {
+        notes.push(`you already cover '${e.matchedFacet}' with ${cov.repo} (${pastTense[cov.verdict] ?? cov.verdict} ${fmtMonth(cov.at)}${cov.project ? ` for ${cov.project}` : ""})`);
+        coveredEntries.add(e);
+      }
+    }
+    if (notes.length) e.priorContext = notes.join("; ");
+  };
+  for (const e of [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]) annotatePrior(e);
+
   // Merge own + feed (Pattern A/B) + promoted + catalogue, rank: dependency /
   // standard stake matches first ("a thing you depend on / a standard you
   // implement just changed"), then by cosine desc (entries without a cosine
@@ -927,7 +1029,9 @@ export async function GET(req: Request) {
   const candidatesOut = [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]
     .sort((a, b) => {
       if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
-      return (b.cosine ?? -1) - (a.cosine ?? -1);
+      const ac = (a.cosine ?? -1) - (coveredEntries.has(a) ? COVERED_SORT_PENALTY : 0);
+      const bc = (b.cosine ?? -1) - (coveredEntries.has(b) ? COVERED_SORT_PENALTY : 0);
+      return bc - ac;
     })
     .filter((e) => {
       // Dedup catalogue / repo-less entries by full name too (they carry no
@@ -971,7 +1075,7 @@ export async function GET(req: Request) {
       const r = await db.select({ id: schema.repos.id }).from(schema.repos)
         .where(and(eq(schema.repos.owner, a.owner), eq(schema.repos.name, a.name))).get();
       if (r && excludedRepoIds.has(r.id)) continue;
-      candidatesOut.push({
+      const adjEntry: OutEntry = {
         candidateId: null,
         repoId: r?.id ?? null,
         repo: a.fullName,
@@ -992,7 +1096,62 @@ export async function GET(req: Request) {
         promoted: false,
         dependencyMatch: false,
         projectMatch: scopedProject.slug,
+      };
+      annotatePrior(adjEntry);
+      candidatesOut.push(adjEntry);
+    }
+  }
+
+  // Defer re-check (discovery mode 're-checked'). 'defer' means "not now" —
+  // a promise to come back. Once a defer for THIS product has aged into the
+  // re-check window and the repo is still actively developed, re-surface it.
+  // Calm by construction: at most ONE per response, only when results are
+  // sparse, throttled by its own long cool-off, silenced for good once the
+  // window passes or the agent re-triages (any new verdict resets the clock).
+  const RECHECK_MIN_DAYS = Math.max(1, parseInt(process.env.REPLEN_RECHECK_MIN_DAYS ?? "90", 10) || 90);
+  const RECHECK_MAX_DAYS = Math.max(RECHECK_MIN_DAYS, parseInt(process.env.REPLEN_RECHECK_MAX_DAYS ?? "270", 10) || 270);
+  const RECHECK_ACTIVE_DAYS = Math.max(1, parseInt(process.env.REPLEN_RECHECK_ACTIVE_DAYS ?? "60", 10) || 60);
+  const RECHECK_COOLOFF_DAYS = Math.max(1, parseInt(process.env.REPLEN_RECHECK_COOLOFF_DAYS ?? "21", 10) || 21);
+  if (scopedProject && applyFloor && candidatesOut.length < ADJ_SHOW_BELOW) {
+    const rechecks = await loadDeferRechecks(auth.userId, {
+      minAgeDays: RECHECK_MIN_DAYS,
+      maxAgeDays: RECHECK_MAX_DAYS,
+      activeWithinDays: RECHECK_ACTIVE_DAYS,
+    });
+    const shownNames = new Set(candidatesOut.map((c) => c.repo.toLowerCase()));
+    const recheckCooloffSince = Date.now() - RECHECK_COOLOFF_DAYS * 24 * 3600 * 1000;
+    for (const rc of rechecks) {
+      if (candidatesOut.length >= limit) break;
+      // The defer was made for this product (or has no project attribution).
+      if (rc.projectSlug !== null && !productSlugs.has(rc.projectSlug)) continue;
+      if (shownNames.has(rc.fullName.toLowerCase())) continue;
+      if (terminalRepoIds.has(rc.repoId)) continue; // user starred/hid/handed off since
+      const lastSurf = lastSurfacedByRepo.get(rc.repoId);
+      if (lastSurf != null && lastSurf > recheckCooloffSince) continue;
+      candidatesOut.push({
+        candidateId: null,
+        repoId: rc.repoId,
+        repo: rc.fullName,
+        title: rc.fullName,
+        url: rc.url,
+        description: rc.description,
+        stars: rc.stars,
+        language: rc.language,
+        license: rc.license,
+        topics: [],
+        repoShape: null,
+        source: "re-checked",
+        postedAt: null,
+        pushedAt: rc.pushedAt?.toISOString() ?? null,
+        whyShortlisted: `re-check: you deferred this in ${fmtMonth(rc.deferredAt)} — it's still actively developed and may be ready now`,
+        cosine: null,
+        matchedFacet: null,
+        promoted: false,
+        dependencyMatch: false,
+        projectMatch: rc.projectSlug ?? scopedProject.slug,
+        priorContext: rc.oneLine ? `your note at the time: ${rc.oneLine}` : null,
       });
+      break; // one re-check per response — calm cadence
     }
   }
 
@@ -1021,6 +1180,9 @@ export async function GET(req: Request) {
       // near. Frame it as a suggestion, not a fit.
       const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
       displayText = `By the way — \`${top.repo}\` could add ${top.matchedFacet} to this project (adjacent to what you already do)${topDesc}. ${candidatesOut.length} Replen suggestion${candidatesOut.length === 1 ? "" : "s"} for this repo — want me to take a look?`;
+    } else if (top.source === "re-checked") {
+      // Re-check lead: the deferred repo is the only/strongest thing today.
+      displayText = `By the way — you deferred \`${top.repo}\` a while back ("not now"); it's still actively developed and may be ready. Want me to take a fresh look?`;
     } else if (top.matchedFacet) {
       // Facet-led: surface WHICH capability it fills, not a bare "% match".
       // This is the component-fit framing — "helps with your X" rather than
@@ -1036,6 +1198,45 @@ export async function GET(req: Request) {
     }
   }
 
+  // Quiet-day leap. When the inventory has NOTHING for this repo, occasionally
+  // surface the top graph leap (cross-project transfer / adjacency / cross-user
+  // endorsement) instead of pure silence. Tightly budgeted — at most one per
+  // project per REPLEN_LEAP_QUIET_DAYS, never the same leap twice — so quiet
+  // months still deliver one portfolio insight without breaking calm cadence.
+  let leapOut: Leap | null = null;
+  if (!displayText && scopedProject && scopedProjectId && applyFloor) {
+    const LEAP_QUIET_DAYS = Math.max(1, parseInt(process.env.REPLEN_LEAP_QUIET_DAYS ?? "30", 10) || 30);
+    const leapKey = (l: Leap) => `${l.kind}:${l.capability}:${l.candidate ?? ""}`;
+    const past = await db
+      .select({ leapKey: schema.leapSurfaces.leapKey, surfacedAt: schema.leapSurfaces.surfacedAt })
+      .from(schema.leapSurfaces)
+      .where(and(
+        eq(schema.leapSurfaces.userId, auth.userId),
+        eq(schema.leapSurfaces.projectId, scopedProjectId),
+      ));
+    const budgetSince = Date.now() - LEAP_QUIET_DAYS * 24 * 3600 * 1000;
+    const withinBudget = !past.some((p) => p.surfacedAt.getTime() > budgetSince);
+    if (withinBudget) {
+      const seenKeys = new Set(past.map((p) => p.leapKey));
+      try {
+        const leaps = await computeLeaps(auth.userId, { scopeProject: scopedProject.slug, limit: 6 });
+        const pick = leaps.find((l) => !seenKeys.has(leapKey(l)));
+        if (pick) {
+          leapOut = pick;
+          displayText = `Nothing new for this repo today — but a connection from your portfolio: ${pick.via}. Want me to take a look?`;
+          await db.insert(schema.leapSurfaces).values({
+            userId: auth.userId,
+            projectId: scopedProjectId,
+            leapKey: leapKey(pick),
+            surfacedAt: new Date(),
+          });
+        }
+      } catch (e) {
+        console.warn("[inventory] quiet-day leap failed (non-fatal):", e);
+      }
+    }
+  }
+
   return NextResponse.json(
     {
       filterMode,
@@ -1048,8 +1249,10 @@ export async function GET(req: Request) {
       afterEligibility,
       afterFilter,
       returned: candidatesOut.length,
-      displayText,
+      displayText: withUpgradeNudge(displayText, upgradeNudge),
       candidates: candidatesOut,
+      // Quiet-day leap (when set, displayText already carries its message).
+      leap: leapOut,
     },
     { headers: corsHeaders },
   );

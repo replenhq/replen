@@ -946,3 +946,21 @@ export const userGraphMeta = sqliteTable("user_graph_meta", {
   edgeCount: integer("edge_count").notNull().default(0),
   builtAt: integer("built_at", { mode: "timestamp" }),
 });
+
+// Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
+// so the calm cadence holds: at most one leap per project per
+// REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.
+export const leapSurfaces = sqliteTable(
+  "leap_surfaces",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectId: integer("project_id").notNull().references(() => projectProfiles.id, { onDelete: "cascade" }),
+    // kind:capability:candidate — dedup key for "already surfaced this leap"
+    leapKey: text("leap_key").notNull(),
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserProject: index("idx_leap_surfaces_user_project").on(t.userId, t.projectId, t.surfacedAt),
+  }),
+);
