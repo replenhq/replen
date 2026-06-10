@@ -3,6 +3,7 @@ import { runPipeline } from "./run-once";
 import { archiveOldHiddenForAllUsers } from "./aging";
 import { runPricingScrape } from "../pricing/scrape";
 import { runAnnouncementScrape } from "../announcements/scrape";
+import { runEolSync } from "../announcements/deadlines";
 
 const schedule = process.env.DIGEST_CRON ?? "0 6 * * *"; // 06:00 UTC daily
 // Aging policy runs once a night, 03:30 UTC - well before the morning pipeline
@@ -53,6 +54,13 @@ cron.schedule(announceSchedule, async () => {
     await runAnnouncementScrape();
   } catch (e) {
     console.error("[cron] announcement poll error", e);
+  }
+  // EOL sync rides the same tick — one all.json fetch + a few dozen product
+  // fetches for products someone's stack actually contains.
+  try {
+    await runEolSync();
+  } catch (e) {
+    console.error("[cron] eol sync error", e);
   }
 });
 

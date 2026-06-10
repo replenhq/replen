@@ -1160,6 +1160,48 @@ export const announcementSurfaces = sqliteTable(
   }),
 );
 
+// Dated obligations — EOLs and deprecation deadlines. Two feeds: structured
+// cycles from endoflife.date (runtimes, databases, frameworks) and dates
+// extracted from deprecation/breaking-change announcements. Each row is one
+// (product, cycle, deadline); surfacing is staged (announce → T-30 → T-7)
+// via deadline_surfaces phases so a deadline reminds without repeating.
+export const deadlineEvents = sqliteTable(
+  "deadline_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // 'eol:<slug>:<cycle>:<date>' or 'ann:<sourcePk>:<hash>' — idempotency key.
+    dedupeKey: text("dedupe_key").notNull(),
+    kind: text("kind").notNull(), // 'eol' | 'deprecation'
+    product: text("product").notNull(),
+    cycle: text("cycle"),
+    title: text("title").notNull(),
+    url: text("url"),
+    deadline: integer("deadline", { mode: "timestamp" }).notNull(),
+    // JSON string[] — same matching contract as the other watch surfaces.
+    detectTokens: text("detect_tokens"),
+    sourcePk: integer("source_pk").references(() => announcementSources.id, { onDelete: "set null" }),
+    detectedAt: integer("detected_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqKey: uniqueIndex("uniq_deadline_key").on(t.dedupeKey),
+    idxDeadline: index("idx_deadline_events_deadline").on(t.deadline),
+  }),
+);
+
+export const deadlineSurfaces = sqliteTable(
+  "deadline_surfaces",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    deadlineId: integer("deadline_id").notNull().references(() => deadlineEvents.id, { onDelete: "cascade" }),
+    phase: text("phase").notNull(), // 'announce' | 't30' | 't7'
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqUserDeadlinePhase: uniqueIndex("uniq_deadline_surface").on(t.userId, t.deadlineId, t.phase),
+  }),
+);
+
 // Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
 // so the calm cadence holds: at most one leap per project per
 // REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.

@@ -16,6 +16,7 @@ import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFac
 import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import { announcementPs } from "@/announcements/surface";
+import { deadlinePs } from "@/announcements/deadlines";
 import type { Modality, Provenance } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
@@ -1249,25 +1250,38 @@ export async function GET(req: Request) {
   if (scopedProject) {
     try {
       const userTokens = pricingUserTokens(productDeps, userTagSet);
-      const [pricing, announcement] = await Promise.all([
+      const [pricing, announcement, deadline] = await Promise.all([
         pricingPs(auth.userId, userTokens),
         announcementPs(auth.userId, userTokens),
+        deadlinePs(auth.userId, userTokens),
       ]);
+      const nowTs = new Date();
+      const recordAnnouncement = (eventId: number) => db.insert(schema.announcementSurfaces)
+        .values({ userId: auth.userId, eventId, surfacedAt: nowTs }).onConflictDoNothing();
+      const recordDeadline = (deadlineId: number, phase: string) => db.insert(schema.deadlineSurfaces)
+        .values({ userId: auth.userId, deadlineId, phase, surfacedAt: nowTs }).onConflictDoNothing();
+      const recordPricing = (changeId: number) => db.insert(schema.pricingSurfaces)
+        .values({ userId: auth.userId, changeId, surfacedAt: nowTs }).onConflictDoNothing();
+      const appendPs = (line: string) => {
+        displayText = displayText ? `${displayText}\n\nP.s. ${line}` : `P.s. ${line}`;
+      };
+      // Priority: Critical announcement (leads) > deadline this week >
+      // pricing change > deadline reminder/announce > other announcement.
       if (announcement?.critical) {
         displayText = displayText ? `${announcement.line}\n\n${displayText}` : announcement.line;
-        await db.insert(schema.announcementSurfaces)
-          .values({ userId: auth.userId, eventId: announcement.eventId, surfacedAt: new Date() })
-          .onConflictDoNothing();
+        await recordAnnouncement(announcement.eventId);
+      } else if (deadline?.urgent) {
+        appendPs(deadline.line);
+        await recordDeadline(deadline.deadlineId, deadline.phase);
       } else if (pricing) {
-        displayText = displayText ? `${displayText}\n\nP.s. ${pricing.line}` : `P.s. ${pricing.line}`;
-        await db.insert(schema.pricingSurfaces)
-          .values({ userId: auth.userId, changeId: pricing.changeId, surfacedAt: new Date() })
-          .onConflictDoNothing();
+        appendPs(pricing.line);
+        await recordPricing(pricing.changeId);
+      } else if (deadline) {
+        appendPs(deadline.line);
+        await recordDeadline(deadline.deadlineId, deadline.phase);
       } else if (announcement) {
-        displayText = displayText ? `${displayText}\n\nP.s. ${announcement.line}` : `P.s. ${announcement.line}`;
-        await db.insert(schema.announcementSurfaces)
-          .values({ userId: auth.userId, eventId: announcement.eventId, surfacedAt: new Date() })
-          .onConflictDoNothing();
+        appendPs(announcement.line);
+        await recordAnnouncement(announcement.eventId);
       }
     } catch (e) {
       console.warn("[inventory] awareness line failed (non-fatal):", e);

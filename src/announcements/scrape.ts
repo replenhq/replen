@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { classifyAnnouncement } from "./classify";
+import { extractDeadline, recordAnnouncementDeadline } from "./deadlines";
 
 const POLLED_TYPES = ["changelog", "security_page", "rss+web", "web"];
 const BASE_INTERVAL_HOURS = Math.max(1, parseInt(process.env.REPLEN_ANNOUNCE_INTERVAL_HOURS ?? "24", 10) || 24);
@@ -177,6 +178,18 @@ export async function runAnnouncementScrape(opts: { limit?: number; match?: stri
         newEvents++;
         eventCount++;
         console.log(`[announce] EVENT ${src.vendor} / ${src.product} [${cls.eventType}/${cls.severity}]: ${item.title.slice(0, 90)}`);
+        // Phase 3: a deprecation/breaking change carrying a future date is a
+        // dated obligation — track it for staged T-30/T-7 reminders.
+        if (cls.eventType === "deprecation" || cls.eventType === "breaking_change") {
+          const dl = extractDeadline(`${item.title} ${item.summary}`);
+          if (dl) {
+            await recordAnnouncementDeadline({
+              sourcePk: src.id, product: src.product, title: item.title,
+              url: item.url || src.sourceUrl, deadline: dl,
+              detectTokens: src.detectTokens, rawHash,
+            });
+          }
+        }
       }
     } else {
       // HTML page — line-set diff against the cached previous fetch.
@@ -227,6 +240,16 @@ export async function runAnnouncementScrape(opts: { limit?: number; match?: stri
       });
       eventCount++;
       console.log(`[announce] EVENT ${src.vendor} / ${src.product} [${cls.eventType}/${cls.severity}]: ${matched[0].slice(0, 90)}`);
+      if (cls.eventType === "deprecation" || cls.eventType === "breaking_change") {
+        const dl = extractDeadline(joined);
+        if (dl) {
+          await recordAnnouncementDeadline({
+            sourcePk: src.id, product: src.product, title: matched[0],
+            url: src.sourceUrl, deadline: dl,
+            detectTokens: src.detectTokens, rawHash,
+          });
+        }
+      }
     }
   }
   console.log(`[announce] done: ${due.length} polled, ${okCount} ok, ${rawCount} new items, ${eventCount} classified events`);
