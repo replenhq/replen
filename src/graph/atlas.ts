@@ -53,6 +53,36 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
   const noteRows = await db.select().from(schema.nodeNotes).where(eq(schema.nodeNotes.userId, userId));
   const noteFor = new Map(noteRows.map((n) => [`${n.kind} ${n.nodeKey}`, n.note]));
 
+  // Full triage write-ups per candidate — the vault is the decision ARCHIVE,
+  // so the complete reasoning lives here, not just the one-liner.
+  const triageRows = await db.select().from(schema.triageEvents).where(eq(schema.triageEvents.userId, userId));
+  const repoRows2 = await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name }).from(schema.repos);
+  const fullNameByRepoId = new Map(repoRows2.map((r) => [r.id, `${r.owner}/${r.name}`.toLowerCase()]));
+  const profileRows = await db.select({ id: schema.projectProfiles.id, slug: schema.projectProfiles.slug })
+    .from(schema.projectProfiles).where(eq(schema.projectProfiles.userId, userId));
+  const slugByProfileId = new Map(profileRows.map((r) => [r.id, r.slug]));
+  const writeupsByCand = new Map<string, Array<{ project: string; at: string; writeup: string }>>();
+  {
+    const latest = new Map<string, typeof triageRows[number]>();
+    for (const e of triageRows) {
+      const k = `${e.projectId ?? "g"}:${e.repoId}`;
+      const prev = latest.get(k);
+      if (!prev || (e.createdAt?.getTime() ?? 0) > (prev.createdAt?.getTime() ?? 0)) latest.set(k, e);
+    }
+    for (const e of latest.values()) {
+      if (!e.writeup) continue;
+      const fn = fullNameByRepoId.get(e.repoId);
+      if (!fn) continue;
+      const arr = writeupsByCand.get(fn) ?? [];
+      arr.push({
+        project: e.projectId != null ? slugByProfileId.get(e.projectId) ?? "unknown" : "no project",
+        at: e.createdAt ? e.createdAt.toISOString().slice(0, 16).replace("T", " ") : "",
+        writeup: e.writeup,
+      });
+      writeupsByCand.set(fn, arr);
+    }
+  }
+
   const reports = new Map<string, { report: string | null; purpose: string | null }>();
   const rows = await db.select({ slug: schema.projectProfiles.slug, agentReport: schema.projectProfiles.agentReport, summaryJson: schema.projectProfiles.summaryJson })
     .from(schema.projectProfiles).where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
@@ -131,6 +161,7 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
       `# ${fullName}`, c.data.url ? `\n${c.data.url}\n` : ``,
       fillsC.length ? `Fills: ${fillsC.map((f) => link(capFile(f.label), f.label)).join(", ")}` : ``, ``,
       dec.length ? `## Your decisions` : ``, ...dec.map((d) => `- **${d.verdict}** for ${link(projFile(d.proj.nodeKey), d.proj.label)}${d.reasonCode ? ` \`${d.reasonCode}\`` : ""}${d.oneLine ? ` — ${d.oneLine}` : ""}`),
+      ...(writeupsByCand.get(fullName.toLowerCase()) ?? []).flatMap((w) => [``, `## Write-up — ${w.project} · ${w.at}`, ``, w.writeup]),
     ].filter((l) => l !== ``).join("\n") + "\n" });
   }
 

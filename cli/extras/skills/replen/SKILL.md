@@ -308,6 +308,12 @@ any write back to Replen. Don't hand-roll `curl` to the API for these; the MCP
 path is the intended mechanism and avoids tripping host permission classifiers
 on the candidate repo name in a curl payload.
 
+**Never record a bare verdict.** Every `replen_record_triage` call — including
+quick skips made outside this full protocol (e.g. from the session-start
+footnote) — must carry at least `oneLine` and `cosine`. A verdict with no
+reasoning shows up in the user's Atlas dossier and vault as "bare verdict —
+the agent recorded no reasoning", which is a bug report with your name on it.
+
 When you call `replen_record_triage`, **pass the contextual fields** so Replen
 learns: `matchedFacet` (copy the `matchedFacet` from the candidate's
 replen_match data), `facetModality` (the data modality of that capability —

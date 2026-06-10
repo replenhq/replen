@@ -227,6 +227,7 @@ const TOOLS: Tool[] = [
     description:
       "Record your per-candidate triage decision back to Replen. Call ONCE per candidate during the replen_match loop, AFTER you've formed your verdict but BEFORE / alongside presenting the writeup to the user. " +
       "Captures the agent's view of each candidate (adopt / port / skip / defer) with score + effort + reasoning. Distinct from replen_state, which captures the USER's action (star / hide / handoff). Both surface on the Activity feed at the user's dashboard. " +
+      "NEVER record a bare verdict: ALWAYS include at least `oneLine` (and `cosine`), even for quick skips outside the full triage protocol — a verdict with no reasoning is illegible in the Atlas dossier and the vault later, and teaches the learning loop nothing. " +
       "Append-only: re-calling for the same repo creates another event row, useful if you re-evaluate later. " +
       "Voice: oneLine should be 1 sentence the user might read in a feed (\"Drops in for annotations.py — 30 min\"). writeup is the full reasoning (up to 16 KB).",
     inputSchema: {

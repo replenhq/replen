@@ -23,6 +23,12 @@ export type Dossier = {
   queueSuggestion?: string | null; // prefilled title for the queue button
   // Anchored note (editable in the panel; flows into recall + the vault).
   note?: string | null;
+  // Candidate nodes: the full decision log — verdict, where, when, and the
+  // agent's complete write-up (the artifact the user's tokens paid for).
+  decisions?: Array<{
+    verdict: string; score: number | null; effort: string | null; reason: string | null;
+    project: string; at: string; oneLine: string | null; writeup: string | null;
+  }>;
   // Action contexts per kind — what the panel's buttons operate on.
   tool?: { key: string; plan: string | null; migrateOff: boolean };
   suggestion?: { fullName: string; projectSlug: string | null };
@@ -128,29 +134,50 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
 
   if (kind === "candidate") {
     const fullName = String(data.fullName ?? node.label);
-    const verdicts: string[] = [];
     const fillsC: string[] = [];
     for (const e of edges) {
-      if (e.kind === "EVALUATED" && e.dstId === node.id) {
-        const proj = byId.get(e.srcId);
-        const ed = j(e.data);
-        if (proj) verdicts.push(`${ed.verdict} for ${proj.label}${ed.reasonCode ? ` (${ed.reasonCode})` : ""}${ed.oneLine ? `: ${ed.oneLine}` : ""}${ed.at ? ` · ${fmtDate(String(ed.at))}` : ""}`);
-      }
       if (e.kind === "FILLS" && e.srcId === node.id) {
         const cap = byId.get(e.dstId);
         if (cap) fillsC.push(cap.label);
       }
     }
+    // The decision log straight from triage_events — NOT the graph edges, so
+    // project-less verdicts (the orphan-node case) show too, with the full
+    // write-up the agent composed at triage time.
+    const [owner, name] = fullName.split("/");
+    const repoRow = owner && name ? await db.select({ id: schema.repos.id }).from(schema.repos)
+      .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name))).get() : null;
+    const decisions: NonNullable<Dossier["decisions"]> = [];
+    if (repoRow) {
+      const events = await db.select().from(schema.triageEvents)
+        .where(and(eq(schema.triageEvents.userId, user.id), eq(schema.triageEvents.repoId, repoRow.id)));
+      const latest = new Map<string, typeof events[number]>();
+      for (const e of events) {
+        const k = String(e.projectId ?? "g");
+        const prev = latest.get(k);
+        if (!prev || (e.createdAt?.getTime() ?? 0) > (prev.createdAt?.getTime() ?? 0)) latest.set(k, e);
+      }
+      const slugRows = await db.select({ id: schema.projectProfiles.id, slug: schema.projectProfiles.slug })
+        .from(schema.projectProfiles).where(eq(schema.projectProfiles.userId, user.id));
+      const slugById2 = new Map(slugRows.map((r) => [r.id, r.slug]));
+      for (const e of [...latest.values()].sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))) {
+        decisions.push({
+          verdict: e.verdict, score: e.score, effort: e.effortBand, reason: e.reasonCode,
+          project: e.projectId != null ? slugById2.get(e.projectId) ?? "(unknown project)" : "(no project)",
+          at: e.createdAt ? e.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "",
+          oneLine: e.oneLine, writeup: e.writeup,
+        });
+      }
+    }
     const alts = await alternativesFor(fullName, 3).catch(() => []);
     const sections: Dossier["sections"] = [];
     if (fillsC.length) sections.push({ heading: "Fills", items: fillsC });
-    if (verdicts.length) sections.push({ heading: "Your decisions", items: verdicts });
     if (alts.length) sections.push({ heading: "Similar maintained libraries", items: alts.map((a) => `${a.fullName}${a.stars ? ` · ${a.stars}★` : ""}${a.adoptedBy ? ` · adopted by ${a.adoptedBy}` : ""}`) });
     return {
       kind, title: fullName,
       subtitle: data.stars != null ? `${data.stars}★` : null,
       url: (data.url as string) ?? `https://github.com/${fullName}`,
-      sections, note: anchoredNote,
+      sections, note: anchoredNote, decisions,
     };
   }
 

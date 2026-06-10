@@ -439,6 +439,32 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
             <>
               {dossier.subtitle && <div style={{ color: "#999", marginBottom: 8 }}>{dossier.subtitle}</div>}
               {dossier.url && <div style={{ marginBottom: 8 }}><a href={dossier.url} target="_blank" rel="noreferrer" style={{ color: "#5eb0ef" }}>{dossier.url.replace(/^https?:\/\//, "")}</a></div>}
+              {(dossier.decisions?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                    Your decisions ({dossier.decisions!.length})
+                  </div>
+                  {dossier.decisions!.map((d, i) => (
+                    <div key={i} style={{ margin: "6px 0 10px", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8 }}>
+                      <div>
+                        <span style={{ fontWeight: 700, color: d.verdict === "adopt" ? "#86efac" : d.verdict === "port" ? "#93c5fd" : d.verdict === "defer" ? "#fcd34d" : "#f87171" }}>{d.verdict}</span>
+                        {d.score != null && <span style={{ color: "#999" }}> · {d.score}/100</span>}
+                        {d.effort && <span style={{ color: "#999" }}> · {d.effort}</span>}
+                        {d.reason && <span style={{ color: "#999" }}> · {d.reason}</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#888", margin: "2px 0" }}>triaged in {d.project} · {d.at}</div>
+                      {d.oneLine && <div style={{ color: "#ccc", marginTop: 4 }}>{d.oneLine}</div>}
+                      {!d.oneLine && !d.writeup && <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>bare verdict — the agent recorded no reasoning</div>}
+                      {d.writeup && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: "pointer", color: "#5eb0ef", fontSize: 12 }}>show write-up</summary>
+                          <div style={{ whiteSpace: "pre-wrap", color: "#bbb", fontSize: 12, marginTop: 6, maxHeight: 320, overflowY: "auto" }}>{d.writeup}</div>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               {dossier.sections.map((s) => (
                 <div key={s.heading} style={{ marginTop: 12 }}>
                   <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.heading}</div>
