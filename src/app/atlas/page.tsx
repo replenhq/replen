@@ -61,17 +61,18 @@ export default async function AtlasPage() {
   const alertTotal = nodes.reduce((s, n) => s + (n.alertCount > 0 ? 1 : 0), 0);
   const blindspots = nodes.filter((n) => n.blindspot).length;
 
+  // Full-bleed: escape the global `main { max-width: 1100px }` container —
+  // the graph owns every pixel below the nav.
   return (
-    <main style={{ padding: "0", height: "100vh", display: "flex", flexDirection: "column" }}>
-      <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border, #262626)" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Your Atlas</h1>
-        <p style={{ margin: "4px 0 0", color: "var(--dim, #a3a3a3)", fontSize: 14 }}>
+    <main style={{ padding: 0, maxWidth: "none", width: "100vw", marginLeft: "calc(50% - 50vw)", height: "calc(100vh - 86px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "12px 24px 10px", borderBottom: "1px solid var(--border, #262626)", flexShrink: 0 }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "inline" }}>Your Atlas</h1>
+        <span style={{ marginLeft: 14, color: "var(--dim, #a3a3a3)", fontSize: 13 }}>
           {nodes.length} nodes · {edges.length} edges
           {alertTotal > 0 ? ` · ${alertTotal} node${alertTotal === 1 ? "" : "s"} with live alerts` : ""}
-          {blindspots > 0 ? ` · ${blindspots} blind spot${blindspots === 1 ? "" : "s"}` : ""}.
-          Click a node for its dossier.
+          {blindspots > 0 ? ` · ${blindspots} blind spot${blindspots === 1 ? "" : "s"}` : ""}
           {nodes.length === 0 ? " — run /replen-onboard and a pipeline run to build it." : ""}
-        </p>
+        </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {nodes.length > 0 ? <AtlasGraph nodes={nodes} edges={edges} mapPos={mapPos} /> : null}

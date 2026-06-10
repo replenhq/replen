@@ -41,6 +41,7 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
   const [kinds, setKinds] = useState<Set<string>>(new Set(ALL_KINDS));
   const [depth, setDepth] = useState<1 | 2>(1);
   const [queuedMsg, setQueuedMsg] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [, startTransition] = useTransition();
 
   // live refs so the render loop sees current UI state without re-init
@@ -136,6 +137,11 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
       const focus = focusSet();
       const searching = searchRef.current.length >= 2;
       const pulse = 1 + 0.25 * Math.sin((performance.now() - t0) / 300);
+      // Hover focus (when nothing is selected): highlight the hovered node's
+      // edges and dim everything outside its neighborhood — the quick "what
+      // is this linked to?" read, no click needed.
+      const hoverId = selRef.current == null && hovered ? hovered.id : null;
+      const hoverHi = hoverId != null ? neighbors.get(hoverId) ?? new Set<number>() : null;
 
       for (const e of validEdges) {
         if (inMap) break; // the map is about position, not plumbing
@@ -143,7 +149,8 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
         if (!shown(na) || !shown(nb)) continue;
         if (focus && !(focus.has(e.src) && focus.has(e.dst))) continue;
         const a = pos.get(e.src)!, b = pos.get(e.dst)!;
-        const on = selRef.current != null && (e.src === selRef.current || e.dst === selRef.current);
+        const on = (selRef.current != null && (e.src === selRef.current || e.dst === selRef.current))
+          || (hoverId != null && (e.src === hoverId || e.dst === hoverId));
         cx.strokeStyle = on ? "rgba(255,200,87,0.5)" : (EDGE_COLOR[e.kind] ?? "rgba(120,120,140,0.1)");
         cx.lineWidth = on ? 1.4 : 0.6;
         cx.beginPath(); cx.moveTo(tx(a.x), ty(a.y)); cx.lineTo(tx(b.x), ty(b.y)); cx.stroke();
@@ -152,7 +159,8 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
         if (!shown(n)) continue;
         if (focus && !focus.has(n.id)) continue;
         const p = pos.get(n.id)!;
-        const dimmed = searching && !searchHit(n);
+        const hoverDim = hoverId != null && n.id !== hoverId && !hoverHi?.has(n.id);
+        const dimmed = (searching && !searchHit(n)) || hoverDim;
         const rr = radius(n) * Math.min(1.6, cam.scale + 0.4);
         const x = tx(p.x), y = ty(p.y);
         cx.globalAlpha = dimmed ? 0.12 : 1;
@@ -174,7 +182,7 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
           cx.fillStyle = "#22d3ee";
           cx.beginPath(); cx.arc(x + rr, y - rr, 3, 0, Math.PI * 2); cx.fill();
         }
-        const showLabel = !dimmed && (n.kind === "project" || n.kind === "product" || n.keystone || n.id === selRef.current || (searching && searchHit(n)) || cam.scale > 1.6);
+        const showLabel = !dimmed && (n.kind === "project" || n.kind === "product" || n.keystone || n.id === selRef.current || n.id === hoverId || (hoverHi?.has(n.id) ?? false) || (searching && searchHit(n)) || cam.scale > 1.6);
         if (showLabel) { cx.globalAlpha = 0.92; cx.fillStyle = "#ddd"; cx.font = `${n.kind === "project" ? 12 : 10}px system-ui`; cx.fillText(n.label.slice(0, 28), x + rr + 3, y + 3); }
         cx.globalAlpha = 1;
       }
@@ -242,44 +250,62 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
   };
 
   const chip = (active: boolean): CSSProperties => ({
-    padding: "2px 9px", borderRadius: 10, fontSize: 12, cursor: "pointer", userSelect: "none",
-    border: `1px solid ${active ? "#666" : "#333"}`, color: active ? "#ddd" : "#666", background: active ? "rgba(255,255,255,0.06)" : "none",
+    padding: "3px 10px", borderRadius: 10, fontSize: 12, cursor: "pointer", userSelect: "none",
+    border: `1px solid ${active ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.14)"}`,
+    color: active ? "#f3f3f3" : "#9a9a9a",
+    background: active ? "rgba(255,255,255,0.13)" : "transparent",
   });
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", background: "var(--bg, #0a0a0a)", cursor: "grab" }} />
 
-      {/* controls */}
-      <div style={{ position: "absolute", top: 12, left: 12, display: "flex", flexDirection: "column", gap: 8, fontSize: 12, color: "#aaa" }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", background: "rgba(0,0,0,0.5)", padding: "6px 10px", borderRadius: 6 }}>
-          <span style={chip(view === "links")} onClick={() => setView("links")}>Links</span>
-          <span style={chip(view === "map")} onClick={() => setView("map")} title="Semantic map — position by meaning (PCA over the matcher's embeddings)">Map</span>
-          <input
-            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search…"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid #333", borderRadius: 5, color: "#ddd", padding: "3px 8px", fontSize: 12, width: 130, outline: "none" }}
-          />
-          {selected && (
-            <span style={chip(false)} onClick={() => setDepth(depth === 1 ? 2 : 1)} title="Focus neighborhood depth">depth {depth}</span>
+      {/* controls — one glass panel, collapsible */}
+      <div style={{ position: "absolute", top: 12, left: 12, fontSize: 12, color: "#cfcfcf", maxWidth: 380 }}>
+        <div style={{
+          background: "rgba(16,16,20,0.72)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+          border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,0.45)",
+          padding: panelOpen ? "10px 12px" : "6px 10px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              onClick={() => setPanelOpen(!panelOpen)}
+              title={panelOpen ? "Collapse controls" : "Expand controls"}
+              style={{ cursor: "pointer", color: "#9ca3af", fontSize: 13, userSelect: "none", padding: "0 2px" }}
+            >{panelOpen ? "▾" : "▸"}</span>
+            <span style={chip(view === "links")} onClick={() => setView("links")}>Links</span>
+            <span style={chip(view === "map")} onClick={() => setView("map")} title="Semantic map — position by meaning (PCA over the matcher's embeddings)">Map</span>
+            <input
+              value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search…"
+              style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 6, color: "#f1f1f1", padding: "4px 9px", fontSize: 12, width: 120, outline: "none" }}
+            />
+            {selected && (
+              <span style={chip(false)} onClick={() => setDepth(depth === 1 ? 2 : 1)} title="Focus neighborhood depth">depth {depth}</span>
+            )}
+          </div>
+          {panelOpen && (
+            <>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                {ALL_KINDS.map((k) => (
+                  <span key={k} style={{ ...chip(kinds.has(k)) }} onClick={() => toggleKind(k)}>
+                    <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: KIND_COLOR[k], marginRight: 5, opacity: kinds.has(k) ? 1 : 0.35 }} />{k}
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)", color: "#b8b8b8" }}>
+                <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: `2px solid ${ALERT_COLOR.security}`, marginRight: 5 }} />alert</span>
+                <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px solid #5eb0ef", marginRight: 5 }} />blind spot</span>
+                <span><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: "#22d3ee", marginRight: 5 }} />queued work</span>
+                <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px dashed #888", marginRight: 5 }} />hover = links</span>
+              </div>
+            </>
           )}
-        </div>
-        <div style={{ display: "flex", gap: 6, background: "rgba(0,0,0,0.5)", padding: "6px 10px", borderRadius: 6, flexWrap: "wrap" }}>
-          {ALL_KINDS.map((k) => (
-            <span key={k} style={{ ...chip(kinds.has(k)) }} onClick={() => toggleKind(k)}>
-              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: KIND_COLOR[k], marginRight: 5, opacity: kinds.has(k) ? 1 : 0.35 }} />{k}
-            </span>
-          ))}
-        </div>
-        <div style={{ background: "rgba(0,0,0,0.5)", padding: "6px 10px", borderRadius: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: `2px solid ${ALERT_COLOR.security}`, marginRight: 4 }} />alert</span>
-          <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px solid #5eb0ef", marginRight: 4 }} />blind spot</span>
-          <span><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: "#22d3ee", marginRight: 4 }} />queued work</span>
         </div>
       </div>
 
       {/* dossier */}
       {selected && (
-        <div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 360, overflowY: "auto", background: "rgba(18,18,18,0.97)", border: "1px solid #333", borderRadius: 8, padding: 16, fontSize: 13, color: "#ddd" }}>
+        <div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 360, overflowY: "auto", background: "rgba(16,16,20,0.78)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,0.45)", padding: 16, fontSize: 13, color: "#ddd" }}>
           <div style={{ fontSize: 11, color: KIND_COLOR[selected.kind] ?? "#999", textTransform: "uppercase", letterSpacing: 0.5 }}>
             {selected.kind}{selected.keystone ? " · keystone" : ""}{selected.blindspot ? " · blind spot" : ""}
           </div>
