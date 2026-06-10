@@ -25,7 +25,11 @@ export type RecallDecision = {
   repo: string; project: string | null; verdict: string; reasonCode: string | null;
   score: number | null; effort: string | null; oneLine: string | null; at: string | null; relevance: number;
 };
-export type RecallResult = { query: string; capabilities: RecallCapability[]; decisions: RecallDecision[] };
+// A passage from a project's grounded agent report (the onboarding code-read
+// write-up) that matches the query — answers ARCHITECTURE questions ("how does
+// X handle auth?", "which repo does its own scraping?") that verdicts can't.
+export type RecallReport = { project: string; snippet: string; relevance: number };
+export type RecallResult = { query: string; capabilities: RecallCapability[]; decisions: RecallDecision[]; reports: RecallReport[] };
 
 export async function recall(userId: number, opts: { query: string; verdict?: string; limit?: number }): Promise<RecallResult> {
   const limit = opts.limit ?? 8;
@@ -59,6 +63,33 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   const capabilities: RecallCapability[] = [...capAgg.entries()]
     .map(([label, v]) => ({ capability: label, projects: [...v.projects], provenance: v.provenance, score: v.best }))
     .sort((a, b) => b.score - a.score).slice(0, limit);
+
+  // ── reports: passages from the grounded agent write-ups that match ──
+  // The onboarding agent's code-read report is the richest text we hold about
+  // each project; keyword-match it and return the best paragraph so recall can
+  // answer architecture questions, not just "what did we decide".
+  const reports: RecallReport[] = [];
+  if (toks.length > 0) {
+    for (const p of projects) {
+      if (!p.agentReport) continue;
+      let bestPara: string | null = null;
+      let bestHits = 0;
+      for (const para of p.agentReport.split(/\n{2,}/)) {
+        const trimmed = para.trim();
+        if (trimmed.length < 40) continue; // headings / list stubs
+        const hits = keywordHits(trimmed, toks);
+        if (hits > bestHits) { bestHits = hits; bestPara = trimmed; }
+      }
+      if (bestPara && bestHits > 0) {
+        reports.push({
+          project: p.slug,
+          snippet: bestPara.length > 500 ? `${bestPara.slice(0, 500)}…` : bestPara,
+          relevance: bestHits,
+        });
+      }
+    }
+    reports.sort((a, b) => b.relevance - a.relevance).splice(3);
+  }
 
   // ── decisions: evaluated candidates matching the query, latest per (project, repo) ──
   const events = await db.select({
@@ -99,5 +130,5 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   }
   decisions.sort((a, b) => b.relevance - a.relevance).splice(limit);
 
-  return { query: opts.query, capabilities, decisions };
+  return { query: opts.query, capabilities, decisions, reports };
 }

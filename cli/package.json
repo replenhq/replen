@@ -1,7 +1,7 @@
 {
   "name": "replen",
-  "version": "1.0.11",
-  "description": "Make your AI coding tools smarter. One command, no API keys. Replen scouts the OSS firehose against your projects and surfaces drop-in libraries, ideas to port, and dead deps to swap — the match decision happens inside your AI tool's session on your subscription tokens. 1-3 actionable matches a month, by design.",
+  "version": "1.0.13",
+  "description": "Make your AI coding tools smarter. One command, no API keys, free. Replen watches what your projects actually do and surfaces a few things worth bringing in each month. Use one as is, port a piece of another, cherry pick an idea, or build it clean room. The match happens inside your AI tool's session. A few actionable matches a month, by design.",
   "type": "module",
   "bin": {
     "replen": "dist/index.js"

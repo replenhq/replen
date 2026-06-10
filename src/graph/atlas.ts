@@ -61,6 +61,18 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
   for (const c of caps) { const t = String(c.data.themeName ?? ""); if (!t) continue; (themeMembers.get(t) ?? themeMembers.set(t, []).get(t)!).push(c); }
   const keystones = caps.filter((c) => c.data.keystone).sort((a, b) => (Number(b.data.degree ?? 0)) - (Number(a.data.degree ?? 0)));
 
+  // Coverage: capabilities no candidate has ever been evaluated against (no
+  // FILLS edge). These are the blind spots — places discovery has never
+  // delivered (or never been triaged). Keystones first: an unevaluated
+  // capability that connects much of the portfolio is the costliest gap.
+  const filledCapIds = new Set<number>();
+  for (const cands2 of candFills.values()) for (const c of cands2) filledCapIds.add(c.id);
+  const blindSpots = caps
+    .filter((c) => !filledCapIds.has(c.id) && (capProjs.get(c.id)?.length ?? 0) > 0)
+    .sort((a, b) =>
+      (Number(!!b.data.keystone) - Number(!!a.data.keystone)) ||
+      (Number(b.data.degree ?? 0) - Number(a.data.degree ?? 0)));
+
   // MAP.md
   files.push({ path: "MAP.md", content: [
     `# Your Replen Atlas`, ``,
@@ -68,6 +80,11 @@ export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
     `## Keystone capabilities`, `The capabilities that connect the most of your work.`, ``,
     ...keystones.slice(0, 12).map((c) => `- ${link(capFile(c.label), c.label)} — ${capProjs.get(c.id)?.length ?? 0} projects`), ``,
     `## Themes`, ...[...themeMembers.entries()].filter(([, m]) => m.length >= 3).sort((a, b) => b[1].length - a[1].length).map(([t, m]) => `- ${link(themeFile(t), t)} (${m.length})`), ``,
+    ...(blindSpots.length ? [
+      `## Blind spots`,
+      `Capabilities nothing has ever been evaluated against — discovery has never delivered here (or nothing was triaged). Keystones first.`, ``,
+      ...blindSpots.slice(0, 15).map((c) => `- ${link(capFile(c.label), c.label)}${c.data.keystone ? " ⭐" : ""} — ${capProjs.get(c.id)?.length ?? 0} project${(capProjs.get(c.id)?.length ?? 0) === 1 ? "" : "s"}`), ``,
+    ] : []),
     `## Projects (${projects.length})`, ...projects.slice().sort((a, b) => a.label.localeCompare(b.label)).map((p) => `- ${link(projFile(p.nodeKey), p.label)}`),
   ].join("\n") });
 

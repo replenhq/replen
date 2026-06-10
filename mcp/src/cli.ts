@@ -8,6 +8,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerTools } from "./server.js";
 import { runSetup } from "./setup.js";
 import { detectCurrentRepo } from "./repo-detect.js";
+import { refreshAtlasVaultInBackground } from "./atlas-sync.js";
 
 async function main() {
   if (process.argv[2] === "setup") {
@@ -64,6 +65,10 @@ Commands:
     `[replen-mcp] connected · base=${baseUrl}` +
     (defaultRepo ? ` · scope=${defaultRepo}` : ` · scope=(no git repo detected)`),
   );
+
+  // Keep the local Atlas vault (~/.replen/atlas/) fresh in the background —
+  // fire-and-forget, debounced (twice a day max), never blocks the transport.
+  refreshAtlasVaultInBackground({ baseUrl, token, defaultRepo });
 }
 
 main().catch((e) => {

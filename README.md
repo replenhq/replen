@@ -120,6 +120,20 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 
 The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
 
+## Your Atlas
+
+Discovery brings the outside world in. Atlas is the other half, a living map of everything you have already built and the connections inside it.
+
+As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
+
+- **Leaps** (`replen_connect`). Connections across your own work that you would never go looking for. A thing you solved cleanly in one repo is the open gap in another. A capability in one project answers a problem in a project you have not opened in months. Each leap is scored on relevance and surprise, and comes with the path that explains it. Your own portfolio becomes a source, not just the ecosystem.
+- **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.
+- **Themes and keystones.** Capabilities clustered into themes, with the load-bearing keystones that recur across projects flagged. A quiet read on what your work is made of, plus provenance on every capability (grounded / extracted / inferred) so matching trusts solid signal over soft guesses.
+
+See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas), or run `replen atlas` to write the whole map to `~/.replen/atlas/` as linked notes you can open in Obsidian.
+
+The vault doubles as a **memory layer for your coding agents**: it lives on disk as plain markdown, the MCP server keeps it fresh in the background, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context — what you've built, what fills each capability, and every decision with the reason — without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
+
 ## Numbers
 
 Things we measure, not claims we promise.
@@ -168,7 +182,7 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
     └─ persist with discovery mode tag (scouted / discovered / re-checked)
                                         ↓
 ─── DELIVERY ─────────────────────────────────────────────────
-  → @replen/mcp (stdio, 16 tools)
+  → @replen/mcp (stdio, 18 tools)
        ↑    replen_check_new → "N new" surfaced in session
        │    replen_match     → curated inventory scoped to open repo
        │    replen_state     → star / hide / handoff captured
@@ -255,7 +269,7 @@ The MCP gives the agent **tools** (data access); the skill gives it a **playbook
 
 ### MCP server (`mcp/`)
 
-Self-contained npm package (`@replen/mcp`) that exposes thirteen tools to Claude Code / Codex / any MCP host. Grouped by role:
+Self-contained npm package (`@replen/mcp`) that exposes eighteen tools to Claude Code / Codex / any MCP host. Grouped by role:
 
 | Role | Tool | Returns |
 |---|---|---|
@@ -263,10 +277,15 @@ Self-contained npm package (`@replen/mcp`) that exposes thirteen tools to Claude
 | | `replen_match` | Today's curated inventory scoped to the open repo. Returns candidates + `whyShortlisted` line; the skill triages each against the local codebase |
 | | `replen_state` | Capture user actions: star / unstar / hide / handoff |
 | | `replen_record_triage` | Persist the agent's verdict (adopt / port / skip + score + effort) back to Replen |
+| **Atlas** | `replen_connect` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
+| | `replen_recall` | Recall. In-session memory over your past triage decisions and capabilities; answers what you have ported, weighed before, or already build elsewhere |
 | **Inspection** | `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
 | | `replen_search` | Full-text search across writeups, repo metadata, notes |
 | | `replen_starred` | Starred matches with handoff state |
 | | `replen_analyze` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
+| **Configuration** | `replen_set_capabilities` | Set a project's grounded capabilities (tag + descriptor + data modality) and report, so matching fits the code from day one |
+| | `replen_set_tags` | Set a project's broad domain tags from the in-session agent |
+| | `replen_set_product` | Group several repos as one product, so their capabilities are unioned when you work in any of them |
 | **Actions** | `replen_handoff` | Opens a handoff PR for a starred match |
 | | `replen_feedback` | Records good / bad on a source (retrains source ranking) |
 | **Ingest control** | `replen_run` | Triggers a fresh server-side ingest run (source fetch + eligibility filter) without opening the dashboard |

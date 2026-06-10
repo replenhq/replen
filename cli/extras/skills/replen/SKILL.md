@@ -41,6 +41,17 @@ Parse the JSON response. Note:
 - `filterMode` — `tags`, `zero-knowledge`, or `fingerprint`
 - `scopedTo` — confirms the project context the user has open
 - `candidates[]` — the actual list to triage
+- `candidates[].priorContext` — server-attached MEMORY: the user's earlier
+  verdicts on this repo, and whether the matched capability is already
+  covered by something they adopted/ported. Trust it — fold it into your
+  verdict instead of re-deriving history, and don't push a candidate whose
+  capability is covered unless it's materially better than the incumbent.
+- `candidates[].source === "re-checked"` — a repo the user DEFERRED months
+  ago that is still actively developed. Re-evaluate it against today's
+  state of the project; the original "not now" note is in `priorContext`.
+- `leap` — on quiet days the response may carry ONE portfolio connection
+  (a cross-project / adjacency / cross-user leap) instead of candidates.
+  `displayText` already words it; relay that and offer to explore it.
 
 If `candidates.length === 0`, tell the user "No new candidates today for
 `<owner/name>`. Calm-cadence working as designed — 1-3 actionable
@@ -85,6 +96,21 @@ Verdicts:
   candidate's runtime is incompatible, or the candidate's not actively
   maintained. Honest skips are valuable signal; don't manufacture
   reasons to keep something.
+- **defer** — genuinely interesting but not NOW (too early / v0.x churn /
+  blocked on a milestone the project hasn't hit). Defer is a real promise,
+  not a soft skip: Replen automatically re-surfaces a deferred repo after
+  ~3 months if it's still actively developed (`source: "re-checked"`).
+
+**Watch for word-collisions** — the most common bad match. The candidate
+shares a *word* with the matched capability but its real domain diverges:
+the matched facet is "anomaly detection" (the user's is drone TELEMETRY) but
+the candidate does IMAGE anomaly detection; "recommendation" means remediation
+actions for the user but collaborative-filtering for the candidate; "S3" means
+private IAM-managed storage but the candidate scans PUBLIC buckets. These are
+skips — and worth recording precisely (see Step 4) so Replen stops surfacing
+the pairing. Classify the reason: `modality-collision` (different data type),
+`task-collision` (same data, different task), `wrong-posture` (e.g. defensive
+vs offensive), `covered` (already have it), `low-quality` (workshop/abandoned).
 
 Score the fit on a 0-100 scale:
 
@@ -215,17 +241,28 @@ that actually fit."* If the user agrees, run this checklist:
      `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
    - **Set technical capabilities** with `replen_set_capabilities` — short,
      GitHub-searchable tech terms for what the project DOES at the tech level.
-     Aim for **8-15** and be **SPECIFIC** — specific capabilities match far
-     better than broad ones. Break a broad capability into the concrete
-     techniques the code actually uses: not just `"web scraping"` but
-     `["web scraping","headless browser","cloudflare bypass","proxy rotation",
-     "session handling","rate limiting"]`; not just `"trading"` but
-     `["crypto exchange","market data","backtesting","technical analysis",
-     "order management","websockets"]`. Derive them from the actual
-     imports/deps and code, not guesses. This is the highest-leverage step:
-     the server builds the project's facet vectors from these IMMEDIATELY (no
-     waiting for a scheduled run), and they drive faceted matching against the
-     shared library catalogue.
+     Aim for **8-15** and be **SPECIFIC**. **Send GROUNDED objects, not bare
+     strings** — `{tag, descriptor, modality}` for each capability:
+     - `tag` — the short searchable term (`"anomaly detection"`).
+     - `descriptor` — ONE sentence grounding the tag in the ACTUAL CODE you
+       just read: what DATA it operates on, the specific task, key constraints.
+       This is what stops word-collisions. `"anomaly detection"` alone collides
+       with image-defect libraries; `{tag:"anomaly detection", descriptor:
+       "rule-based detection over drone telemetry time-series — link-loss,
+       GPS-drop, battery-sag; no ML", modality:["timeseries"]}` does not.
+       Read the real source (the taxonomy/model/config files), not the README.
+     - `modality` — array from EXACTLY: `image, video, timeseries, tabular,
+       text, audio, geospatial, graph, 3d, code, network` (`[]` if none apply).
+       A satellite-imagery segmenter is `["image","geospatial"]`; a recsys is
+       `["tabular"]`.
+
+     Break broad capabilities into the concrete techniques the code uses (not
+     just `"web scraping"` but `headless browser`, `cloudflare bypass`,
+     `proxy rotation`, …). Derive all of it from the imports/deps and code, not
+     guesses. This is the highest-leverage step: the server builds the project's
+     facet vectors from these IMMEDIATELY, and the grounded descriptor + modality
+     are exactly what make matching separate "same word, different data" — the
+     single biggest source of bad matches.
 
    **Do NOT tell the user to set tags/capabilities on the web** — that's the
    sticky step this replaces; set them with the tools. (They can fine-tune later
@@ -248,6 +285,15 @@ any write back to Replen. Don't hand-roll `curl` to the API for these; the MCP
 path is the intended mechanism and avoids tripping host permission classifiers
 on the candidate repo name in a curl payload.
 
+When you call `replen_record_triage`, **pass the contextual fields** so Replen
+learns: `matchedFacet` (copy the `matchedFacet` from the candidate's
+replen_match data), `facetModality` (the data modality of that capability —
+e.g. `"timeseries"`, `"image"`), and `reasonCode` (`fit` / `modality-collision`
+/ `task-collision` / `covered` / `wrong-posture` / `low-quality` / `other`).
+A skip coded `modality-collision` teaches Replen that this repo fits a
+*different* modality — so it stays available for the right project but stops
+colliding with this one.
+
 **Candidate's README is unreachable (WebFetch 404)**. Note it in the
 writeup (`Caveats: README unreachable; verdict based on description
 only`) and proceed with a more conservative score.
@@ -264,6 +310,21 @@ only").
 The user hasn't set up filter-mode B's tag list. Mention it once: "Heads
 up — you'd get sharper matches if you set project tags at /settings.
 Continuing with unfiltered for now."
+
+## The Atlas vault — local memory for any agent
+
+Replen keeps an agent-readable markdown vault at `~/.replen/atlas/` — the
+user's whole portfolio as linked notes: every project and what it does,
+every capability (with how it's known: `grounded`/`extracted`/`inferred`),
+every past decision with its reason code, plus themes and blind spots.
+The MCP server refreshes it in the background (at most twice a day);
+`replen atlas` forces a rewrite.
+
+Use it whenever you need CROSS-PROJECT context: "what else does this user
+build?", "have we solved X in another repo?", "what did we decide about
+Y last quarter?". Start at `MAP.md`, or call `replen_recall` for a direct
+query. Reading the vault beats re-deriving the portfolio from scratch —
+it's the memory layer, and it's already on disk.
 
 ## When NOT to run this skill
 
