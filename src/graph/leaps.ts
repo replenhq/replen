@@ -11,10 +11,11 @@
 //   3. cross-user endorsement — a repo that scored adopt/port across ≥K other
 //      users whose projects look like yours, that you haven't evaluated. k-anon.
 
-import { eq, gte } from "drizzle-orm";
+import { eq, gte, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { cosineSimilarity, parseStoredEmbedding } from "../lib/embeddings";
 import { KEEP_KINDS, type RepoKind } from "../catalogue/classify";
+import { isGloballyDemoted } from "../lib/repo-quality";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -263,19 +264,29 @@ async function buildCatalogueCapIndex(exclude: Set<string>): Promise<Map<string,
 // catalogue for an embedding so we can match them to the asking user's projects.
 async function endorsedCandidates(): Promise<Array<{ fullName: string; embedding: number[]; users: number; url: string | null; stars: number | null }>> {
   const q = await db
-    .select({ repoId: schema.repoQuality.repoId, adopt: schema.repoQuality.adoptUsers, port: schema.repoQuality.portUsers })
+    .select({ repoId: schema.repoQuality.repoId, adopt: schema.repoQuality.adoptUsers, port: schema.repoQuality.portUsers, skip: schema.repoQuality.skipUsers, total: schema.repoQuality.totalUsers })
     .from(schema.repoQuality)
     .where(gte(schema.repoQuality.totalUsers, CROSS_USER_K));
-  const positive = q.filter((r) => (r.adopt + r.port) >= CROSS_USER_K);
+  // Positive endorsement AND not globally demoted — a repo enough users called
+  // rubbish must never resurface as a cross-user "leap" (the inventory route
+  // gates this; the leap path must too).
+  const positive = q.filter((r) => (r.adopt + r.port) >= CROSS_USER_K && !isGloballyDemoted({ skipUsers: r.skip, totalUsers: r.total }));
   if (!positive.length) return [];
-  const repos = await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name, url: schema.repos.url, stars: schema.repos.stars }).from(schema.repos);
+  // One catalogue query for all endorsed repos (was one per repo).
+  const repos = await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name, url: schema.repos.url, stars: schema.repos.stars })
+    .from(schema.repos).where(inArray(schema.repos.id, positive.map((p) => p.repoId)));
   const repoById = new Map(repos.map((r) => [r.id, r]));
+  const fullNames = repos.map((r) => `${r.owner}/${r.name}`);
+  const catRows = fullNames.length
+    ? await db.select({ fullName: schema.catalogueRepos.fullName, embedding: schema.catalogueRepos.embedding })
+        .from(schema.catalogueRepos).where(inArray(schema.catalogueRepos.fullName, fullNames))
+    : [];
+  const embByName = new Map(catRows.map((c) => [c.fullName.toLowerCase(), parseStoredEmbedding(c.embedding ?? null)]));
   const out: Array<{ fullName: string; embedding: number[]; users: number; url: string | null; stars: number | null }> = [];
   for (const p of positive) {
     const r = repoById.get(p.repoId); if (!r) continue;
     const fullName = `${r.owner}/${r.name}`;
-    const cat = await db.select({ embedding: schema.catalogueRepos.embedding }).from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, fullName)).get();
-    const emb = parseStoredEmbedding(cat?.embedding ?? null); if (!emb) continue;
+    const emb = embByName.get(fullName.toLowerCase()); if (!emb) continue;
     out.push({ fullName, embedding: emb, users: p.adopt + p.port, url: r.url, stars: r.stars });
   }
   return out;

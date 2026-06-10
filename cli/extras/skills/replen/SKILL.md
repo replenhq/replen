@@ -5,10 +5,12 @@ description: Review Replen's suggestions for the current repo against your code.
 
 # Replen Match — in-session candidate triage
 
-You are running the matching loop locally. Replen's **Watchtower** — its
+You are running **Brainstem**'s matching loop locally. **Watchtower** — Replen's
 maintained network of ~1,250 sources (vendor changelogs, advisories, pricing
-pages, release feeds, standards trackers, EOL calendars) — has fetched a list
-of plausible OSS candidates and events; you've got the user's codebase open.
+pages, release feeds, standards trackers, EOL calendars) — fetched the raw
+events; **Brainstem** scored them against this codebase's capabilities; you've
+got the user's codebase open and make the final call. Verdicts you record land
+in **Atlas** and tune Brainstem's ranking for every future session.
 Your job is to decide which (if any) are worth their attention, write up the
 strong ones, and capture what they want to do about them.
 

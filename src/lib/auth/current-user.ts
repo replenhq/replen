@@ -61,12 +61,13 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const identities = dt.firebase?.identities ?? {};
   const sourceProvider = dt.source_sign_in_provider ?? "";
   const provider = dt.firebase?.sign_in_provider ?? "";
+  // Google guarantees a verified email for google.com sign-ins. GitHub does
+  // NOT — it leaves email_verified=false because a GitHub account can carry an
+  // unverified address — so GitHub must clear the raw claim, never provider
+  // presence, or an unverified GitHub email could claim an invite bound to it.
   const isOAuthVerified =
-    "github.com" in identities ||
     "google.com" in identities ||
-    sourceProvider === "github.com" ||
     sourceProvider === "google.com" ||
-    provider === "github.com" ||
     provider === "google.com";
   const emailVerified = Boolean(dt.email_verified) || isOAuthVerified;
   const displayName = (tokens.decodedToken.name as string) ?? null;

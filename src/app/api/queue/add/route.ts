@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db/client";
-import { signQueueParams } from "@/lib/queue-sign";
+import { verifyQueueParams } from "@/lib/queue-sign";
 import { escapeHtml } from "@/email/escape";
 
 // Click-to-queue from email. The link's HMAC signature (see
@@ -21,13 +21,23 @@ export async function GET(req: Request) {
   const ok = Number.isFinite(userId) && kind && title && sig;
   let valid = false;
   try {
-    valid = !!ok && sig === signQueueParams(userId, kind, refId, title);
+    valid = !!ok && verifyQueueParams(userId, kind, refId, title, sig); // constant-time
   } catch {
     valid = false;
   }
   if (!valid) {
     return new NextResponse(page("That link didn't verify.", "It may have been truncated by your mail client."), {
       status: 400, headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // Defence in depth: only an active user gets a queue write (a suspended
+  // account shouldn't keep accepting items via old email links).
+  const u = await db.select({ status: schema.users.status }).from(schema.users)
+    .where(eq(schema.users.id, userId)).get();
+  if (!u || u.status !== "active") {
+    return new NextResponse(page("That link didn't verify.", "This account isn't active."), {
+      status: 403, headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
 

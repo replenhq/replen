@@ -64,6 +64,8 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
     if (!to) continue;
     const userTokens = await loadUserTokens(u.userId);
     if (userTokens.size === 0) continue;
+    // Hoisted out of the per-event loop — one load per user, not per match.
+    const versions = await loadUserVersions(u.userId).catch(() => new Map<string, Array<{ slug: string; version: string }>>());
 
     for (const c of criticals) {
       // Vendor-anchored sources match by tokens; aggregator events match by
@@ -84,11 +86,8 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
       const name = aggregator ? null : (c.product === c.vendor ? c.vendor : `${c.vendor} ${c.product}`);
       // Name-level attribution from version reports, when available.
       let affectedLine = "";
-      try {
-        const versions = await loadUserVersions(u.userId);
-        const slugs = [...new Set(toks.flatMap((t) => (versions.get(t) ?? []).map((v) => `${v.slug} (${v.version})`)))];
-        if (slugs.length) affectedLine = `Affects: ${slugs.slice(0, 5).join(", ")}`;
-      } catch { /* best-effort */ }
+      const slugs = [...new Set(toks.flatMap((t) => (versions.get(t) ?? []).map((v) => `${v.slug} (${v.version})`)))];
+      if (slugs.length) affectedLine = `Affects: ${slugs.slice(0, 5).join(", ")}`;
       const subject = `Replen alert: ${label}${name ? ` — ${name}` : ""}`;
       const lineText = `${c.title}\n\n${c.summary ?? ""}\n${affectedLine ? `\n${affectedLine}\n` : ""}\n${c.url ?? ""}\n\nThis reached you because your stack uses an affected tool. Open your repo and run /replen for a grounded read.`;
       const html = [

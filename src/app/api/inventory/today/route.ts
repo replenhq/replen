@@ -1069,8 +1069,8 @@ export async function GET(req: Request) {
           const fit = m.matchedFacet ? `fits your ${m.matchedFacet} capability` : "semantic match";
           const pct = `${(m.cosine * 100).toFixed(0)}%`;
           const forRepo = m.matchedRepo && m.matchedRepo !== scopedProject.slug ? ` — for your \`${m.matchedRepo}\` repo` : "";
-          if (m.rising && ageMo != null) return `rising — ${fit}, ${ageMo}mo old (${pct})${forRepo}`;
-          return `catalogue: ${fit} (${pct})${forRepo}`;
+          if (m.rising && ageMo != null) return `Brainstem: rising — ${fit}, ${ageMo}mo old (${pct})${forRepo}`;
+          return `Brainstem: ${fit} (${pct})${forRepo}`;
         })(),
         cosine: m.cosine,
         matchedFacet: m.matchedFacet,

@@ -59,6 +59,13 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
   const reheatRef = useRef(false);
   const scatterRef = useRef(false);
   const selRef = useRef<number | null>(null);
+  // Camera + node positions survive effect re-inits (a server action's
+  // revalidate re-renders the page → new node/edge array identities → this
+  // effect re-runs). Without persisting these, every star/note/plan edit would
+  // reset the user's zoom, orbit, and layout. Seeded once, reused on re-init.
+  const camRef = useRef<{ x: number; y: number; scale: number } | null>(null);
+  const orbitRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
+  const posRef = useRef<Map<number, { x: number; y: number; z: number }>>(new Map());
 
   useEffect(() => {
     const _cv = canvasRef.current; if (!_cv) return;
@@ -70,14 +77,25 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
     const neighbors = new Map<number, Set<number>>();
     for (const e of validEdges) { (neighbors.get(e.src) ?? neighbors.set(e.src, new Set()).get(e.src)!).add(e.dst); (neighbors.get(e.dst) ?? neighbors.set(e.dst, new Set()).get(e.dst)!).add(e.src); }
 
+    // Reuse a node's previous position when this is a re-init (so a re-render
+    // after an action doesn't jump the layout); seed fresh nodes on the ring.
     const pos = new Map<number, P>();
-    nodes.forEach((n, i) => { const a = (i / nodes.length) * Math.PI * 2; const r = 200 + (i % 7) * 40; pos.set(n.id, { x: Math.cos(a) * r, y: Math.sin(a) * r, z: ((i * 37) % 240) - 120, vx: 0, vy: 0, vz: 0 }); });
+    const prevPos = posRef.current;
+    nodes.forEach((n, i) => {
+      const prev = prevPos.get(n.id);
+      if (prev) { pos.set(n.id, { x: prev.x, y: prev.y, z: prev.z, vx: 0, vy: 0, vz: 0 }); return; }
+      const a = (i / nodes.length) * Math.PI * 2; const r = 200 + (i % 7) * 40;
+      pos.set(n.id, { x: Math.cos(a) * r, y: Math.sin(a) * r, z: ((i * 37) % 240) - 120, vx: 0, vy: 0, vz: 0 });
+    });
+    posRef.current = pos as unknown as Map<number, { x: number; y: number; z: number }>;
+    const reinit = camRef.current != null; // had a prior camera → this is a re-init
     const radius = (n: GNode) => (n.kind === "project" ? 7 : n.kind === "product" ? 8 : n.kind === "tool" ? 3.5 : n.keystone ? 6 : 3) + Math.min(4, n.degree * 0.15);
 
-    let cam = { x: 0, y: 0, scale: 0.9 };
-    let yaw = 0, pitch = 0; // 3D orbit camera
+    let cam = camRef.current ?? { x: 0, y: 0, scale: 0.9 };
+    camRef.current = cam;
+    let yaw = orbitRef.current.yaw, pitch = orbitRef.current.pitch; // 3D orbit camera (persisted)
     const PERSP = 1100;     // perspective distance — smaller = more dramatic
-    let alpha = 1;
+    let alpha = reinit ? 0.05 : 1; // re-init: don't reheat the whole sim, layout is already settled
     let hovered: GNode | null = null;
     let raf = 0;
     const t0 = performance.now();
@@ -117,7 +135,7 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
       return out;
     };
 
-    function resize() { const dpr = window.devicePixelRatio || 1; const r = cv.getBoundingClientRect(); cv.width = r.width * dpr; cv.height = r.height * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0); cam.x = r.width / 2; cam.y = r.height / 2; }
+    function resize() { const dpr = window.devicePixelRatio || 1; const r = cv.getBoundingClientRect(); cv.width = r.width * dpr; cv.height = r.height * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0); if (!reinit) { cam.x = r.width / 2; cam.y = r.height / 2; } }
     resize(); window.addEventListener("resize", resize);
 
     // In map view, glide nodes with coordinates toward them; hide the rest.
@@ -285,7 +303,7 @@ export function AtlasGraph({ nodes, edges, mapPos }: { nodes: GNode[]; edges: GE
         if (dim3Ref.current) {
           // 3D: dragging orbits the camera (shift-drag pans)
           if (ev.shiftKey) { cam.x += dx; cam.y += dy; }
-          else { yaw += dx * 0.005; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.005)); userOrbited = true; }
+          else { yaw += dx * 0.005; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.005)); orbitRef.current = { yaw, pitch }; userOrbited = true; }
         } else {
           cam.x += dx; cam.y += dy;
         }

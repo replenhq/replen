@@ -1,6 +1,6 @@
 {
   "name": "@replen/mcp",
-  "version": "1.0.20",
+  "version": "1.0.22",
   "description": "MCP server for replen — surfaces suggestions for your repo (libraries, dependency releases, security advisories) as tools your AI coding host (Claude Code, Codex, Cursor) can call. Pairs with the /replen skill.",
   "type": "module",
   "bin": {

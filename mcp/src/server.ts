@@ -42,6 +42,13 @@ function resolveRepo(args: Record<string, unknown>, cfg: ApiConfig): string | un
 const REPO_PARAM_DESCRIPTION =
   "GitHub 'owner/name' to scope results to. Defaults to the repo this MCP was spawned in (detected from `git remote get-url origin`). Pass an empty string '' to override the default and see matches across all your projects.";
 
+// Shared by replen_leaps and its deprecated alias replen_connect.
+const leapsHandler = async (cfg: ApiConfig, args: Record<string, unknown>): Promise<string> => {
+  const parsed = z.object({ repo: z.string().optional(), limit: z.number().int().min(1).max(30).default(12) }).parse(args);
+  const data = await apiGet(cfg, "/api/graph/leaps", { repo: resolveRepo(args, cfg), limit: parsed.limit });
+  return JSON.stringify(data, null, 2);
+};
+
 const TOOLS: Tool[] = [
   {
     name: "replen_help",
@@ -49,13 +56,21 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {} },
     handler: async () => {
       const lines = [
-        "Replen MCP — available tools:",
+        "Replen MCP — available tools (Brainstem matches · Watchtower watches · Atlas remembers):",
         "",
-        "  Skill-mode (current — in-session matching with subscription tokens):",
-        "    replen_match            Pulls today's candidate inventory scoped to the cwd repo so YOU triage each one against the local codebase. Returns candidates + metadata. You produce the writeups; no API key used.",
-        "    replen_record_triage    Record your per-candidate verdict (adopt / port / skip / defer) after you triage one in replen_match. Powers the Activity feed.",
+        "  Brainstem (the matching loop — in-session, subscription tokens):",
+        "    replen_match            Today's candidate inventory for the cwd repo — what Watchtower surfaced, Brainstem-scored against the local codebase. YOU triage; no API key used.",
+        "    replen_record_triage    Record your per-candidate verdict (adopt / port / skip / defer) — ALWAYS with oneLine + cosine.",
         "    replen_state            Record a user action (starred / hidden / handed_off / surfaced) on a candidate.",
-        "    replen_check_new Session-start check: is there anything new + actionable? Cheap, terse, silent when nothing's new.",
+        "    replen_check_new        Session-start check: anything new + actionable? Cheap, terse, silent when nothing's new.",
+        "",
+        "  Atlas (the knowledge graph + memory):",
+        "    replen_leaps            Leaps — non-obvious cross-project / adjacency / cross-user connections, path-explained.",
+        "    replen_recall           Memory over capabilities, decisions, reports, and your anchored notes.",
+        "    replen_queue            The Queue — list / add / done / dismiss work waiting for a session.",
+        "    replen_set_capabilities Grounded capabilities (tag + descriptor + modality + paths) for a project.",
+        "    replen_set_versions     Pinned dependency/runtime versions (names + versions only).",
+        "    replen_set_tags / replen_set_product   Domain tags · multi-repo product grouping.",
         "",
         "  Legacy hosted-tier (still works for users in subscription_tier='hosted'; in skill-mode these return empty/stale data):",
         "    replen_today     LLM-scored matches from the last N days. In skill-mode use replen_match instead.",
@@ -78,7 +93,7 @@ const TOOLS: Tool[] = [
   {
     name: "replen_match",
     description:
-      "Review Replen's suggestions for the current repo — what Watchtower (Replen's maintained ~1,250-source network: changelogs, advisories, pricing pages, releases, standards, EOL calendars) surfaced for THIS codebase. Pulls the candidate inventory scoped to the cwd repo so you can triage each one against the local code. " +
+      "Review Replen's suggestions for the current repo — what Watchtower (Replen's maintained ~1,250-source network: changelogs, advisories, pricing pages, releases, standards, EOL calendars) surfaced and Brainstem (the matching core) scored against THIS codebase's capabilities. Pulls the candidate inventory scoped to the cwd repo so you can triage each one against the local code. " +
       "\n\n" +
       "RESPONSE FORMAT — IMPORTANT:\n" +
       "The response has two sections, separated by a divider:\n" +
@@ -138,9 +153,9 @@ const TOOLS: Tool[] = [
     },
   },
   {
-    name: "replen_connect",
+    name: "replen_leaps",
     description:
-      "Surface NON-OBVIOUS, high-leverage connections (Leaps) for the user's repos, drawn from Replen's knowledge graph of their whole portfolio. " +
+      "Leaps — Atlas's connection engine. Surface NON-OBVIOUS, high-leverage connections for the user's repos, drawn from Atlas (Replen's knowledge graph of their whole portfolio). " +
       "Unlike replen_match (today's candidate inventory), this finds connections a flat search can't see:\n" +
       "  - cross-project: a capability the user solved in ONE project that a DIFFERENT, related project lacks (often pointing at a repo they already adopted/ported there)\n" +
       "  - adjacency: a capability ADJACENT to one they have but genuinely distinct (with the best repo that fills it) — e.g. 'you do computer vision; you don't use satellite-imagery tooling yet'\n" +
@@ -154,11 +169,19 @@ const TOOLS: Tool[] = [
         limit: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Max leaps to return. Default 12." },
       },
     },
-    handler: async (cfg, args) => {
-      const parsed = z.object({ repo: z.string().optional(), limit: z.number().int().min(1).max(30).default(12) }).parse(args);
-      const data = await apiGet(cfg, "/api/graph/leaps", { repo: resolveRepo(args, cfg), limit: parsed.limit });
-      return JSON.stringify(data, null, 2);
+    handler: leapsHandler,
+  },
+  {
+    name: "replen_connect",
+    description: "DEPRECATED alias of replen_leaps (the surface is named Leaps). Calls the same endpoint; prefer replen_leaps.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: REPO_PARAM_DESCRIPTION },
+        limit: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Max leaps to return. Default 12." },
+      },
     },
+    handler: leapsHandler, // shared — no drift between the alias and replen_leaps
   },
   {
     name: "replen_recall",
@@ -362,6 +385,7 @@ const TOOLS: Tool[] = [
             tag: z.string(),
             descriptor: z.string().optional(),
             modality: z.array(z.string()).optional(),
+            paths: z.array(z.string()).max(5).optional(),
           }),
         ])).max(40),
       }).parse(args);

@@ -5,7 +5,7 @@
 // nothing else. Key: ENCRYPTION_KEY (already required in prod for at-rest
 // secrets).
 
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 function key(): string {
   const k = process.env.ENCRYPTION_KEY;
@@ -13,11 +13,27 @@ function key(): string {
   return k;
 }
 
+// Length-prefixed field encoding so no attacker-controlled value (kind/title)
+// can shift a delimiter to forge a different (user, kind, ref, title) tuple
+// that signs identically. Full 64-hex digest (not truncated).
+function signingBasis(userId: number, kind: string, refId: number | null, title: string): string {
+  const parts = [String(userId), kind, refId != null ? String(refId) : "", title];
+  return parts.map((p) => `${p.length}:${p}`).join("");
+}
+
 export function signQueueParams(userId: number, kind: string, refId: number | null, title: string): string {
-  return createHmac("sha256", key())
-    .update(`${userId}|${kind}|${refId ?? ""}|${title}`)
-    .digest("hex")
-    .slice(0, 32);
+  return createHmac("sha256", key()).update(signingBasis(userId, kind, refId, title)).digest("hex");
+}
+
+// Constant-time verification — never compare signatures with === (timing oracle).
+export function verifyQueueParams(userId: number, kind: string, refId: number | null, title: string, sig: string): boolean {
+  const expected = signQueueParams(userId, kind, refId, title);
+  if (typeof sig !== "string" || sig.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 export function queueAddUrl(userId: number, kind: string, refId: number | null, title: string): string {

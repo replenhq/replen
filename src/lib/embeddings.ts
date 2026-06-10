@@ -162,6 +162,20 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot;
 }
 
+// L2-normalize a vector to unit length. Use this on any vector you BUILD by
+// summing/averaging stored embeddings before passing it to cosineSimilarity:
+// cosineSimilarity is a bare dot product (correct only because individual
+// stored OpenAI vectors are already unit-length), so the mean of unit vectors
+// — which has magnitude < 1 — would otherwise yield a deflated, non-cosine
+// score. Returns the input unchanged if it's zero/degenerate.
+export function normalizeVec(v: number[]): number[] {
+  let mag = 0;
+  for (let i = 0; i < v.length; i++) mag += v[i] * v[i];
+  mag = Math.sqrt(mag);
+  if (!Number.isFinite(mag) || mag === 0) return v;
+  return v.map((x) => x / mag);
+}
+
 /**
  * Pull an embedding vector out of the JSON-serialised form stored in
  * the DB. Returns null for malformed / missing data; callers should

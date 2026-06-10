@@ -5,7 +5,7 @@
 // projects actually adopted. Deterministic — cosine over the catalogue plus
 // the cross-user adoption tallies, no LLM.
 
-import { and, desc, eq, gte, like } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, like } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { cosineSimilarity, parseStoredEmbedding } from "./embeddings";
 import { KEEP_KINDS, type RepoKind } from "../catalogue/classify";
@@ -44,6 +44,10 @@ export async function alternativesFor(fullName: string, limit = 3): Promise<Alte
   const adoptedBy = new Map<string, number>();
   for (const q of quality) adoptedBy.set(`${q.owner}/${q.name}`.toLowerCase(), q.adopt + q.port);
 
+  // Match the catalogue reader's discipline: only embedded rows, star-ordered,
+  // capped — a full unbounded table pull degrades linearly as the catalogue
+  // grows and drags every embedding blob over the wire.
+  const SCAN_CAP = Math.max(100, parseInt(process.env.REPLEN_CATALOGUE_SCAN_CAP ?? "4000", 10) || 4000);
   const maintainedSince = new Date(Date.now() - MAINTAINED_DAYS * 86400e3);
   const rows = await db
     .select({
@@ -54,7 +58,10 @@ export async function alternativesFor(fullName: string, limit = 3): Promise<Alte
       kind: schema.catalogueRepos.kind,
       pushedAt: schema.catalogueRepos.pushedAt,
     })
-    .from(schema.catalogueRepos);
+    .from(schema.catalogueRepos)
+    .where(isNotNull(schema.catalogueRepos.embedding))
+    .orderBy(desc(schema.catalogueRepos.stars))
+    .limit(SCAN_CAP);
 
   const self = fullName.toLowerCase();
   const scored: Array<Alternative & { score: number }> = [];

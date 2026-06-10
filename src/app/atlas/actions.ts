@@ -12,6 +12,17 @@ import { computeOverlay } from "@/graph/overlay";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 import { embed, facetEmbeddingText, serialiseEmbedding, parseStoredFacetEmbeddings, serialiseFacetEmbeddings } from "@/lib/embeddings";
 import { buildUserGraph } from "@/graph/build";
+import { revalidatePath } from "next/cache";
+
+// Rebuild the user's graph after a dossier edit and refresh the /atlas page,
+// WITHOUT blocking the action response — the click feels instant and the next
+// render (revalidate) picks up the rebuilt graph. A rebuild failure is logged,
+// never surfaced as a failed save (the underlying write already committed).
+function rebuildAndRevalidate(userId: number): void {
+  void buildUserGraph(userId, { force: true })
+    .then(() => revalidatePath("/atlas"))
+    .catch((e) => console.warn("[atlas] post-action graph rebuild failed:", e));
+}
 
 export type Dossier = {
   kind: string;
@@ -313,7 +324,7 @@ export async function suggestionAction(fullName: string, action: "star" | "dismi
       userId: user.id, repoId, projectId, status, actionAt: now, surfacedAt: now, surfacedCount: 1,
     });
   }
-  await buildUserGraph(user.id, { force: true });
+  rebuildAndRevalidate(user.id);
   return { ok: true };
 }
 
@@ -333,7 +344,7 @@ export async function setToolPref(tool: string, pref: { plan?: string | null; mi
   } else {
     await db.insert(schema.toolPrefs).values({ userId: user.id, tool: key, plan, migrateOff, updatedAt: now });
   }
-  await buildUserGraph(user.id, { force: true });
+  rebuildAndRevalidate(user.id);
   return { ok: true };
 }
 
@@ -353,7 +364,7 @@ export async function addGoal(label: string, opts: { descriptor?: string; projec
     descriptor: opts.descriptor?.trim().slice(0, 500) || null,
     status: "active", embedding, createdAt: new Date(),
   }).returning({ id: schema.capabilityGoals.id }).get();
-  await buildUserGraph(user.id, { force: true });
+  rebuildAndRevalidate(user.id);
   return { ok: true, id: inserted?.id };
 }
 
@@ -364,7 +375,7 @@ export async function resolveGoal(id: number, outcome: "done" | "dropped"): Prom
   if (!row) return { ok: false };
   await db.update(schema.capabilityGoals).set({ status: outcome, resolvedAt: new Date() })
     .where(eq(schema.capabilityGoals.id, id));
-  await buildUserGraph(user.id, { force: true });
+  rebuildAndRevalidate(user.id);
   return { ok: true };
 }
 
@@ -417,7 +428,7 @@ export async function curateCapability(
         .where(eq(schema.projectProfiles.id, p.id));
     }
   }
-  await buildUserGraph(user.id, { force: true });
+  rebuildAndRevalidate(user.id);
   return { ok: true, touched };
 }
 

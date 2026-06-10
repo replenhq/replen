@@ -139,7 +139,7 @@ Discovery brings the outside world in. Atlas is the other half, a living map of 
 
 As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
 
-- **Leaps** (`replen_connect`). Connections across your own work that you would never go looking for. A thing you solved cleanly in one repo is the open gap in another. A capability in one project answers a problem in a project you have not opened in months. Each leap is scored on relevance and surprise, and comes with the path that explains it. Your own portfolio becomes a source, not just the ecosystem.
+- **Leaps** (`replen_leaps`). Connections across your own work that you would never go looking for. A thing you solved cleanly in one repo is the open gap in another. A capability in one project answers a problem in a project you have not opened in months. Each leap is scored on relevance and surprise, and comes with the path that explains it. Your own portfolio becomes a source, not just the ecosystem.
 - **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.
 - **Themes and keystones.** Capabilities clustered into themes, with the load-bearing keystones that recur across projects flagged. A quiet read on what your work is made of, plus provenance on every capability (grounded / extracted / inferred) so matching trusts solid signal over soft guesses.
 
@@ -303,7 +303,7 @@ Self-contained npm package (`@replen/mcp`) that exposes eighteen tools to Claude
 | | `replen_match` | Today's curated inventory scoped to the open repo. Returns candidates + `whyShortlisted` line; the skill triages each against the local codebase |
 | | `replen_state` | Capture user actions: star / unstar / hide / handoff |
 | | `replen_record_triage` | Persist the agent's verdict (adopt / port / skip + score + effort) back to Replen |
-| **Atlas** | `replen_connect` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
+| **Atlas** | `replen_leaps` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
 | | `replen_recall` | Recall. In-session memory over your past triage decisions and capabilities; answers what you have ported, weighed before, or already build elsewhere |
 | **Inspection** | `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
 | | `replen_search` | Full-text search across writeups, repo metadata, notes |

@@ -99,7 +99,8 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
         });
       }
     }
-    reports.sort((a, b) => b.relevance - a.relevance).splice(3);
+    reports.sort((a, b) => b.relevance - a.relevance);
+    reports.length = Math.min(reports.length, 3); // keep top 3 (clearer than splice)
   }
 
   // ── decisions: evaluated candidates matching the query, latest per (project, repo) ──
@@ -139,7 +140,8 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
       at: e.createdAt?.toISOString() ?? null, relevance: rel,
     });
   }
-  decisions.sort((a, b) => b.relevance - a.relevance).splice(limit);
+  decisions.sort((a, b) => b.relevance - a.relevance);
+  decisions.length = Math.min(decisions.length, limit); // keep top `limit`
 
   // ── anchored notes: user-written, node-tied, keyword-matched ──
   const noteRows = await db.select().from(schema.nodeNotes).where(eq(schema.nodeNotes.userId, userId));
