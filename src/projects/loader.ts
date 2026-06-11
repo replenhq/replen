@@ -633,7 +633,11 @@ export async function upsertProjects(projects: LocalProject[], userId: number) {
       }
     } else {
       // New project: default included=true, sensitivity=low. User can adjust.
-      const defaultSensitivity = p.slug.startsWith("acme-") ? "high" : "low";
+      // Operators can pre-mark slug families as sensitive via env, e.g.
+      // REPLEN_SENSITIVE_SLUG_PREFIXES="internal-,client-".
+      const sensitivePrefixes = (process.env.REPLEN_SENSITIVE_SLUG_PREFIXES ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      const defaultSensitivity = sensitivePrefixes.some((pre) => p.slug.startsWith(pre)) ? "high" : "low";
       await db.insert(schema.projectProfiles).values({
         userId,
         slug: p.slug,

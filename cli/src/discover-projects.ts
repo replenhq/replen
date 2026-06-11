@@ -202,7 +202,7 @@ export function discoverProjects(roots: string[]): DiscoveryResult {
 
       // Slug + display name both anchor on the GitHub repo NAME, not the
       // local folder name. Deriving from the folder meant a folder rename (or
-      // an org rename like nsokin→nsokin) minted a fresh slug and the server
+      // an org rename) minted a fresh slug and the server
       // inserted a duplicate row. `~/code/drone` with remote
       // `nsokin/palisade-website` now registers as slug `palisade-website`.
       // The repo name is also the fallback display name, so a generic

@@ -112,7 +112,7 @@ export async function GET(req: Request) {
       ))
       .get();
 
-    // 2. Owner-tolerant fallback. Repos move orgs (e.g. nsokin → nsokin) and
+    // 2. Owner-tolerant fallback. Repos move orgs (renames, transfers) and
     //    the registered owner drifts from the local remote, so the MCP-detected
     //    owner/name stops matching. When the exact match misses, match by repo
     //    NAME alone — but only when it unambiguously identifies a project,

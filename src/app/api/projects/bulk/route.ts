@@ -128,7 +128,7 @@ export async function POST(req: Request) {
   // Load all of this user's existing rows once. Identity is
   // github_full_name (stable across folder/org renames); slug is a
   // mutable display label. Matching on gfn — not slug — is what stops a
-  // renamed folder or a nsokin→nsokin org rename from minting a fresh
+  // renamed folder or an org rename from minting a fresh
   // slug and inserting a duplicate row.
   const existing = await db
     .select({
