@@ -615,6 +615,10 @@ export async function GET(req: Request) {
   const FACET_CAL_MARGIN = Math.max(0, parseFloat(process.env.REPLEN_FACET_CAL_MARGIN ?? "0.04"));
   const FACET_IDF_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_FACET_IDF_WEIGHT ?? "0.06"));
   const FACET_CAL_MIN_POOL = Math.max(20, parseInt(process.env.REPLEN_FACET_CAL_MIN_POOL ?? "40", 10) || 40);
+  // Candidate embedding by "owner/name" — collected as we score, reused for MMR
+  // diversity at the output stage (so the final 3 are complementary, not 3
+  // flavors of one capability). Research: matching-precision §5 (MMR).
+  const vecByRepo = new Map<string, number[]>();
   const facetBaseline = new Map<string, number>(); // facet label → pool-cosine percentile (its noise floor / promiscuity)
   if (applyFloor && probeFacets.length > 0) {
     const poolVecs: number[][] = [];
@@ -713,6 +717,7 @@ export async function GET(req: Request) {
     if (projectEmbedding) {
       const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
       candVec = candEmbedding;
+      if (candEmbedding && candOn) vecByRepo.set(`${candOn.owner}/${candOn.name}`.toLowerCase(), candEmbedding);
       if (candEmbedding) {
         const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
         if (Number.isFinite(cSim)) centroidCos = cSim;
@@ -1109,6 +1114,7 @@ export async function GET(req: Request) {
     }));
     for (const { m, repoId } of resolved) {
       if (repoId !== null && excludedRepoIds.has(repoId)) continue;
+      if (m.vec) vecByRepo.set(m.fullName.toLowerCase(), m.vec);
       // Contextual modality suppression: this repo collided with facets of this
       // modality before — don't surface it via such a facet again.
       if (m.matchedFacet) {
@@ -1215,7 +1221,7 @@ export async function GET(req: Request) {
 
   const mergedSeen = new Set<number>();
   const mergedNameSeen = new Set<string>();
-  const candidatesOut = [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]
+  const candidatesPreMmr = [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]
     .sort((a, b) => {
       if (a.dependencyMatch !== b.dependencyMatch) return a.dependencyMatch ? -1 : 1;
       return rankOf(b) - rankOf(a);
@@ -1235,8 +1241,37 @@ export async function GET(req: Request) {
       // repo-less dup of the same name.
       mergedNameSeen.add(e.repo.toLowerCase());
       return true;
-    })
-    .slice(0, limit);
+    });
+  // MMR diversity (research: matching-precision §5). Greedily pick the top-`limit`
+  // so each is relevant AND complementary — λ·rank − (1−λ)·max-similarity-to-
+  // already-picked — instead of 3 near-identical libraries for one capability.
+  // Dependency/stake matches keep their hard priority (picked first, in order);
+  // diversity only reorders the discretionary tail. Falls back to plain order
+  // for entries with no embedding. Cheap: O(n·k) cosines over in-memory vecs.
+  const MMR_LAMBDA = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MMR_LAMBDA ?? "0.7")));
+  const mmrReorder = (entries: OutEntry[]): OutEntry[] => {
+    if (MMR_LAMBDA >= 1 || entries.length <= 2) return entries;
+    const stake = entries.filter((e) => e.dependencyMatch);
+    const rest = entries.filter((e) => !e.dependencyMatch);
+    if (rest.length <= 2) return entries;
+    const vec = (e: OutEntry) => vecByRepo.get(e.repo.toLowerCase());
+    const relOf = new Map(rest.map((e) => [e, rankOf(e)]));
+    const picked: OutEntry[] = [];
+    const pool = [...rest];
+    while (pool.length) {
+      let bestI = 0, bestScore = -Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const v = vec(pool[i]);
+        let maxSim = 0;
+        if (v) for (const p of picked) { const pv = vec(p); if (pv) maxSim = Math.max(maxSim, cosineSimilarity(v, pv)); }
+        const score = MMR_LAMBDA * (relOf.get(pool[i]) ?? -1) - (1 - MMR_LAMBDA) * maxSim;
+        if (score > bestScore) { bestScore = score; bestI = i; }
+      }
+      picked.push(pool.splice(bestI, 1)[0]);
+    }
+    return [...stake, ...picked];
+  };
+  const candidatesOut = mmrReorder(candidatesPreMmr).slice(0, limit);
 
   // Phase 7 — capability adjacency. When the direct results are sparse, append
   // exploratory suggestions: the best library from a capability the project

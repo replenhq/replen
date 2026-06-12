@@ -41,6 +41,7 @@ export type CatalogueMatch = {
   ageDays: number | null;   // repo age; null when unknown
   rising: boolean;          // recent + relevant → "rising in your space"
   tasteAdj?: number;        // Rocchio taste boost applied at ranking time
+  vec?: number[];           // the candidate's embedding — for MMR diversity at the output stage
 };
 
 // Language/runtime compatibility. A library is only useful if you can actually
@@ -271,7 +272,7 @@ export async function catalogueMatches(opts: {
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
       topics, repoShape: r.repoShape, cosine, matchedFacet, matchedProvenance, matchedRepo,
       ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
-      tasteAdj,
+      tasteAdj, vec: emb,
     });
   }
 

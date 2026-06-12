@@ -79,6 +79,35 @@ State the plan in one line ("12 to ground, 18 version-backfills, 3 skips") so
 the user sees why it'll be fast. **A full code-read on an already-grounded repo
 is wasted work — the pre-flight exists to prevent exactly the 24-minute re-run.**
 
+**Then amortize the FULL-ground bucket by stack (cuts the cold read hardest).**
+A portfolio's repos cluster by stack — 8 Next.js + Drizzle + Firebase apps share
+~80% of their *technical* capabilities, which is exactly what Replen matches on
+("describe the tech, not the application"). So the expensive repeated thing is
+the *shared* thing. Group the full-ground repos by a cheap **stack fingerprint**
+read from each manifest you already have to open (framework + ORM/DB + a couple
+of capability-bearing deps, e.g. `next+drizzle+firebase` / `fastapi+pytorch` /
+`hardhat+solidity`). Within each group:
+- Ground the **first** repo fully (the 2a–2e contract).
+- For each **sibling**, hand its grounding subagent the leader's pushed
+  `capabilities` array as a **TECH-ONLY draft to verify and diff** — the subagent
+  reads only enough to confirm which shared capabilities actually apply, drop the
+  ones that don't, and ADD this repo's domain-specific capabilities + its own
+  `paths`/versions. It does NOT re-derive the shared stack from scratch.
+This is a *draft to verify*, never auto-accept (the "don't invent capabilities
+the code doesn't show" rule still holds), and you template only TECH capabilities
+— never the report, domain tags, or anything application-specific (privacy +
+no cross-repo domain bleed). Singletons (no stack sibling) just full-ground
+normally.
+
+Mechanically: process the group leader first and have its subagent **return its
+`capabilities` array** (the `{tag, descriptor, modality}` objects, paths
+stripped) in its final message; the orchestrator passes that array into each
+sibling subagent's prompt as `STACK DRAFT (verify against THIS repo, don't
+auto-accept)`. Groups still run concurrently with each other — only the
+leader→siblings step within a group is ordered. If returning the array is
+impractical for your host, fall back to plain full-ground for the siblings (no
+correctness loss, just no speed-up).
+
 ## Step 2 — Per-repo grounding (autonomous; fan out if you can)
 
 **Parallelise if your host supports it.** In Claude Code, spawn one background
@@ -93,12 +122,18 @@ must not block on a 3-hour read. Tier the work so value lands fast:
    are what the user is actively working on and will see footnotes for soonest.
 2. **Cap concurrency** to what the host sustains (Claude Code parallel subagents
    are capped automatically; don't try to launch 200 at once — launch in waves).
-3. **Version-first option for the long tail** — for repos beyond the active set,
-   a version-only backfill (cheap, no code read) still turns on EOL/security/
-   dependency-exclusion awareness. Full capability grounding can follow lazily
-   (next /replen-onboard, or on first /replen in that repo). Tell the user:
-   "Grounding your N most-active repos now; the rest get version-aware coverage
-   immediately and full profiles as you work in them." Don't silently drop the tail.
+3. **Version-first is the DEFAULT for the long tail** (not a fallback). Pick a
+   full-ground budget N (the most-recently-committed repos — say the active ~20–
+   30, or what the user confirms). Everything BEYOND N gets a version-only
+   backfill: cheap, no code read, and it turns on EOL/security/dependency-
+   exclusion awareness immediately. Full capability grounding for the tail then
+   happens **just-in-time on first `/replen` in that repo** — the `/replen`
+   skill grounds a `hasVersions && !hasCapabilities` repo inline before triaging
+   (its Step 2a). This is the key to a hundreds-of-repos cold start staying
+   minutes, not hours: you never speculatively read 170 repos the user may never
+   open. Tell the user: "Grounding your N most-active repos now; the rest get
+   version-aware coverage immediately and a full profile the first time you open
+   them." Don't silently drop the tail — it's covered, just lazily.
 
 **"Done" includes a version report** — covered by the VERSION-ONLY bucket above.
 

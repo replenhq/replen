@@ -67,6 +67,28 @@ Parse the JSON response. Note:
   the verdict isn't just "X is risky" but "X is risky; Y is the maintained
   replacement, N similar projects adopted it".
 
+### Step 2a — JIT grounding: profile this repo if onboarding hasn't yet
+
+A large-portfolio `/replen-onboard` grounds the most-active repos fully and
+gives the long tail a cheap version-only pass — so a registered repo can have
+versions but **no capability profile yet**. Triaging it would fall back to
+coarse tag matching (you'll see `filterMode: "tags"` and few/no facet-led
+candidates). When that happens, ground it inline FIRST — it's just-in-time
+onboarding, and it's why the user opening this repo is the right moment:
+
+1. Confirm the gap: call `replen_onboard_state` and find this repo — if
+   `hasCapabilities` is false, it needs grounding.
+2. Run the grounding contract (same as `/replen-onboard` step 2a–2e, condensed):
+   read the code, derive 8–15 grounded `{tag, descriptor, modality, paths}`
+   capabilities + a technical report, and push via `replen_set_capabilities`
+   (+ `replen_set_tags`, + `replen_set_versions` if not already reported).
+   Respect the cover — describe the tech, never de-sanitize the application.
+3. Re-pull the inventory (Step 2) — now it returns real facet-led matches.
+
+Skip this when `hasCapabilities` is already true (the common case). One quiet
+line to the user is enough: *"This repo wasn't fully profiled yet — grounding
+it now so the matches actually fit."*
+
 ### Step 2b — Keep the version picture fresh (cheap, do it)
 
 If `git status` shows the lockfile changed since you last reported, or you
