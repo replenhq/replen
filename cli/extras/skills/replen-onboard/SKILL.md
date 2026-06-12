@@ -35,6 +35,16 @@ missing, stop and tell the user to run `npx replen` first.
 
 Find the user's local repositories and filter to the ones worth onboarding.
 
+> **Shell portability (read before scripting the scan).** Assume macOS/zsh:
+> - **BSD `sed`/`grep` reject GNU regex** like `+?` and `\|` — don't pipe remote
+>   URLs through `sed -E 's#…(…)?…#'`; parse `owner/name` with `basename`/`${}`
+>   or `git remote get-url` + a simple `cut`/parameter-expansion instead.
+> - **`gh` is often shadowed** by a shell function/alias — if `gh` errors weirdly,
+>   call the real binary (`command gh …` or `/opt/homebrew/bin/gh`).
+> - **zsh does NOT word-split unquoted vars** — build repo lists as arrays
+>   (`repos=(a b c); for r in $repos`), not space-strings in a `for` loop.
+> Get these right up front; debugging them mid-sweep wastes cycles and looks broken.
+
 1. **Locate local clones.** Look in the parent directory of the cwd (sibling
    repos) and any obvious code root (`~/github`, `~/code`, `~/src`, `~/dev`).
    A repo is any directory containing `.git`.
@@ -50,26 +60,49 @@ Find the user's local repositories and filter to the ones worth onboarding.
    acme-api, … — go, or want me to drop any?"* This is the **only** question you
    ask. Once confirmed, run the rest autonomously.
 
+## Step 1.5 — Pre-flight: decide the MINIMUM work per repo (do NOT skip this)
+
+Before grounding anything, call **`replen_onboard_state`** ONCE. It returns
+every repo's server-side state (`hasCapabilities`, `hasVersions`, `hasReport`).
+Cross-reference each in-scope LOCAL repo against it and bucket it — this is what
+turns a 24-minute re-run into ~2 minutes, and a re-run should mostly be skips:
+
+- **FULL ground** — not listed, or `hasCapabilities=false`. Read the code, do
+  the whole 2a–2e contract. (On a true cold start every repo is here — expected.)
+- **VERSION-ONLY backfill** — `hasCapabilities=true` but `hasVersions=false`.
+  Do NOT read the codebase or touch docs. Just read the lockfile + runtime pins
+  and call `replen_set_versions` (2e.4). Seconds per repo, no LLM-heavy read.
+- **SKIP** — `hasCapabilities && hasVersions && hasReport` and the repo's
+  `git log -1` hasn't moved since it was last grounded. Already done; leave it.
+
+State the plan in one line ("12 to ground, 18 version-backfills, 3 skips") so
+the user sees why it'll be fast. **A full code-read on an already-grounded repo
+is wasted work — the pre-flight exists to prevent exactly the 24-minute re-run.**
+
 ## Step 2 — Per-repo grounding (autonomous; fan out if you can)
 
 **Parallelise if your host supports it.** In Claude Code, spawn one background
-subagent per repo (Task tool / background agents) so the sweep runs concurrently
-and the user isn't blocked. If your host has no background/subagent primitive,
-process repos sequentially — the autonomy matters more than the parallelism.
+subagent per repo in the FULL-ground bucket (Task tool / background agents) so
+the sweep runs concurrently. Version-only backfills are cheap enough to batch
+inline (no subagent needed). If your host has no subagent primitive, process
+sequentially — autonomy matters more than parallelism.
 
-**Idempotent + resumable.** Before working a repo, you may check whether it's
-already onboarded (it already has capabilities/facets). Re-running is always
-safe — pushing again just overwrites — so an interrupted sweep resumes cleanly by
-re-running and skipping repos already done.
+**Cold-start at scale (tens → hundreds of repos).** A new user with 200 repos
+must not block on a 3-hour read. Tier the work so value lands fast:
+1. **Order by recency** — ground the most-recently-committed repos first; those
+   are what the user is actively working on and will see footnotes for soonest.
+2. **Cap concurrency** to what the host sustains (Claude Code parallel subagents
+   are capped automatically; don't try to launch 200 at once — launch in waves).
+3. **Version-first option for the long tail** — for repos beyond the active set,
+   a version-only backfill (cheap, no code read) still turns on EOL/security/
+   dependency-exclusion awareness. Full capability grounding can follow lazily
+   (next /replen-onboard, or on first /replen in that repo). Tell the user:
+   "Grounding your N most-active repos now; the rest get version-aware coverage
+   immediately and full profiles as you work in them." Don't silently drop the tail.
 
-**"Done" includes a version report.** A repo that has capabilities but has
-never reported versions is NOT done — give it the lightweight backfill pass:
-skip the doc work and re-profiling entirely, just read the lockfile + runtime
-pins and call `replen_set_versions` (Step 2e.4). This is how an existing
-portfolio gets version-aware deadlines/security awareness after upgrading
-Replen — a re-run backfills versions across every repo in minutes.
+**"Done" includes a version report** — covered by the VERSION-ONLY bucket above.
 
-For each in-scope repo, do this contract:
+For each repo in the FULL-ground bucket, do this contract:
 
 ### 2a-pre. Check for an existing knowledge graph FIRST (the adapter step)
 
@@ -165,9 +198,16 @@ specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
 
 ### 2e. Push to Replen
 
-1. **Register** the repo if it isn't already: `npx replen sync-projects` (scans
-   local repos and pushes them). Ensure each in-scope repo has a GitHub remote so
-   it's scoped by `owner/name`.
+1. **Register** the repo if it isn't already. The per-repo `replen_set_tags` /
+   `replen_set_capabilities` push below resolves owner-tolerantly and CREATES
+   the project row if missing — so for the fan-out flow you usually don't need a
+   separate register step at all. If you do want a bulk pre-register, run
+   `npx replen sync-projects` **from a neutral directory like `$HOME`** (e.g.
+   `cd "$HOME" && npx replen sync-projects`) — NOT from inside a checkout named
+   `replen`, where the local package shadows the CLI and npx fails with "could
+   not determine executable to run". `npx replen@latest sync-projects` also
+   sidesteps the shadow. Ensure each repo has a GitHub remote so it scopes by
+   `owner/name`.
 2. **Set domain tags** with `replen_set_tags` — broad domain labels.
 3. **Set capabilities + report** with `replen_set_capabilities`, passing the
    grounded `capabilities` array AND the `report` from 2c. The server builds the

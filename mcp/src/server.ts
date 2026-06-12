@@ -466,6 +466,21 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "replen_onboard_state",
+    description:
+      "Per-repo onboarding state for the whole portfolio — the cheap PRE-FLIGHT for /replen-onboard. Call this ONCE before " +
+      "grounding anything, then do the MINIMUM work per repo instead of re-reading every codebase:\n" +
+      "  • not listed, or hasCapabilities=false → FULL ground (read code, derive capabilities + report + versions)\n" +
+      "  • hasCapabilities=true && hasVersions=false → LIGHTWEIGHT version-only backfill (read the lockfile, call replen_set_versions — seconds, NO code read)\n" +
+      "  • hasCapabilities && hasVersions && hasReport → SKIP (already grounded; only re-ground if the user changed the repo materially)\n" +
+      "This is what turns a 24-minute re-run into ~2 minutes. Returns names + booleans only, never code or report contents.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async (cfg) => {
+      const data = await apiGet(cfg, "/api/projects/state", {});
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
     name: "replen_queue",
     description:
       "The awareness→action queue. Items land here from the user's weekly brief / alert emails ('queue for next session') " +

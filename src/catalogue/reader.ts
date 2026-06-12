@@ -145,9 +145,22 @@ export async function catalogueMatches(opts: {
   // Rocchio taste vector (src/lib/taste.ts) — candidates similar to what this
   // project (and its relatives) actually adopted get a small additive boost.
   tasteVec?: number[] | null;
+  // Per-facet calibration baselines (label → pool-cosine percentile), computed
+  // by the caller from the live candidate pool. A facet-led catalogue match
+  // must clear its facet's OWN noise floor by a margin — this is what stops a
+  // promiscuous facet ("optimization") pulling a 0.82 disk-cleaner. Empty map →
+  // calibration off (back-compat).
+  facetBaseline?: Map<string, number>;
 }): Promise<CatalogueMatch[]> {
-  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, projectLanguages, knownDeps, coveredFacets, limit, tasteVec } = opts;
+  const { projectEmbedding, projectFacets, minCosine, competitorCentroid, facetLead, excludeFullNames, projectLanguages, knownDeps, coveredFacets, limit, tasteVec, facetBaseline } = opts;
   const TASTE_W = Math.max(0, parseFloat(process.env.REPLEN_TASTE_BOOST ?? "0.05"));
+  const FACET_CAL_MARGIN = Math.max(0, parseFloat(process.env.REPLEN_FACET_CAL_MARGIN ?? "0.04"));
+  const FACET_IDF_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_FACET_IDF_WEIGHT ?? "0.06"));
+  const idfPen = (label: string | null): number => {
+    if (!label || !facetBaseline) return 0;
+    const b = facetBaseline.get(label);
+    return b === undefined ? 0 : FACET_IDF_WEIGHT * b;
+  };
   if (!projectEmbedding && projectFacets.length === 0) return [];
 
   const rows = await db
@@ -223,7 +236,14 @@ export async function catalogueMatches(opts: {
     const coveredPen = matchedFacet && isCommodityText(matchedFacet) && coveredFacets.has(normLabel(matchedFacet)) ? COVERED_PENALTY : 0;
     const infraPen = isInfraFacet(matchedFacet) ? INFRA_PENALTY : 0;
     const matchedProvenance = facetLed ? (bestFacetProvenance ?? null) : null;
-    const effective = cosine - langPen - commodityPen - coveredPen - infraPen + provenanceAdj(matchedProvenance ?? undefined);
+    // Per-facet calibration: a facet-led match must beat that facet's own pool
+    // noise floor by a margin (not just the global minCosine). Suppresses the
+    // promiscuous-facet false positives (disk-cleaner@0.82 on "optimization").
+    if (matchedFacet !== null && facetBaseline) {
+      const base = facetBaseline.get(matchedFacet);
+      if (base !== undefined && cosine < base + FACET_CAL_MARGIN) continue;
+    }
+    const effective = cosine - langPen - commodityPen - coveredPen - infraPen - idfPen(matchedFacet) + provenanceAdj(matchedProvenance ?? undefined);
     if (!Number.isFinite(effective) || effective < minCosine) continue;
 
     const facetLeads = Number.isFinite(bestFacet) && bestFacet >= cVal + facetLead;
@@ -268,6 +288,7 @@ export async function catalogueMatches(opts: {
     - commodityPenalty(m.name, m.description, m.topics)
     - (m.matchedFacet && isCommodityText(m.matchedFacet) && coveredFacets.has(normLabel(m.matchedFacet)) ? COVERED_PENALTY : 0)
     - (isInfraFacet(m.matchedFacet) ? INFRA_PENALTY : 0)
+    - idfPen(m.matchedFacet)
     + provenanceAdj(m.matchedProvenance ?? undefined);
   out.sort((a, b) => score(b) - score(a));
 

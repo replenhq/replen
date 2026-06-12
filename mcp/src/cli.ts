@@ -39,7 +39,29 @@ Commands:
   const baseUrl = (process.env.DIGEST_BASE_URL ?? "http://localhost:3030").replace(/\/+$/, "");
   const token = process.env.DIGEST_TOKEN;
   if (!token) {
-    console.error("DIGEST_TOKEN env var required. This command only runs inside an MCP host like Claude Code, which injects the token for you — running it bare (e.g. to refresh the npx cache) is expected to print this and exit. To set up the token, run `npx replen` or generate one at app.replen.dev/settings.");
+    // An MCP host (Claude Code / Codex) spawns this over stdio pipes and
+    // injects DIGEST_TOKEN. A human running `npx -y @replen/mcp@latest` by
+    // hand (almost always to refresh the npx cache before a new session) has
+    // an interactive terminal — a TTY — and no token. Detecting the TTY lets
+    // us show that person a SUCCESS message (the package just downloaded fine;
+    // nothing is wrong) instead of an error-shaped "token required" line.
+    const pkg = JSON.parse(
+      (await import("fs")).readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const interactive = process.stdout.isTTY || process.stderr.isTTY;
+    if (interactive) {
+      console.log(
+        `✓ @replen/mcp ${pkg.version} is installed and cached.\n\n` +
+        `Nothing to do here — this server runs *inside* Claude Code / Codex, which\n` +
+        `connects to it automatically. You ran it directly (e.g. to pull the latest\n` +
+        `version), and that worked.\n\n` +
+        `Next: restart your AI session to pick up this version.\n` +
+        `First-time setup instead? Run \`npx replen\`.`,
+      );
+      process.exit(0);
+    }
+    // Spawned by a host but no token injected — that IS a misconfiguration.
+    console.error("DIGEST_TOKEN not provided by the MCP host. Re-run `npx replen` to (re)write the server config, then restart your session. Token setup: app.replen.dev/settings.");
     process.exit(1);
   }
 

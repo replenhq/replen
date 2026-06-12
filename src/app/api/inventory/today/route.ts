@@ -601,6 +601,32 @@ export async function GET(req: Request) {
   const INFERRED_PREMIUM = Math.max(0, parseFloat(process.env.REPLEN_INFERRED_FACET_PREMIUM ?? "0.07"));
   const needsProvenancePremium = (p: Provenance | null | undefined) => p === "inferred" || p === "ambiguous";
 
+  // ── Per-facet calibration + specificity (research: matching-precision §1–2) ──
+  // Cosine is NOT comparable across facets: a generic facet ("optimization")
+  // sits at elevated similarity against EVERYTHING, so an 0.82 match is noise;
+  // a specific facet ("drone telemetry") where 0.6 is rare is a real signal. We
+  // measure each facet's own noise floor — the percentile cosine it scores
+  // against the actual candidate pool — and (a) require a facet-led match to
+  // clear THAT floor by a margin (calibration), and (b) down-rank matches led by
+  // promiscuous facets (the embedding-IDF analog). Deterministic, no model; the
+  // baseline IS the facet's measured specificity. (Walmart Cosine Adapter,
+  // arXiv:2408.04887.) Computed once from the pool — microseconds.
+  const FACET_CAL_PCTL = Math.min(0.99, Math.max(0.5, parseFloat(process.env.REPLEN_FACET_CAL_PCTL ?? "0.85")));
+  const FACET_CAL_MARGIN = Math.max(0, parseFloat(process.env.REPLEN_FACET_CAL_MARGIN ?? "0.04"));
+  const FACET_IDF_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_FACET_IDF_WEIGHT ?? "0.06"));
+  const FACET_CAL_MIN_POOL = Math.max(20, parseInt(process.env.REPLEN_FACET_CAL_MIN_POOL ?? "40", 10) || 40);
+  const facetBaseline = new Map<string, number>(); // facet label → pool-cosine percentile (its noise floor / promiscuity)
+  if (applyFloor && probeFacets.length > 0) {
+    const poolVecs: number[][] = [];
+    for (const c of eligible) { const v = parseStoredEmbedding(c.embedding ?? null); if (v) poolVecs.push(v); }
+    if (poolVecs.length >= FACET_CAL_MIN_POOL) {
+      for (const f of probeFacets) {
+        const sims = poolVecs.map((v) => cosineSimilarity(f.vec, v)).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+        if (sims.length) facetBaseline.set(f.label, sims[Math.min(sims.length - 1, Math.floor(sims.length * FACET_CAL_PCTL))]);
+      }
+    }
+  }
+
   // Pattern A — "watch your stack". A release from a vendor the SCOPED project
   // actually depends on is the strongest possible signal ("a thing you depend
   // on just shipped"): it bypasses the relevance floor and sorts above semantic
@@ -753,7 +779,15 @@ export async function GET(req: Request) {
     // dependency match is exempt — it's the strongest signal we have. A match
     // LED by an inferred/ambiguous facet pays the provenance premium on top.
     if (applyFloor && !depMatch) {
-      const bar = projectFloor + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
+      let bar = projectFloor + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
+      // Per-facet calibration: a facet-led match must clear that facet's OWN
+      // pool noise floor by a margin, not just the global floor. This is what
+      // suppresses the disk-cleaner-at-0.82-on-"optimization" class — 0.82 is
+      // below that promiscuous facet's calibrated bar even though it clears 0.48.
+      if (matchedFacet !== null) {
+        const base = facetBaseline.get(matchedFacet);
+        if (base !== undefined) bar = Math.max(bar, base + FACET_CAL_MARGIN);
+      }
       const clears = cosine !== null ? cosine >= bar : relevance > 0;
       if (!clears) continue;
     }
@@ -790,6 +824,13 @@ export async function GET(req: Request) {
       if (hints.keystoneLabels.has(nf)) rank += KEYSTONE_BOOST;
       if (hints.unfilledLabels.has(nf)) rank += BLINDSPOT_BOOST;
       if (goalLabels.has(nf)) { rank += GOAL_BOOST; reasons.push(`advances your goal: ${matchedFacet}`); }
+      // Embedding-IDF: a match led by a promiscuous facet (high pool baseline)
+      // carries less information than the same cosine on a specific facet —
+      // down-rank it in proportion to the facet's baseline. Displayed cosine
+      // stays raw; only ordering shifts. Survivors of a generic facet sink
+      // below genuine specific-capability fills.
+      const base = facetBaseline.get(matchedFacet);
+      if (base !== undefined) rank -= FACET_IDF_WEIGHT * base;
     }
 
     filtered.push({
@@ -1057,6 +1098,7 @@ export async function GET(req: Request) {
       coveredFacets,
       limit,
       tasteVec: taste,
+      facetBaseline,
     });
     // Resolve repoIds (for exclusion + state-keying) where the repo is already
     // known; catalogue-only repos keep repoId null (state writes resolve by name).
