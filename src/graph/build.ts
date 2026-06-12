@@ -137,7 +137,7 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       if (!key) continue;
       if (isNoiseFacetLabel(label) || dropNames.has(key)) continue;
       // Ambiguous facets (raw doc-section headings, low-confidence inference)
-      // never become graph nodes — they pollute themes, keystones, blind-spot
+      // never become graph nodes — they pollute themes, waypoints, blind-spot
       // counts, and the Atlas view. Matching still uses them, hard-gated by
       // the provenance premium; the graph is the curated view.
       if (provenance === "ambiguous") continue;
@@ -274,7 +274,7 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     }
   }
 
-  // ── §5: themes (Louvain communities) + keystone capabilities ──
+  // ── §5: themes (Louvain communities) + waypoint capabilities ──
   // Community edges = semantic adjacency + co-occurrence (capabilities used in
   // the same project belong together). Degree = adjacency + #projects.
   {
@@ -291,7 +291,7 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     for (const e of capEdges) cEdges.push({ a: idx.get(e.a)!, b: idx.get(e.b)!, w: e.w });
     for (const [pair, w] of capCoocc) { const [a, b] = pair.split("|"); if (idx.has(a) && idx.has(b)) cEdges.push({ a: idx.get(a)!, b: idx.get(b)!, w: Math.min(2, w) }); }
     const comm = louvain(capKeys.map((_, i) => i), cEdges);
-    // degree (keystone signal) = #projects with the cap + #adjacency edges
+    // degree (waypoint signal) = #projects with the cap + #adjacency edges
     const capProjectCount = new Map<string, number>();
     for (const caps of projCaps.values()) for (const c of caps) capProjectCount.set(c, (capProjectCount.get(c) ?? 0) + 1);
     const capDegree = new Map<string, number>();
@@ -308,12 +308,12 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       const labels = ranked.slice(0, 2).map((k) => nodes.get(nk("capability", k))?.label ?? k);
       commName.set(c, labels.join(" / "));
     }
-    // keystone = top-degree capabilities overall
-    const keystones = new Set(capKeys.slice().sort((x, y) => (capDegree.get(y) ?? 0) - (capDegree.get(x) ?? 0)).slice(0, Math.max(3, Math.ceil(capKeys.length * 0.08))));
+    // waypoint = top-degree capabilities overall
+    const waypoints = new Set(capKeys.slice().sort((x, y) => (capDegree.get(y) ?? 0) - (capDegree.get(x) ?? 0)).slice(0, Math.max(3, Math.ceil(capKeys.length * 0.08))));
     capKeys.forEach((k, i) => {
       const n = nodes.get(nk("capability", k)); if (!n) return;
       const c = comm.get(i)!;
-      n.data.theme = c; n.data.themeName = commName.get(c) ?? ""; n.data.degree = capDegree.get(k) ?? 0; n.data.keystone = keystones.has(k);
+      n.data.theme = c; n.data.themeName = commName.get(c) ?? ""; n.data.degree = capDegree.get(k) ?? 0; n.data.waypoint = waypoints.has(k);
     });
   }
 

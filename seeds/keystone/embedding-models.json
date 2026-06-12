@@ -1,0 +1,21 @@
+{
+  "_note": "Keystone seed — text-embedding capability + hosted-model solutions + task-scoped better_than edges. 'better' is task-relative (our own 3-small-vs-3-large A/B proved it), which is exactly why better_than edges carry a `task`.",
+  "capabilities": [
+    { "label": "text embeddings", "domain": "retrieval", "modality": ["text"] },
+    { "label": "semantic search", "domain": "retrieval", "parent": "text embeddings", "modality": ["text"] }
+  ],
+  "solutions": [
+    { "kind": "hosted_model", "name": "text-embedding-3-small", "source": "hosted", "description": "OpenAI embedding model, 1536-dim. No user API key needed when the server holds the key.", "attributes": { "vendor": "OpenAI", "dims": 1536, "mteb": 62.3, "cost_per_1m": 0.02, "fills": ["text embeddings", "semantic search"] } },
+    { "kind": "hosted_model", "name": "text-embedding-3-large", "source": "hosted", "description": "OpenAI embedding model, 3072-dim.", "attributes": { "vendor": "OpenAI", "dims": 3072, "mteb": 64.6, "cost_per_1m": 0.13, "fills": ["text embeddings", "semantic search"] } },
+    { "kind": "hosted_model", "name": "gemini-embedding-001", "source": "hosted", "description": "Google Gemini embedding model; top of MTEB retrieval as of mid-2025.", "attributes": { "vendor": "Google", "mteb": 68.3, "fills": ["text embeddings", "semantic search"] } },
+    { "kind": "hosted_model", "name": "voyage-3", "source": "hosted", "description": "Voyage AI embeddings, strong on retrieval/code.", "attributes": { "vendor": "Voyage", "mteb": 67.0, "fills": ["text embeddings", "semantic search"] } },
+    { "kind": "hosted_model", "name": "cohere-embed-v4", "source": "hosted", "description": "Cohere embed v4.", "attributes": { "vendor": "Cohere", "mteb": 65.2, "fills": ["text embeddings", "semantic search"] } },
+    { "kind": "library", "name": "BAAI/bge-m3", "source": "github", "description": "Self-hostable multilingual embedding model; best open <1B is Arctic-Embed v2, BGE-M3 close.", "attributes": { "mteb": 63.0, "self_hostable": true, "fills": ["text embeddings", "semantic search"] } }
+  ],
+  "better_than": [
+    { "winner": "gemini-embedding-001", "loser": "text-embedding-3-small", "task": "general retrieval (MTEB)", "metric": "MTEB", "margin": 6.0, "source": "MTEB leaderboard 2025" },
+    { "winner": "voyage-3", "loser": "text-embedding-3-small", "task": "general retrieval (MTEB)", "metric": "MTEB", "margin": 4.7, "source": "MTEB leaderboard 2025" },
+    { "winner": "text-embedding-3-large", "loser": "text-embedding-3-small", "task": "general retrieval (MTEB)", "metric": "MTEB", "margin": 2.3, "source": "MTEB leaderboard 2025" },
+    { "winner": "text-embedding-3-small", "loser": "text-embedding-3-large", "task": "asymmetric short-label retrieval", "metric": "good/bad cosine separation", "margin": 0.065, "source": "Replen A/B 2026-06 (3-large compressed separation 0.289->0.224 on short-label<->README pairs)" }
+  ]
+}

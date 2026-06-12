@@ -13,6 +13,7 @@ import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseDepVersionNames, parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
 import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
 import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
+import { suggestUpgrades, suggestPracticeTransfer } from "@/lib/keystone";
 import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import { announcementPs } from "@/announcements/surface";
@@ -335,15 +336,15 @@ export async function GET(req: Request) {
   const modalitySuppress = await loadModalitySuppressions(auth.userId);
   const prior = await loadTriageContext(auth.userId);
   // The learning trio + graph hints (all degrade silently with no history):
-  //   hints  — keystone/blind-spot capability labels + related projects (graph)
+  //   hints  — waypoint/blind-spot capability labels + related projects (graph)
   //   taste  — Rocchio vector over this project's (and relatives') verdicts
   //   priors — Laplace hit-rates per source / per facet from triage outcomes
   const hints: RankHints = scopedProject
     ? await loadRankHints(auth.userId, scopedProject.slug)
-    : { keystoneLabels: new Set<string>(), unfilledLabels: new Set<string>(), relatedSlugs: [] };
+    : { waypointLabels: new Set<string>(), unfilledLabels: new Set<string>(), relatedSlugs: [] };
   const taste = scopedProject ? await loadTasteVector(auth.userId, scopedProjectId, hints.relatedSlugs) : null;
   const outcomePriors = await loadOutcomePriors(auth.userId);
-  const KEYSTONE_BOOST = Math.max(0, parseFloat(process.env.REPLEN_KEYSTONE_BOOST ?? "0.02"));
+  const WAYPOINT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_WAYPOINT_BOOST ?? "0.02"));
   const BLINDSPOT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_BLINDSPOT_BOOST ?? "0.02"));
   const GOAL_BOOST = Math.max(0, parseFloat(process.env.REPLEN_GOAL_BOOST ?? "0.04"));
   // Tools the user declared they're migrating off — that vendor's release
@@ -818,7 +819,7 @@ export async function GET(req: Request) {
     }
 
     // Rank = cosine + the learning boosts. Displayed cosine stays raw; the
-    // boosts only reorder (taste, source/facet hit-rate priors, keystone and
+    // boosts only reorder (taste, source/facet hit-rate priors, waypoint and
     // blind-spot graph hints). All zero with no history.
     let rank = cosine ?? -1;
     rank += tasteBoost(candVec, taste);
@@ -826,7 +827,7 @@ export async function GET(req: Request) {
     if (matchedFacet) {
       rank += priorBoost(outcomePriors.facet, matchedFacet);
       const nf = normFacetLabel(matchedFacet);
-      if (hints.keystoneLabels.has(nf)) rank += KEYSTONE_BOOST;
+      if (hints.waypointLabels.has(nf)) rank += WAYPOINT_BOOST;
       if (hints.unfilledLabels.has(nf)) rank += BLINDSPOT_BOOST;
       if (goalLabels.has(nf)) { rank += GOAL_BOOST; reasons.push(`advances your goal: ${matchedFacet}`); }
       // Embedding-IDF: a match led by a promiscuous facet (high pool baseline)
@@ -1167,7 +1168,7 @@ export async function GET(req: Request) {
       if (m.matchedFacet) {
         cRank += priorBoost(outcomePriors.facet, m.matchedFacet);
         const nf = normFacetLabel(m.matchedFacet);
-        if (hints.keystoneLabels.has(nf)) cRank += KEYSTONE_BOOST;
+        if (hints.waypointLabels.has(nf)) cRank += WAYPOINT_BOOST;
         if (hints.unfilledLabels.has(nf)) cRank += BLINDSPOT_BOOST;
         if (goalLabels.has(nf)) { cRank += GOAL_BOOST; pushed.whyShortlisted += `; advances your goal: ${m.matchedFacet}`; }
       }
@@ -1470,17 +1471,28 @@ export async function GET(req: Request) {
     if (withinBudget) {
       const seenKeys = new Set(past.map((p) => p.leapKey));
       try {
-        const leaps = await computeLeaps(auth.userId, { scopeProject: scopedProject.slug, limit: 6 });
-        const pick = leaps.find((l) => !seenKeys.has(leapKey(l)));
-        if (pick) {
-          leapOut = pick;
-          displayText = `Nothing new for this repo today — but a connection from your portfolio: ${pick.via}. Want me to take a look?`;
-          await db.insert(schema.leapSurfaces).values({
-            userId: auth.userId,
-            projectId: scopedProjectId,
-            leapKey: leapKey(pick),
-            surfacedAt: new Date(),
-          });
+        // Practice-transfer FIRST — the highest-value quiet-day insight: a
+        // structural move (Keystone practice) another portfolio project makes
+        // that this adjacent one doesn't. Shares the leap budget + dedup.
+        const transfers = await suggestPracticeTransfer(auth.userId, scopedProject.slug);
+        const ptKey = (t: { practice: string; fromProject: string }) => `practice:${normFacetLabel(t.practice)}:${t.fromProject}`;
+        const pt = transfers.find((t) => !seenKeys.has(ptKey(t)));
+        if (pt) {
+          displayText = `Nothing new for this repo today — but a portfolio pattern: \`${pt.fromProject}\` uses **${pt.practice}** (${pt.description.slice(0, 110).replace(/\.$/, "")}). This project is close enough that it might fit here too — want me to look at whether it'd help?`;
+          await db.insert(schema.leapSurfaces).values({ userId: auth.userId, projectId: scopedProjectId, leapKey: ptKey(pt), surfacedAt: new Date() });
+        } else {
+          const leaps = await computeLeaps(auth.userId, { scopeProject: scopedProject.slug, limit: 6 });
+          const pick = leaps.find((l) => !seenKeys.has(leapKey(l)));
+          if (pick) {
+            leapOut = pick;
+            displayText = `Nothing new for this repo today — but a connection from your portfolio: ${pick.via}. Want me to take a look?`;
+            await db.insert(schema.leapSurfaces).values({
+              userId: auth.userId,
+              projectId: scopedProjectId,
+              leapKey: leapKey(pick),
+              surfacedAt: new Date(),
+            });
+          }
         }
       } catch (e) {
         console.warn("[inventory] quiet-day leap failed (non-fatal):", e);
@@ -1488,6 +1500,10 @@ export async function GET(req: Request) {
     }
   }
 
+  // Keystone upgrades for this project's reported solutions (task-scoped
+  // better_than edges) — computed in the awareness block below, reused in the
+  // response. Declared here so both see it.
+  let keystoneUpgrades: Awaited<ReturnType<typeof suggestUpgrades>> = [];
   // Awareness line — pricing watch + announcement layer, AT MOST ONE per
   // response, each shown once per user ever. Severity decides placement and
   // priority: a Critical announcement (exploited CVE, breach, malicious
@@ -1503,6 +1519,26 @@ export async function GET(req: Request) {
         announcementPs(auth.userId, userTokens),
         deadlinePs(auth.userId, userTokens),
       ]);
+      // Keystone upgrade — a solution this project uses has a better_than edge.
+      // Lowest-priority calm line (improve-when-you-can, not time-sensitive like
+      // security/EOL/billing), surfaced at most once per (project, upgrade).
+      // Match against reported deps (libraries/services) AND the project's
+      // capability terms (algorithms are captured as capabilities, e.g.
+      // "weighted knn") — facets are the cleaned/matchable set, but capability
+      // TAGS hold the full list (algorithms often live only there), so include
+      // both. One better_than query covers library swaps + algorithm upgrades.
+      let capTags: string[] = [];
+      if (scopedProject?.summaryJson) {
+        try { const s = JSON.parse(scopedProject.summaryJson) as { capabilityTags?: string[] }; capTags = Array.isArray(s.capabilityTags) ? s.capabilityTags.filter((t): t is string => typeof t === "string") : []; } catch { /* */ }
+      }
+      const upgradeProbe = scopedProject ? [...productDeps, ...projectFacets.map((f) => f.label), ...capTags] : [];
+      keystoneUpgrades = upgradeProbe.length > 0 ? await suggestUpgrades(upgradeProbe).catch(() => []) : [];
+      let keystoneUp: typeof keystoneUpgrades[number] | null = null;
+      if (keystoneUpgrades.length > 0 && scopedProjectId) {
+        const seen = new Set((await db.select({ k: schema.keystoneSurfaces.upgradeKey }).from(schema.keystoneSurfaces)
+          .where(and(eq(schema.keystoneSurfaces.userId, auth.userId), eq(schema.keystoneSurfaces.projectId, scopedProjectId)))).map((r) => r.k));
+        keystoneUp = keystoneUpgrades.find((u) => !seen.has(`${u.current}->${u.better}`)) ?? null;
+      }
       const nowTs = new Date();
       const recordAnnouncement = (eventId: number) => db.insert(schema.announcementSurfaces)
         .values({ userId: auth.userId, eventId, surfacedAt: nowTs }).onConflictDoNothing();
@@ -1547,6 +1583,19 @@ export async function GET(req: Request) {
       } else if (announcement) {
         appendPs(`${announcement.line}${await atlasLink(announcement.token)}`);
         await recordAnnouncement(announcement.eventId);
+      } else if (keystoneUp && scopedProjectId) {
+        const u = keystoneUp;
+        const why = u.source ? ` (${u.source})` : "";
+        // Algorithm upgrades are CONDITIONAL (the task names the condition; the
+        // user may have chosen the simpler one deliberately) — frame them softer
+        // than a library swap or model pick.
+        const line = u.betterKind === "algorithm"
+          ? `\`${scopedProject!.slug}\` uses \`${u.current}\` — \`${u.better}\` is typically the stronger approach for ${u.task}${why}.`
+          : `\`${scopedProject!.slug}\` uses \`${u.current}\` — \`${u.better}\` is the better ${u.betterKind === "hosted_model" ? "model" : "swap"} for ${u.task}${why}.`;
+        appendPs(line);
+        await db.insert(schema.keystoneSurfaces)
+          .values({ userId: auth.userId, projectId: scopedProjectId, upgradeKey: `${u.current}->${u.better}`, surfacedAt: nowTs })
+          .onConflictDoNothing();
       }
     } catch (e) {
       console.warn("[inventory] awareness line failed (non-fatal):", e);
@@ -1602,6 +1651,8 @@ export async function GET(req: Request) {
     } catch { /* ignore */ }
   }
 
+  // keystoneUpgrades computed in the awareness block above (the better_than
+  // upgrades for this project's reported solutions, task-scoped).
   return NextResponse.json(
     {
       filterMode,
@@ -1609,6 +1660,8 @@ export async function GET(req: Request) {
       // What the project is trying to BE — triage candidates against this, not
       // just the capability slots. Null until onboarding captures it.
       projectThesis,
+      // Keystone: better_than upgrades for solutions this project uses (task-scoped).
+      keystoneUpgrades,
       productRepos: productRepoCount, // repos in this product whose capabilities are unioned
       days,
       windowReason,

@@ -16,21 +16,23 @@ import {
 
 export type GNode = {
   id: number; kind: string; nodeKey: string; label: string; theme: string | null;
-  keystone: boolean; provenance: string | null; stars: number | null; degree: number;
+  waypoint: boolean; provenance: string | null; stars: number | null; degree: number;
   alertKind: string | null; alertCount: number; blindspot: boolean; queued: number;
 };
 export type GEdge = { kind: string; src: number; dst: number; weight: number | null };
 
 const KIND_COLOR: Record<string, string> = {
   project: "#ffc857", capability: "#5eb0ef", candidate: "#65a30d", product: "#c084fc", tool: "#f472b6", suggestion: "#2dd4bf", goal: "#f43f5e", modality: "#888",
+  upgrade: "#fbbf24", // Keystone better_than recommendation — gold
 };
 const EDGE_COLOR: Record<string, string> = {
   HAS_CAPABILITY: "rgba(94,176,239,0.18)", ADJACENT_TO: "rgba(120,120,140,0.14)", FILLS: "rgba(101,163,13,0.3)",
   EVALUATED: "rgba(217,119,6,0.35)", MEMBER_OF: "rgba(192,132,252,0.3)", RELATES_TO: "rgba(120,120,140,0.10)",
   USES: "rgba(244,114,182,0.12)", SUGGESTED: "rgba(45,212,191,0.30)", GOAL_OF: "rgba(244,63,94,0.35)",
+  BETTER_THAN: "rgba(251,191,36,0.55)", // Keystone upgrade — gold, stands out
 };
 const ALERT_COLOR: Record<string, string> = { security: "#ef4444", breaking: "#f97316", pricing: "#eab308" };
-const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "tool", "product"];
+const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "tool", "product", "upgrade"];
 
 type P = { x: number; y: number; z: number; vx: number; vy: number; vz: number };
 
@@ -93,7 +95,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
     });
     posRef.current = pos as unknown as Map<number, { x: number; y: number; z: number }>;
     const reinit = camRef.current != null; // had a prior camera → this is a re-init
-    const radius = (n: GNode) => (n.kind === "project" ? 7 : n.kind === "product" ? 8 : n.kind === "tool" ? 3.5 : n.keystone ? 6 : 3) + Math.min(4, n.degree * 0.15);
+    const radius = (n: GNode) => (n.kind === "project" ? 7 : n.kind === "product" ? 8 : n.kind === "tool" ? 3.5 : n.waypoint ? 6 : 3) + Math.min(4, n.degree * 0.15);
 
     let cam = camRef.current ?? { x: 0, y: 0, scale: 0.9 };
     camRef.current = cam;
@@ -285,7 +287,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
           cx.fillStyle = "#22d3ee";
           cx.beginPath(); cx.arc(x + rr, y - rr, 3, 0, Math.PI * 2); cx.fill();
         }
-        const showLabel = !dimmed && (n.kind === "project" || n.kind === "product" || n.keystone || n.id === selRef.current || n.id === hoverId || (hoverHi?.has(n.id) ?? false) || (searching && searchHit(n)) || cam.scale > 1.6);
+        const showLabel = !dimmed && (n.kind === "project" || n.kind === "product" || n.kind === "upgrade" || n.waypoint || n.id === selRef.current || n.id === hoverId || (hoverHi?.has(n.id) ?? false) || (searching && searchHit(n)) || cam.scale > 1.6);
         if (showLabel) { cx.globalAlpha = 0.92; cx.fillStyle = "#ddd"; cx.font = `${n.kind === "project" ? 12 : 10}px system-ui`; cx.fillText(n.label.slice(0, 28), x + rr + 3, y + 3); }
         cx.globalAlpha = 1;
       }
@@ -478,7 +480,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       {selected && (
         <div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 360, overflowY: "auto", background: "rgba(16,16,20,0.78)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,0.45)", padding: 16, fontSize: 13, color: "#ddd" }}>
           <div style={{ fontSize: 11, color: KIND_COLOR[selected.kind] ?? "#999", textTransform: "uppercase", letterSpacing: 0.5 }}>
-            {selected.kind}{selected.keystone ? " · keystone" : ""}{selected.blindspot ? " · blind spot" : ""}
+            {selected.kind}{selected.waypoint ? " · waypoint" : ""}{selected.blindspot ? " · blind spot" : ""}
           </div>
           <div style={{ fontWeight: 700, fontSize: 16, margin: "4px 0" }}>{selected.label}</div>
           {selected.alertCount > 0 && (

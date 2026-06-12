@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { sql } from "drizzle-orm";
 import { getEmbeddingHealth } from "@/lib/embeddings";
+import { keystoneCoverage } from "@/lib/keystone";
 
 // Liveness + readiness probe for uptime monitors (UptimeRobot,
 // BetterStack, Cloudflare Health Checks) and on-host healthchecks.
@@ -32,8 +33,12 @@ export async function GET() {
     const embedding = emb.ok
       ? { ok: true, lastSuccessAt: emb.lastSuccessAt }
       : { ok: false, quotaExhausted: emb.lastFailure?.quotaExhausted ?? false, since: emb.lastFailure?.at ?? null, message: emb.lastFailure?.message };
+    // Keystone coverage — what the ontology actually knows. Visible here so an
+    // unseeded layer (e.g. 0 algorithm edges) is obvious, not silently inert.
+    let keystone: Awaited<ReturnType<typeof keystoneCoverage>> | { error: string };
+    try { keystone = await keystoneCoverage(); } catch (e) { keystone = { error: e instanceof Error ? e.message : String(e) }; }
     return NextResponse.json(
-      { ok: true, db: "ok", dbMs, embedding, at: new Date().toISOString() },
+      { ok: true, db: "ok", dbMs, embedding, keystone, at: new Date().toISOString() },
       { status: 200, headers: { "cache-control": "no-store" } },
     );
   } catch (e) {

@@ -1,0 +1,45 @@
+{
+  "_note": "Keystone seed — library better_than edges. Deprecation-driven ones are the safest comparative claims (the loser is genuinely abandoned). Quality/perf ones are task-scoped. Several intersect the user's real deps (ffmpeg-installer, bcryptjs) so suggestions fire on real repos.",
+  "capabilities": [
+    { "label": "date handling", "domain": "utilities" },
+    { "label": "http client", "domain": "networking" },
+    { "label": "css preprocessing", "domain": "frontend" },
+    { "label": "password hashing", "domain": "security", "modality": [] },
+    { "label": "application logging", "domain": "observability" },
+    { "label": "browser automation", "domain": "scraping" },
+    { "label": "ffmpeg binary packaging", "domain": "media" },
+    { "label": "react component testing", "domain": "testing" }
+  ],
+  "solutions": [
+    { "kind": "library", "name": "@ffmpeg-installer/ffmpeg", "source": "github", "description": "Archived/unmaintained ffmpeg binary installer.", "attributes": { "status": "archived", "fills": ["ffmpeg binary packaging"] } },
+    { "kind": "library", "name": "ffmpeg-static", "source": "github", "description": "Maintained static ffmpeg binaries for Node.", "attributes": { "fills": ["ffmpeg binary packaging"] } },
+    { "kind": "library", "name": "moment", "source": "github", "description": "Legacy date library, in maintenance mode (mutable, large, no tree-shaking).", "attributes": { "status": "legacy", "fills": ["date handling"] } },
+    { "kind": "library", "name": "date-fns", "source": "github", "description": "Immutable, tree-shakeable date utilities.", "attributes": { "fills": ["date handling"] } },
+    { "kind": "library", "name": "dayjs", "source": "github", "description": "2KB immutable moment-compatible date library.", "attributes": { "fills": ["date handling"] } },
+    { "kind": "library", "name": "request", "source": "github", "description": "Deprecated HTTP client (since 2020).", "attributes": { "status": "deprecated", "fills": ["http client"] } },
+    { "kind": "library", "name": "got", "source": "github", "description": "Maintained HTTP client for Node.", "attributes": { "fills": ["http client"] } },
+    { "kind": "library", "name": "node-sass", "source": "github", "description": "Deprecated LibSass binding.", "attributes": { "status": "deprecated", "fills": ["css preprocessing"] } },
+    { "kind": "library", "name": "sass", "source": "github", "description": "Dart Sass — the maintained reference implementation.", "attributes": { "fills": ["css preprocessing"] } },
+    { "kind": "library", "name": "enzyme", "source": "github", "description": "Abandoned React test util, no React 18 adapter.", "attributes": { "status": "abandoned", "fills": ["react component testing"] } },
+    { "kind": "library", "name": "@testing-library/react", "source": "github", "description": "User-centric React testing, the modern standard.", "attributes": { "fills": ["react component testing"] } },
+    { "kind": "library", "name": "bcryptjs", "source": "github", "description": "Pure-JS bcrypt (slower; bcrypt caps at 72 bytes).", "attributes": { "fills": ["password hashing"] } },
+    { "kind": "library", "name": "bcrypt", "source": "github", "description": "Native bcrypt binding.", "attributes": { "fills": ["password hashing"] } },
+    { "kind": "library", "name": "argon2", "source": "github", "description": "Argon2id — OWASP-recommended password hash, memory-hard.", "attributes": { "fills": ["password hashing"] } },
+    { "kind": "library", "name": "winston", "source": "github", "description": "Flexible but slower logger.", "attributes": { "fills": ["application logging"] } },
+    { "kind": "library", "name": "pino", "source": "github", "description": "Very low overhead JSON logger.", "attributes": { "fills": ["application logging"] } },
+    { "kind": "library", "name": "puppeteer", "source": "github", "description": "Chrome-only browser automation.", "attributes": { "fills": ["browser automation"] } },
+    { "kind": "library", "name": "playwright", "source": "github", "description": "Multi-browser automation, auto-waiting, more robust for scraping.", "attributes": { "fills": ["browser automation"] } }
+  ],
+  "better_than": [
+    { "winner": "ffmpeg-static", "loser": "@ffmpeg-installer/ffmpeg", "task": "bundling an ffmpeg binary in Node", "metric": "maintenance", "source": "@ffmpeg-installer/ffmpeg is archived; ffmpeg-static is maintained" },
+    { "winner": "date-fns", "loser": "moment", "task": "date handling", "metric": "size/maintenance", "source": "moment is in maintenance mode; date-fns is immutable + tree-shakeable" },
+    { "winner": "dayjs", "loser": "moment", "task": "drop-in date handling (moment-compatible API)", "metric": "size", "source": "dayjs is a ~2KB moment-API-compatible replacement" },
+    { "winner": "got", "loser": "request", "task": "http client", "metric": "maintenance", "source": "request was deprecated in 2020; got is maintained" },
+    { "winner": "sass", "loser": "node-sass", "task": "css preprocessing", "metric": "maintenance", "source": "node-sass (LibSass) is deprecated; Dart Sass (sass) is the reference impl" },
+    { "winner": "@testing-library/react", "loser": "enzyme", "task": "react component testing", "metric": "maintenance", "source": "enzyme has no React 18 adapter and is abandoned" },
+    { "winner": "argon2", "loser": "bcryptjs", "task": "password hashing (new systems)", "metric": "security", "source": "OWASP recommends Argon2id; bcryptjs is pure-JS and bcrypt caps input at 72 bytes" },
+    { "winner": "argon2", "loser": "bcrypt", "task": "password hashing (new systems)", "metric": "security", "source": "OWASP recommends Argon2id over bcrypt for new systems" },
+    { "winner": "pino", "loser": "winston", "task": "high-throughput application logging", "metric": "performance", "source": "pino has materially lower logging overhead than winston" },
+    { "winner": "playwright", "loser": "puppeteer", "task": "browser automation / JS-render scraping", "metric": "robustness", "source": "playwright adds auto-waiting + multi-browser + more reliable selectors" }
+  ]
+}

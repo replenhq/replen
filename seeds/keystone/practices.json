@@ -1,0 +1,22 @@
+{
+  "_note": "Keystone seed — architectural PRACTICES (kind=practice). Transferable structural moves, not libraries. A project 'uses' a practice when it has a capability/facet matching one of these. The data-driven domain ontology is the canonical practice-transfer example (acme built it; data-heavy multi-tenant projects benefit). better_than edges compare a practice to its anti-pattern, task-scoped.",
+  "capabilities": [
+    { "label": "configurable domain model", "domain": "data-architecture" },
+    { "label": "auditable state", "domain": "data-architecture" },
+    { "label": "semantic retrieval in postgres", "domain": "retrieval" },
+    { "label": "reliable event publishing", "domain": "data-architecture" },
+    { "label": "read write scaling", "domain": "data-architecture" }
+  ],
+  "solutions": [
+    { "kind": "practice", "name": "data-driven domain ontology", "source": "concept", "description": "Entity types, properties, and relationships stored as DATA (rows) rather than hardcoded in application code, so the domain model is configurable per-customer without a redeploy — one platform serves different segments without forking.", "attributes": { "fills": ["configurable domain model"], "signals": ["many related entity stores", "fork-per-customer pressure", "frequent schema changes"] } },
+    { "kind": "practice", "name": "hardcoded domain schema", "source": "concept", "description": "Entity types defined in application code; changing the model means a code change, release, and test cycle.", "attributes": { "antipattern_for": ["configurable domain model"] } },
+    { "kind": "practice", "name": "event sourcing", "source": "concept", "description": "Persist state as an append-only log of events; current state is a fold. Gives a full audit trail and temporal queries.", "attributes": { "fills": ["auditable state"] } },
+    { "kind": "practice", "name": "outbox pattern", "source": "concept", "description": "Write domain changes and their outbound events in one transaction (an 'outbox' table), then relay — exactly-once-ish event publishing without dual-write races.", "attributes": { "fills": ["reliable event publishing"] } },
+    { "kind": "practice", "name": "cqrs", "source": "concept", "description": "Separate read and write models so each scales and is shaped independently.", "attributes": { "fills": ["read write scaling"] } },
+    { "kind": "practice", "name": "pgvector semantic search", "source": "concept", "description": "Store embeddings in Postgres (pgvector) with IVFFlat/HNSW indexes for semantic retrieval alongside relational data — no separate vector DB.", "attributes": { "fills": ["semantic retrieval in postgres"] } },
+    { "kind": "practice", "name": "computed/derived properties", "source": "concept", "description": "Define derived fields (e.g. 'is_recent') evaluated at query time from base data, rather than denormalizing and maintaining them.", "attributes": { "fills": ["configurable domain model"] } }
+  ],
+  "better_than": [
+    { "winner": "data-driven domain ontology", "loser": "hardcoded domain schema", "task": "serving multiple customers/segments from one platform without forking", "metric": "adaptability", "source": "a data-driven domain model is changed by a row, not a release — the multi-tenant-without-forking move (ACME pattern)" }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "_note": "Keystone seed — ALGORITHM nodes + task-scoped better_than edges. Algorithms are already captured as project capability facets, so these match via facets (not deps). 'better' is strongly task/constraint-scoped and CONDITIONAL — the user may have chosen the simpler algorithm deliberately (interpretability, small data), so the edge always names the condition under which the upgrade wins. Loser node names match real facet labels exactly so they fire.",
+  "capabilities": [
+    { "label": "ranking", "domain": "ml" },
+    { "label": "shortest path", "domain": "algorithms" },
+    { "label": "sequence modeling", "domain": "ml" },
+    { "label": "clustering", "domain": "ml" },
+    { "label": "tabular prediction", "domain": "ml" }
+  ],
+  "solutions": [
+    { "kind": "algorithm", "name": "weighted knn", "source": "concept", "description": "Hand-weighted k-nearest-neighbours scoring.", "attributes": { "fills": ["ranking"] } },
+    { "kind": "algorithm", "name": "learned-to-rank", "source": "concept", "description": "LambdaMART / gradient-boosted ranking trained on labeled outcomes.", "attributes": { "fills": ["ranking"] } },
+    { "kind": "algorithm", "name": "a-star pathfinding", "source": "concept", "description": "A* heuristic shortest-path search, recomputed per query.", "attributes": { "fills": ["shortest path"] } },
+    { "kind": "algorithm", "name": "contraction hierarchies", "source": "concept", "description": "Precomputed shortcut hierarchy for near-instant repeated shortest-path queries on a static graph.", "attributes": { "fills": ["shortest path"] } },
+    { "kind": "algorithm", "name": "hidden markov model", "source": "concept", "description": "HMM for sequence/state modeling.", "attributes": { "fills": ["sequence modeling"] } },
+    { "kind": "algorithm", "name": "neural sequence model", "source": "concept", "description": "LSTM/Transformer sequence model.", "attributes": { "fills": ["sequence modeling"] } },
+    { "kind": "algorithm", "name": "k-means", "source": "concept", "description": "Centroid clustering; assumes spherical, equal-size clusters, needs k.", "attributes": { "fills": ["clustering"] } },
+    { "kind": "algorithm", "name": "hdbscan", "source": "concept", "description": "Density clustering: finds variable-density clusters + noise, no k.", "attributes": { "fills": ["clustering"] } },
+    { "kind": "algorithm", "name": "tf-idf", "source": "concept", "description": "Lexical term-weighting similarity.", "attributes": { "fills": ["ranking"] } },
+    { "kind": "algorithm", "name": "dense embeddings", "source": "concept", "description": "Semantic vector similarity.", "attributes": { "fills": ["ranking"] } }
+  ],
+  "better_than": [
+    { "winner": "learned-to-rank", "loser": "weighted knn", "task": "ranking WHEN you have labeled outcome data", "metric": "ranking quality", "source": "learned-to-rank (LambdaMART) beats hand-weighted KNN once you have outcome labels to train on; KNN stays fine for cold-start / no labels" },
+    { "winner": "contraction hierarchies", "loser": "a-star pathfinding", "task": "MANY repeated shortest-path queries on a mostly-static graph", "metric": "query latency", "source": "contraction hierarchies precompute shortcuts for orders-of-magnitude faster repeated queries; A* is better for one-off queries or fast-changing graphs" },
+    { "winner": "neural sequence model", "loser": "hidden markov model", "task": "sequence modeling WHEN you have lots of data and don't need interpretability", "metric": "accuracy", "source": "neural sequence models beat HMMs with enough data; HMMs stay better for small-data / interpretable / explicit-state cases" },
+    { "winner": "hdbscan", "loser": "k-means", "task": "clustering with noise or variable-density clusters and unknown k", "metric": "cluster quality", "source": "HDBSCAN handles noise + variable density + no preset k; k-means is fine for known-k spherical clusters" },
+    { "winner": "dense embeddings", "loser": "tf-idf", "task": "SEMANTIC similarity (meaning, not shared words)", "metric": "relevance", "source": "dense embeddings capture meaning; tf-idf only shared terms — but tf-idf is better for exact-keyword / rare-term matching" }
+  ]
+}

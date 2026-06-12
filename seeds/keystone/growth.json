@@ -1,0 +1,39 @@
+{
+  "_note": "Keystone growth seed — more library/service/practice/algorithm coverage. Library edges chosen to hit the user's REAL deps (ethers, @next-auth/prisma-adapter, node-fetch) so they fire. Hosted-services depth + a few more practices/algorithms for breadth. All task-scoped + deprecation-driven where possible.",
+  "capabilities": [
+    { "label": "ethereum interaction", "domain": "web3" },
+    { "label": "transactional email", "domain": "communication" },
+    { "label": "ci cd", "domain": "devops" },
+    { "label": "progressive delivery", "domain": "delivery" },
+    { "label": "safe retries", "domain": "reliability" }
+  ],
+  "solutions": [
+    { "kind": "library", "name": "ethers", "source": "github", "description": "Mature Ethereum JS library.", "attributes": { "fills": ["ethereum interaction"] } },
+    { "kind": "library", "name": "viem", "source": "github", "description": "TypeScript-first Ethereum library — smaller, typed, modern DX; pairs with wagmi.", "attributes": { "fills": ["ethereum interaction"] } },
+    { "kind": "library", "name": "@next-auth/prisma-adapter", "source": "github", "description": "NextAuth v4 Prisma adapter (renamed in v5).", "attributes": { "status": "renamed", "fills": ["authentication"] } },
+    { "kind": "library", "name": "@auth/prisma-adapter", "source": "github", "description": "Auth.js (NextAuth v5) Prisma adapter — the current package.", "attributes": { "fills": ["authentication"] } },
+    { "kind": "library", "name": "node-fetch", "source": "github", "description": "fetch polyfill for old Node.", "attributes": { "fills": ["http client"] } },
+    { "kind": "library", "name": "native fetch", "source": "concept", "description": "Built-in global fetch (Node 18+) — no dependency.", "attributes": { "fills": ["http client"] } },
+    { "kind": "library", "name": "jsonwebtoken", "source": "github", "description": "Classic JWT library (CJS).", "attributes": { "fills": ["authentication"] } },
+    { "kind": "library", "name": "jose", "source": "github", "description": "Modern, ESM, spec-complete JWT/JWE/JWK — works at the edge.", "attributes": { "fills": ["authentication"] } },
+    { "kind": "service", "name": "travis ci", "source": "hosted", "description": "Declining hosted CI.", "attributes": { "status": "declining", "fills": ["ci cd"] } },
+    { "kind": "service", "name": "github actions", "source": "hosted", "description": "Repo-native CI/CD, free tier, huge marketplace.", "attributes": { "fills": ["ci cd"] } },
+    { "kind": "service", "name": "nodemailer-smtp", "source": "concept", "description": "Hand-rolled SMTP sending.", "attributes": { "fills": ["transactional email"] } },
+    { "kind": "service", "name": "resend", "source": "hosted", "description": "Modern transactional email API with React email + good deliverability.", "attributes": { "fills": ["transactional email"] } },
+    { "kind": "practice", "name": "feature flags", "source": "concept", "description": "Gate features behind runtime flags for progressive rollout, kill-switches, and A/B without redeploys.", "attributes": { "fills": ["progressive delivery"], "signals": ["frequent releases", "risky changes", "multi-tenant toggles"] } },
+    { "kind": "practice", "name": "idempotency keys", "source": "concept", "description": "Client-supplied keys so a retried mutating request is applied at most once — safe retries on flaky networks/webhooks.", "attributes": { "fills": ["safe retries"], "signals": ["payment or webhook handlers", "at-least-once delivery", "non-idempotent POSTs"] } },
+    { "kind": "algorithm", "name": "linear regression", "source": "concept", "description": "Linear model for tabular regression.", "attributes": { "fills": ["tabular prediction"] } },
+    { "kind": "algorithm", "name": "gradient boosting", "source": "concept", "description": "XGBoost/LightGBM — strong tabular learner capturing nonlinearity + interactions.", "attributes": { "fills": ["tabular prediction"] } },
+    { "kind": "algorithm", "name": "naive bayes", "source": "concept", "description": "Probabilistic classifier assuming feature independence.", "attributes": { "fills": ["tabular prediction"] } }
+  ],
+  "better_than": [
+    { "winner": "viem", "loser": "ethers", "task": "Ethereum interaction in NEW TypeScript code", "metric": "DX/size/types", "source": "viem is TypeScript-first, smaller, fully typed, and pairs with wagmi; ethers stays fine for existing/mature code" },
+    { "winner": "@auth/prisma-adapter", "loser": "@next-auth/prisma-adapter", "task": "NextAuth/Auth.js Prisma adapter", "metric": "maintenance", "source": "@next-auth/prisma-adapter was renamed to @auth/prisma-adapter in NextAuth v5" },
+    { "winner": "native fetch", "loser": "node-fetch", "task": "HTTP requests on Node 18+", "metric": "zero-dependency", "source": "Node 18+ ships a global fetch — node-fetch is no longer needed" },
+    { "winner": "jose", "loser": "jsonwebtoken", "task": "JWT in modern/edge runtimes", "metric": "ESM/edge/maintenance", "source": "jose is ESM, spec-complete, and runs at the edge; jsonwebtoken is CJS and Node-only" },
+    { "winner": "github actions", "loser": "travis ci", "task": "CI/CD for a GitHub repo", "metric": "maintenance/cost", "source": "Travis CI has declined sharply; GitHub Actions is repo-native with a free tier" },
+    { "winner": "resend", "loser": "nodemailer-smtp", "task": "transactional email at product scale", "metric": "deliverability/DX", "source": "a managed email API (Resend) handles deliverability, DKIM/SPF, and React email vs hand-rolled SMTP" },
+    { "winner": "gradient boosting", "loser": "linear regression", "task": "tabular prediction WITH nonlinear feature interactions", "metric": "accuracy", "source": "gradient boosting captures nonlinearity/interactions linear models miss — but linear is better for tiny data / interpretability" },
+    { "winner": "gradient boosting", "loser": "naive bayes", "task": "tabular classification with enough labeled data", "metric": "accuracy", "source": "gradient boosting beats naive bayes once you have data; naive bayes stays a fast strong baseline for text/small-data" }
+  ]
+}

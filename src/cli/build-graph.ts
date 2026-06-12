@@ -29,13 +29,13 @@ async function inspect(userId: number) {
   }
   const shared = [...capFanIn.entries()].filter(([, ps]) => ps.length > 1).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
   if (shared.length) {
-    console.log(`\nKeystone capabilities (shared across projects):`);
+    console.log(`\nWaypoint capabilities (shared across projects):`);
     for (const [capId, ps] of shared) console.log(`  ${idToNode.get(capId)?.label.padEnd(28)} ← ${ps.join(", ")}`);
   }
-  // Themes (§5 communities) + keystones
+  // Themes (§5 communities) + waypoints
   const capNodes = nodes.filter((n) => n.kind === "capability");
   const themes = new Map<string, string[]>();
-  for (const n of capNodes) { let d: { themeName?: string; keystone?: boolean } = {}; try { d = JSON.parse(n.data ?? "{}"); } catch { /* */ } const t = d.themeName || "—"; (themes.get(t) ?? themes.set(t, []).get(t)!).push(n.label); }
+  for (const n of capNodes) { let d: { themeName?: string; waypoint?: boolean } = {}; try { d = JSON.parse(n.data ?? "{}"); } catch { /* */ } const t = d.themeName || "—"; (themes.get(t) ?? themes.set(t, []).get(t)!).push(n.label); }
   const bigThemes = [...themes.entries()].filter(([, m]) => m.length >= 3).sort((a, b) => b[1].length - a[1].length).slice(0, 8);
   if (bigThemes.length) {
     console.log(`\nThemes (capability communities):`);

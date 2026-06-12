@@ -21,7 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../analyzer/run-context";
 import { shouldSkip } from "./big-co";
 import type { ProjectSearchVectors } from "../projects/search-vectors";
-import { uncoveredKeystones } from "../graph/coverage";
+import { uncoveredWaypoints } from "../graph/coverage";
 
 // Conservative caps.
 const PER_TERM_RESULTS = parseInt(process.env.GH_TARGETED_PER_TERM ?? "5", 10);
@@ -34,7 +34,7 @@ const PER_USER_SEARCH_BUDGET = parseInt(process.env.GH_TARGETED_BUDGET ?? "25", 
 // gets eaten fast — 3 vectors × 3 terms = 9 queries/project. Adjust upward
 // only when budget allows.
 const MAX_PROJECTS = parseInt(process.env.GH_TARGETED_MAX_PROJECTS ?? "10", 10);
-// Blind-spot scouting: uncovered KEYSTONE capabilities (no candidate has ever
+// Blind-spot scouting: uncovered WAYPOINT capabilities (no candidate has ever
 // been evaluated against them — see src/graph/coverage.ts) each get one
 // search per run, after the outcome vectors have spent their budget share.
 const BLINDSPOT_MAX = Math.max(0, parseInt(process.env.GH_TARGETED_BLINDSPOTS ?? "3", 10) || 3);
@@ -236,14 +236,14 @@ export const ghTargetedSearchFetcher: Fetcher = {
       }
     }
 
-    // Blind-spot scouting — coverage feeding acquisition. Uncovered keystone
+    // Blind-spot scouting — coverage feeding acquisition. Uncovered waypoint
     // capabilities get one search each with the remaining budget; candidates
     // attribute to the first project that has the capability so downstream
     // scoring/eligibility treat them like any other targeted result.
     if (budgetRemaining > 0 && BLINDSPOT_MAX > 0) {
-      let spots: Awaited<ReturnType<typeof uncoveredKeystones>> = [];
+      let spots: Awaited<ReturnType<typeof uncoveredWaypoints>> = [];
       try {
-        spots = await uncoveredKeystones(userId, BLINDSPOT_MAX);
+        spots = await uncoveredWaypoints(userId, BLINDSPOT_MAX);
       } catch (e) {
         console.warn(`[gh-targeted] user=${userId} blind-spot lookup failed:`, e);
       }
@@ -287,7 +287,7 @@ export const ghTargetedSearchFetcher: Fetcher = {
               stars,
               primaryLanguage: typeof item.language === "string" ? item.language : null,
               projectSlug: spot.projectSlugs[0],
-              outcome: `coverage blind spot: nothing has ever been evaluated against "${spot.label}" (a keystone capability)`,
+              outcome: `coverage blind spot: nothing has ever been evaluated against "${spot.label}" (a waypoint capability)`,
               outcomeSource: "graph-coverage",
               outcomeConfidence: "medium",
               matchedTerm: spot.label,

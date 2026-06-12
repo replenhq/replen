@@ -51,6 +51,14 @@ Parse the JSON response. Note:
   `goal` is worth surfacing even if it doesn't map to an existing capability.
   Lead your writeups with mission-fit, not just tech-fit. (Null until the project
   is onboarded with a thesis — then fall back to capability-fit alone.)
+- `keystoneUpgrades` — task-scoped `better_than` upgrades for solutions this
+  project already uses (from Keystone, the comparative-knowledge ontology): each
+  is `{current, better, betterKind, task, margin, source}`. A deprecated/inferior
+  dependency has a maintained/stronger replacement. The footnote may surface one;
+  if the user wants it, DO the swap (update the dep, adjust call sites). Always
+  cite the `task` — "better" is task-relative (e.g. text-embedding-3-large beats
+  3-small for general retrieval but NOT for short-label matching). Don't push an
+  upgrade the user didn't ask about beyond the one calm line.
 - `candidates[]` — the actual list to triage
 - `candidates[].priorContext` — server-attached MEMORY: the user's earlier
   verdicts on this repo, and whether the matched capability is already

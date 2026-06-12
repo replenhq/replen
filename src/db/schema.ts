@@ -1361,3 +1361,89 @@ export const leapSurfaces = sqliteTable(
     idxUserProject: index("idx_leap_surfaces_user_project").on(t.userId, t.projectId, t.surfacedAt),
   }),
 );
+
+// ── KEYSTONE — Replen's comparative-knowledge ontology ───────────────────────
+// The type-level map of the software-capability space: capabilities, the
+// solutions that fill them (libraries / hosted models / services / algorithms /
+// architectural practices), and the typed edges between them — including the
+// new `better_than`, the primitive that turns Replen from "does it fit?" into
+// "is it better? / would it help?". Peer of Atlas (per-user instances),
+// Watchtower (sources), Brainstem (matching). DYNAMIC by design — it's all
+// rows, not hardcoded enums ("schema as data, not code"): new capabilities,
+// solutions, edge kinds, and ingested client ontologies extend it without a
+// redeploy. CROSS-USER / global operational data (like the catalogue), so no
+// user_id. Seeded from small committed seeds under seeds/keystone/.
+export const keystoneCapabilities = sqliteTable(
+  "keystone_capabilities",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    label: text("label").notNull(),
+    normLabel: text("norm_label").notNull(),
+    domain: text("domain"),                 // coarse grouping (e.g. "retrieval", "vision", "data-architecture")
+    parentId: integer("parent_id"),         // is-a hierarchy (self-ref; "semantic segmentation" is-a "computer vision")
+    modality: text("modality"),             // JSON string[] — the data shapes this capability operates on
+    embedding: text("embedding"),           // JSON number[] — for matching a user facet to a Keystone capability
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }),
+  },
+  (t) => ({ uniqNorm: uniqueIndex("uniq_keystone_capability").on(t.normLabel) }),
+);
+
+// A solution that fills capabilities — kind-typed so libraries, hosted models,
+// services, algorithms, and practices are ALL first-class from day one (adding
+// a category is rows, never a schema change).
+export const keystoneSolutions = sqliteTable(
+  "keystone_solutions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").notNull(),           // library | hosted_model | service | algorithm | practice
+    name: text("name").notNull(),
+    normName: text("norm_name").notNull(),
+    source: text("source"),                 // github | hosted | concept | ingested
+    description: text("description"),
+    attributes: text("attributes"),         // JSON — benchmarks {mteb:...}, cost, license, repo, etc.
+    embedding: text("embedding"),           // JSON number[]
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }),
+  },
+  (t) => ({ uniqKindName: uniqueIndex("uniq_keystone_solution").on(t.kind, t.normName) }),
+);
+
+// Typed directed edges between Keystone nodes. The edge KIND carries the
+// semantics; `attributes` carries the evidence (a better_than edge records
+// {task, metric, margin, source} so a suggestion can cite WHY).
+export const keystoneEdges = sqliteTable(
+  "keystone_edges",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fromKind: text("from_kind").notNull(),  // capability | solution
+    fromId: integer("from_id").notNull(),
+    toKind: text("to_kind").notNull(),      // capability | solution
+    toId: integer("to_id").notNull(),
+    kind: text("kind").notNull(),           // is_a | fills | adjacent_to | better_than | paired_with
+    weight: real("weight"),
+    attributes: text("attributes"),         // JSON — e.g. {task, metric, margin, source} for better_than
+    source: text("source"),                 // seed | benchmark | derived | ingested  (provenance)
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxFrom: index("idx_keystone_edges_from").on(t.fromKind, t.fromId, t.kind),
+    idxTo: index("idx_keystone_edges_to").on(t.toKind, t.toId, t.kind),
+  }),
+);
+
+// Calm-cadence dedup for Keystone upgrade footnotes — at most one upgrade line
+// per (user, project, upgrade) ever, so "you're on a deprecated dep" is said
+// once, not every session. The upgrade still rides in the inventory DATA block
+// for the agent regardless; this only gates the one-line footnote surface.
+export const keystoneSurfaces = sqliteTable(
+  "keystone_surfaces",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectId: integer("project_id").notNull().references(() => projectProfiles.id, { onDelete: "cascade" }),
+    upgradeKey: text("upgrade_key").notNull(), // `${current}->${better}` — dedup key
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({ uniqUserProjectUpgrade: uniqueIndex("uniq_keystone_surface").on(t.userId, t.projectId, t.upgradeKey) }),
+);

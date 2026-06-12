@@ -136,7 +136,7 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     if (aliases.length) sections.push({ heading: "Also known as", items: aliases });
     return {
       kind, title: node.label,
-      subtitle: [data.themeName ? `theme: ${data.themeName}` : null, data.keystone ? "keystone" : null, mods.length ? `modality: ${mods.join(", ")}` : null].filter(Boolean).join(" · ") || null,
+      subtitle: [data.themeName ? `theme: ${data.themeName}` : null, data.waypoint ? "waypoint" : null, mods.length ? `modality: ${mods.join(", ")}` : null].filter(Boolean).join(" · ") || null,
       sections, blindspot, note: anchoredNote,
       capability: { label: node.label, provenance: usedIn.some((u) => u.includes("grounded")) ? "grounded" : null },
       queueSuggestion: blindspot ? `Find a library for "${node.label}" (coverage blind spot)` : null,

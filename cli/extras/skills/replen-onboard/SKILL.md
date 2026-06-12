@@ -255,6 +255,19 @@ strings. Each is `{tag, descriptor, modality}`:
 Break broad capabilities into the concrete techniques the code uses. Be
 specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
 
+**Also capture architectural PRACTICES as capabilities.** Beyond what the code
+*does*, note the distinctive structural *moves* it makes — these are what let
+Replen suggest a pattern to your OTHER projects ("acme made its domain model
+data-driven; this data-heavy project should consider it"). Include a capability
+for any deliberate practice you find: a **data-driven domain ontology** (entity
+types/relationships stored as DATA/rows, not hardcoded — configurable without a
+redeploy), **event sourcing**, **outbox pattern**, **CQRS**, **pgvector
+semantic search**, **feature store**, etc. Use the standard practice name as the
+`tag` (so it matches Keystone's practice registry). Respect the cover — describe
+the practice's STRUCTURE, never the sensitive entity names it models (for a
+covered repo, "a configurable Postgres-backed domain ontology — entity types,
+typed properties, computed properties as rows", never the entity names).
+
 ### 2e. Push to Replen
 
 1. **Register** the repo if it isn't already. The per-repo `replen_set_tags` /
