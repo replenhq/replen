@@ -85,7 +85,7 @@ const TOOLS: Tool[] = [
         "    replen_handoff   Open a handoff PR in the matched project's own repo. Server-side because git writes need credentials we don't carry locally.",
         "",
         "Common flow (skill-mode):",
-        "  • Triage today: replen_match → analyse each candidate against local code → present writeups → replen_state per user action.",
+        "  • Triage today: replen_match → analyse each candidate against local code → replen_record_triage per candidate (immediately, before presenting) → present writeups → replen_state per user action.",
       ];
       return lines.join("\n");
     },
@@ -108,9 +108,11 @@ const TOOLS: Tool[] = [
       "\n" +
       "TRIAGE PROTOCOL (only when the user accepts):\n" +
       "  1. For each candidate, WebFetch the candidate's README + grep the user's source for related code (under src/, lib/, app/ — skip node_modules, dist, .next).\n" +
-      "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w).\n" +
+      "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime), 'defer' (good but not now). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w). For a skip, classify the reason (reasonCode): 'covered' (already built/depended-on — use ONLY when you confirmed the implementation in-code), 'modality-collision', 'task-collision', 'wrong-posture', 'low-quality', 'other'.\n" +
       "  3. Compose a writeup with concrete file-level impact references — name actual files the candidate replaces or improves.\n" +
-      "  4. Present writeups to the user, ask which to star / hide / handoff / skip, call replen_state for each action.\n" +
+      "  4. RECORD EACH VERDICT NOW via replen_record_triage (verdict + score + effort + reasonCode + oneLine + cosine), BEFORE presenting and WITHOUT asking. Recording is observation, not action — it's non-destructive and is what teaches the matcher and stops the same candidate (and the facet it matched) coming back. An unrecorded triage taught Replen nothing and the candidates return next session. Only the user-judgment actions wait for the user.\n" +
+      "  5. If the repo's lockfile changed since last report, or it has never reported, call replen_set_versions with the resolved direct dependency versions (names + versions only) — this is what stops the repo's OWN dependencies being suggested back to it.\n" +
+      "  6. Present writeups, then ask which to star / hide / handoff (verdicts are already recorded); call replen_state for each user action.\n" +
       "Cap on real-life triage: 5 candidates max per session. " +
       "Scoped by default to the repo this MCP was spawned in. Pass repo='' to see the global firehose across all the user's projects.",
     inputSchema: {

@@ -126,13 +126,27 @@ knowledge graph — verify instead.)
 ### 2c. Write the grounded project report
 
 Produce a comprehensive write-up of the repo — the thing you'd hand a new
-engineer. Cover: **what it does and for whom · the stack · the algorithms/
-techniques it uses and WHY · the data it operates on · how it's architected ·
-what it's trying to achieve · constraints/non-goals.** Ground every claim in the
-code (name the files/modules). Be specific about the tech, not the domain
-marketing. This report is the single richest grounding artifact — it's what lets
-Replen tell, e.g., "anomaly detection over telemetry time-series (no ML)" apart
-from "image-defect anomaly detection".
+engineer. Cover: **the stack · the algorithms/techniques it uses and WHY · the
+data it operates on (shape/modality) · how it's architected · the technical
+problem it solves · constraints/non-goals.** Ground every claim in the code
+(name the files/modules). Be specific about the tech, not the domain. This
+report is the single richest grounding artifact — it's what lets Replen tell,
+e.g., "anomaly detection over telemetry time-series (no ML)" apart from
+"image-defect anomaly detection".
+
+**Respect the cover — describe the TECH, never de-sanitize the application.**
+This report leaves the machine (stored server-side as grounding), so it must
+read like the repo's own public docs, not like a leak. Replen only needs the
+technical capability profile — what algorithms run on what data shape — which is
+modality-precise without any sensitive real-world detail. If the README/CLAUDE.md
+deliberately present a sanitized framing (e.g. "urban-infrastructure
+segmentation") that differs from what the code's identifiers imply, FOLLOW THE
+DOCS' framing: write "semantic segmentation of overhead imagery into vector
+polygons," NOT the specific real-world thing it detects or who uses it. Never
+copy a sensitive internal codename, end-user, deployment, or real-world target
+into the report or the descriptors — the capability is the signal; the
+application is exactly what stays local. When in doubt, describe it as the
+public README does.
 
 ### 2d. Derive grounded capabilities
 

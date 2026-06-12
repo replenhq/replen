@@ -7,7 +7,7 @@ import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
-import { isGenericInfraFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
+import { isGenericProbeFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
 import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseDepVersionNames, parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
@@ -515,9 +515,19 @@ export async function GET(req: Request) {
   // projectFacets list still drives coverage, modality maps, and the
   // "already have it" adjacency exclusion. A facet the user explicitly set
   // as a GOAL is exempt — stated intent beats the genericity heuristic.
-  const probeFacets = projectFacets.filter(
-    (f) => !isGenericInfraFacetLabel(f.label) || goalLabels.has(normFacetLabel(f.label)),
-  );
+  // Facets the agent skipped as 'covered' (built in-house) for any repo in
+  // this product — dropped as probes so a low-trust facet can't keep pulling a
+  // fresh tool from a crowded catalogue category every session. Stays exempt
+  // when set as a goal (you may build it now AND want better tooling later).
+  const coveredSkipFacets = new Set<string>();
+  for (const slug of productSlugs) for (const f of prior.coveredSkips.get(slug) ?? []) coveredSkipFacets.add(f);
+  const probeFacets = projectFacets.filter((f) => {
+    const nf = normFacetLabel(f.label);
+    if (goalLabels.has(nf)) return true; // stated intent overrides every suppression
+    if (isGenericProbeFacetLabel(f.label)) return false; // infra + vague-generic
+    if (coveredSkipFacets.has(nf)) return false;
+    return true;
+  });
   // Modality per facet label (union across product repos) — for checking a
   // candidate's recorded modality collisions against the facet it matched.
   const facetModsByLabel = new Map<string, Modality[]>();

@@ -156,12 +156,20 @@ export type TriageContext = {
   coverage: Map<string, FacetCoverage>;
   // repo fullName (lowercased) → this user's latest decision per project (recent first, ≤3)
   repoHistory: Map<string, PriorDecision[]>;
+  // project slug → set of normFacetLabel the agent skipped as 'covered' — i.e.
+  // looked at the code and confirmed the capability is already BUILT in-house.
+  // Stronger than adopt/port coverage (which only down-ranks a still-useful
+  // alternative): a covered-skip means "stop fishing tools against this facet",
+  // so the route drops it as a match PROBE entirely. This is the fix for a
+  // low-trust inferred facet (e.g. 'LLM integration') that keeps pulling a
+  // different tool from a crowded catalogue category every session.
+  coveredSkips: Map<string, Set<string>>;
 };
 
 export async function loadTriageContext(userId: number): Promise<TriageContext> {
   const events: TriageEventLite[] = await db.select(eventCols).from(schema.triageEvents)
     .where(eq(schema.triageEvents.userId, userId));
-  if (!events.length) return { coverage: new Map(), repoHistory: new Map() };
+  if (!events.length) return { coverage: new Map(), repoHistory: new Map(), coveredSkips: new Map() };
 
   const projects = await db
     .select({ id: schema.projectProfiles.id, slug: schema.projectProfiles.slug })
@@ -176,6 +184,7 @@ export async function loadTriageContext(userId: number): Promise<TriageContext> 
 
   const coverage = new Map<string, FacetCoverage>();
   const repoHistory = new Map<string, PriorDecision[]>();
+  const coveredSkips = new Map<string, Set<string>>();
   for (const e of latest.values()) {
     const fullName = names.get(e.repoId);
     if (!fullName) continue;
@@ -192,12 +201,19 @@ export async function loadTriageContext(userId: number): Promise<TriageContext> 
         coverage.set(key, { repo: fullName, project, verdict: e.verdict, at: e.createdAt });
       }
     }
+    // A 'covered' skip is the agent confirming, against the code, that the
+    // capability is already built — scope it to the project it was judged in
+    // (facets are per-project; an unscoped skip can't target one).
+    if (e.verdict === "skip" && e.reasonCode === "covered" && e.matchedFacet && project) {
+      const set = coveredSkips.get(project) ?? coveredSkips.set(project, new Set()).get(project)!;
+      set.add(normFacetLabel(e.matchedFacet));
+    }
   }
   for (const hist of repoHistory.values()) {
     hist.sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0));
     hist.splice(3);
   }
-  return { coverage, repoHistory };
+  return { coverage, repoHistory, coveredSkips };
 }
 
 // ── defer re-checks ──────────────────────────────────────────────────────────

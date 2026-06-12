@@ -39,7 +39,7 @@ Commands:
   const baseUrl = (process.env.DIGEST_BASE_URL ?? "http://localhost:3030").replace(/\/+$/, "");
   const token = process.env.DIGEST_TOKEN;
   if (!token) {
-    console.error("DIGEST_TOKEN env var required. Generate one on /settings of your digest dashboard.");
+    console.error("DIGEST_TOKEN env var required. This command only runs inside an MCP host like Claude Code, which injects the token for you — running it bare (e.g. to refresh the npx cache) is expected to print this and exit. To set up the token, run `npx replen` or generate one at app.replen.dev/settings.");
     process.exit(1);
   }
 

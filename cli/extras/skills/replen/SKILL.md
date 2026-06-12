@@ -353,7 +353,13 @@ verdict it calibrates the relevance floor for this project, and your
 adopt/skip pattern continuously tunes the ranking via the taste vector).
 A skip coded `modality-collision` teaches Replen that this repo fits a
 *different* modality — so it stays available for the right project but stops
-colliding with this one.
+colliding with this one. A skip coded `covered` is the strongest signal you
+can send: it tells Replen the capability is **already built in this repo**, so
+it stops probing that facet entirely and won't surface a different tool for it
+next session. Use `covered` ONLY when you've confirmed the implementation in
+the code (e.g. the repo has its own `services/llm_client.py`), not just because
+a similar dependency exists — that's what makes "we already do this" stick to
+the capability instead of replaying every session against a new candidate.
 
 **Candidate's README is unreachable (WebFetch 404)**. Note it in the
 writeup (`Caveats: README unreachable; verdict based on description

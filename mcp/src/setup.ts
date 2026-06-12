@@ -79,7 +79,7 @@ After running this, restart Claude Code. The "${args.name}" MCP server will be a
   }
 
   if (!args.token.startsWith("ing_")) {
-    console.error(`Warning: token doesn't look like a digest token (expected "ing_..." prefix). Continuing anyway.`);
+    console.error(`Warning: token doesn't look like a Replen token (expected "ing_..." prefix). Continuing anyway.`);
   }
   try {
     new URL(args.base);

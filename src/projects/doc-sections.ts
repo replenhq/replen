@@ -46,6 +46,13 @@ const META_TOOLING = /(claude code|claude\b|\bmcp\b|model context protocol|curso
 // the matcher can ALSO drop them defensively at read time (legacy facets stored
 // before this filter existed), not just at generation.
 const NARRATION_NOISE = /(teleprompter|narration|voice-?over|screencast|b-?roll|storyboard|walkthrough script|demo script)/i;
+// Doc-section headings that are pure framing, not a capability: "Why", "What
+// this project is", "Sibling tooling", "Motivation". They became facets only
+// because they're headings; as probes they're noise (a "Why" facet matches
+// nothing meaningful). Dropped ENTIRELY (not just as probes) — there's no
+// coverage value in a framing heading. Anchored to the whole label so a real
+// capability that merely contains a word ("rationale engine") survives.
+const STRUCTURAL_HEADING = /^((project |system |architecture |code |repo |high.?level )?overview|why|why this( matters| project| works)?|what|what['’]s this|what is this|what this( project)?( is| does| means)?|what it( is| does)|what we (do|built)|how( it| this)? works|data flow|control flow|data model|sibling (tooling|projects?|repos?)|related (tooling|projects?|work)|motivation|background|context|rationale|goals?|objectives?|purpose|next steps?|what['’]s next|the (problem|solution)|problem statement|tl;?dr)$/i;
 export function isNoiseFacetLabel(label: string): boolean {
   const l = label.trim();
   if (!l) return true;
@@ -53,6 +60,10 @@ export function isNoiseFacetLabel(label: string): boolean {
   if (/^\d{1,3}\s*[-.)]/.test(l)) return true;            // numbered-section prefix (01-, 2., 3))
   if ((l.match(/[a-z]/gi) ?? []).length < 3) return true; // codes/slugs with no real words
   if (NARRATION_NOISE.test(l)) return true;               // video/script meta doc
+  if (STRUCTURAL_HEADING.test(l)) return true;            // framing heading, not a capability
+  if (/^q[1-4]\b/i.test(l)) return true;                  // roadmap quarter heading ("Q2 — …")
+  if (/\b[A-Za-z]{2,5}\d+\.[a-z]/.test(l)) return true;   // ticket/milestone code ("ML21.b.2")
+  if ((l.match(/\b[A-Z][a-z]+[A-Z][a-z]+\b/g) ?? []).length >= 2) return true; // ≥2 CamelCase code identifiers ("EnemyPosition / OsintObservation") — a doc/code dump, not a capability
   if (/\(\d+[^)]*\)\s*$/.test(l)) return true;            // trailing tally — "Case Studies (5 pages)", "Pages to Delete (1)"
   if (/\b(pages?|posts?|articles?)\s+(to|at|already)\b/i.test(l)) return true; // content-audit/TODO headings
   if (/\b(to delete|to create|to remove|already present|wrong url|needs? (relocation|review|update))\b/i.test(l)) return true;
@@ -81,6 +92,31 @@ const GENERIC_INFRA_RE = new RegExp(
 export function isGenericInfraFacetLabel(label: string): boolean {
   const l = label.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
   return GENERIC_INFRA_RE.test(l);
+}
+
+// Generic-but-real capability words too vague to LEAD a match: a bare
+// "optimization" sits near every optimizer (a macOS disk cleaner matched a
+// trading bot on it); "core components" / "core" / "components" are structural;
+// "database"/"postgresql" sit near every DB tool. Like infra, these stay valid
+// capabilities (coverage, graph, already-have) but can't lead a match, seed
+// adjacency, or pull catalogue. Anchored whole-label + optional generic suffix,
+// so a real domain ("query optimization", "geospatial database") is NOT caught.
+const GENERIC_CAP_CORE =
+  "(core|core components?|components?|modules?|utilit(y|ies)|helpers?|" +
+  "optim(i[sz]ation|i[sz]er)|performance|scalability|reliability|" +
+  "database|databases|data ?store|persistence|postgres(ql)?|mysql|sqlite|mongodb|" +
+  "caching|cache|logging|monitoring|observability|telemetry|metrics|" +
+  "api|apis|rest api|backend|frontend|full ?stack|web app|application|library|framework|" +
+  "scanner|scanning|scanner testing|testing|automation|tooling|integration|general)";
+const GENERIC_CAP_RE = new RegExp(
+  `^${GENERIC_CAP_CORE}( (support|integration|layer|module|system|engine|service|pipeline|management))?$`,
+  "i",
+);
+// The single check the route uses: a facet too generic to be a useful probe,
+// whether it's infrastructure plumbing or a vague capability word.
+export function isGenericProbeFacetLabel(label: string): boolean {
+  const l = label.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return GENERIC_INFRA_RE.test(l) || GENERIC_CAP_RE.test(l);
 }
 
 type RawSection = { heading: string; body: string };
