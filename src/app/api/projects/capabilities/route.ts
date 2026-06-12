@@ -21,7 +21,7 @@ import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "
 //
 // Project resolution is owner-tolerant (exact github_full_name, then repo name).
 
-type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown };
+type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown };
 
 // Cap the stored report so a runaway agent can't write megabytes.
 const MAX_REPORT_CHARS = 24_000;
@@ -125,6 +125,25 @@ export async function POST(req: Request) {
   }
   summary.capabilityTags = merged;
   summary.capabilities = mergedSpecs;
+  // Product THESIS — what the project is trying to BE and where it's heading.
+  // Distinct from capabilities (what it technically does): the thesis is the
+  // mission a candidate should ADVANCE, and the relevance test the in-session
+  // agent triages against ("does this serve a contested-airspace decision-
+  // support platform?" >> "does this do OSINT?"). Derived by the agent from the
+  // code + any goals.md/handover.md/roadmap the user already keeps. Names/intent
+  // only — never sensitive operational detail (respect the cover).
+  if (typeof body.purpose === "string" && body.purpose.trim()) {
+    summary.purpose = body.purpose.trim().slice(0, 600);
+  }
+  if (Array.isArray(body.goals)) {
+    // Agent-supplied goals are user/doc-grounded directions → stored as
+    // high-confidence "user" OutcomeGoals (same shape the server summarizer uses,
+    // so Stage-2 goal-aware ranking treats them as first-class).
+    summary.outcomeGoals = body.goals
+      .filter((g): g is string => typeof g === "string" && !!g.trim())
+      .slice(0, 8)
+      .map((g) => ({ statement: g.trim().slice(0, 200), source: "user" as const, confidence: "high" as const }));
+  }
 
   // The agent's grounded project report (optional) — stored as an additional
   // grounding input for the server's safety-net summarization on the next regen.

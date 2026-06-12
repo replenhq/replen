@@ -1585,10 +1585,30 @@ export async function GET(req: Request) {
     }
   }
 
+  // Product thesis — what this project is trying to BE + where it's heading.
+  // Handed to the in-session agent so it triages candidates against the MISSION
+  // ("does this advance a contested-airspace decision-support platform?"), not
+  // just the tech slots. The richest, cheapest relevance signal we have — and a
+  // far better false-positive filter than cosine. Null until onboarding fills it.
+  let projectThesis: { purpose: string | null; goals: string[] } | null = null;
+  if (scopedProject?.summaryJson) {
+    try {
+      const s = JSON.parse(scopedProject.summaryJson) as { purpose?: string; outcomeGoals?: Array<{ statement?: string }> };
+      const purpose = typeof s.purpose === "string" && s.purpose.trim() ? s.purpose.trim() : null;
+      const goals = Array.isArray(s.outcomeGoals)
+        ? s.outcomeGoals.map((g) => g?.statement).filter((g): g is string => typeof g === "string" && !!g.trim())
+        : [];
+      if (purpose || goals.length) projectThesis = { purpose, goals };
+    } catch { /* ignore */ }
+  }
+
   return NextResponse.json(
     {
       filterMode,
       scopedTo: scopedProject ? `${scopedProject.slug} (${scopedProject.githubFullName})` : null,
+      // What the project is trying to BE — triage candidates against this, not
+      // just the capability slots. Null until onboarding captures it.
+      projectThesis,
       productRepos: productRepoCount, // repos in this product whose capabilities are unioned
       days,
       windowReason,

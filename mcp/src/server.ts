@@ -354,6 +354,8 @@ const TOOLS: Tool[] = [
         repo: { type: "string", description: "owner/name of the project repo (owner-tolerant)" },
         repoId: { type: "number", description: "Alternative to repo — the project's id" },
         report: { type: "string", description: "OPTIONAL grounded project report — your comprehensive code-read write-up (what it does, tech, algos, how/why, architecture, for whom). The richest grounding; stored and weighted highest in Replen's own summarization. Derive it from reading the actual source." },
+        purpose: { type: "string", description: "OPTIONAL but HIGH-VALUE: the project's THESIS in 1-2 sentences — what it's trying to BE and what makes it distinct, NOT just what it technically does. This is the mission a candidate should advance, and the relevance test the triage agent judges against ('does this serve a contested-airspace decision-support platform?' beats 'does this do OSINT?'). Ground it in the code AND any goals.md / handover.md / ROADMAP.md / PRD the user keeps. Respect the cover — intent, never sensitive operational detail." },
+        goals: { type: "array", items: { type: "string" }, description: "OPTIONAL: where the project is HEADING — a few outcome goals / planned directions (e.g. 'real-time multi-sensor fusion', 'sub-second COA ranking'). Lets Replen surface tools that advance what's NEXT, not just what exists. From the code + roadmap/goals docs." },
         capabilities: {
           type: "array",
           description: "Capabilities — PREFER grounded objects {tag, descriptor, modality}; bare strings also accepted.",
@@ -381,6 +383,8 @@ const TOOLS: Tool[] = [
         repo: z.string().optional(),
         repoId: z.number().int().positive().optional(),
         report: z.string().max(32 * 1024).optional(),
+        purpose: z.string().max(2000).optional(),
+        goals: z.array(z.string()).max(12).optional(),
         capabilities: z.array(z.union([
           z.string(),
           z.object({

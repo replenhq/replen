@@ -43,6 +43,14 @@ Parse the JSON response. Note:
 
 - `filterMode` — `tags`, `zero-knowledge`, or `fingerprint`
 - `scopedTo` — confirms the project context the user has open
+- `projectThesis` — what this project is trying to BE (`purpose`) and where it's
+  heading (`goals`). **This is your primary relevance lens.** Judge every
+  candidate against the mission, not just the capability match: a library can fit
+  a tech slot and still NOT advance what the product is trying to be (a generic
+  charting lib for a decision-support platform), and a candidate that advances a
+  `goal` is worth surfacing even if it doesn't map to an existing capability.
+  Lead your writeups with mission-fit, not just tech-fit. (Null until the project
+  is onboarded with a thesis — then fall back to capability-fit alone.)
 - `candidates[]` — the actual list to triage
 - `candidates[].priorContext` — server-attached MEMORY: the user's earlier
   verdicts on this repo, and whether the matched capability is already

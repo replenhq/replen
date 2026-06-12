@@ -30,6 +30,30 @@ const ENDPOINT = "https://api.openai.com/v1/embeddings";
 const TIMEOUT_MS = 30_000;
 const MAX_INPUT_LENGTH = 8000; // OpenAI's per-input token limit, char-approximated
 
+// ── Embedding health (resilience) ────────────────────────────────────────────
+// Embedding failures used to be swallowed (return null), so an out-of-quota key
+// degraded the whole matcher SILENTLY — new candidates/facets just never got
+// vectors. We now keep a sticky record of the last failure (esp. quota
+// exhaustion) so /api/healthz + replen_status can surface it loudly. Cleared on
+// the next successful embed.
+type EmbedHealth = { ok: boolean; at: string; status: number | null; quotaExhausted: boolean; message: string };
+let lastEmbedFailure: EmbedHealth | null = null;
+let lastEmbedSuccessAt: string | null = null;
+export function getEmbeddingHealth(): { ok: boolean; lastSuccessAt: string | null; lastFailure: EmbedHealth | null } {
+  return { ok: lastEmbedFailure === null, lastSuccessAt: lastEmbedSuccessAt, lastFailure: lastEmbedFailure };
+}
+function noteEmbedSuccess(): void { lastEmbedFailure = null; lastEmbedSuccessAt = new Date().toISOString(); }
+function noteEmbedFailure(status: number | null, body: string): void {
+  const quota = status === 429 || /insufficient_quota|exceeded your current quota|billing/i.test(body);
+  lastEmbedFailure = {
+    ok: false, at: new Date().toISOString(), status, quotaExhausted: quota,
+    message: quota
+      ? "OpenAI embedding key is OUT OF QUOTA — top up billing at platform.openai.com. New candidates/facets/catalogue entries are NOT being embedded; matching runs on stale vectors only."
+      : `embedding request failed (status ${status ?? "network"}): ${body.slice(0, 160)}`,
+  };
+  if (quota) console.error(`[embeddings] QUOTA EXHAUSTED — ${lastEmbedFailure.message}`);
+}
+
 export type EmbeddingResult = {
   vector: number[];
   contentHash: string;
@@ -70,6 +94,7 @@ export async function embed(text: string): Promise<EmbeddingResult | null> {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.warn(`[embeddings] HTTP ${res.status}: ${body.slice(0, 200)}`);
+      noteEmbedFailure(res.status, body);
       return null;
     }
     const json = (await res.json()) as { data?: Array<{ embedding?: number[] }> };
@@ -78,6 +103,7 @@ export async function embed(text: string): Promise<EmbeddingResult | null> {
       console.warn(`[embeddings] unexpected response shape; length=${vector?.length}`);
       return null;
     }
+    noteEmbedSuccess();
     return { vector, contentHash, model: MODEL, generatedAt: new Date() };
   } catch (e) {
     console.warn(`[embeddings] request failed:`, (e as Error).message);
@@ -124,6 +150,7 @@ export async function embedBatch(texts: string[]): Promise<Array<EmbeddingResult
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.warn(`[embeddings] batch HTTP ${res.status}: ${body.slice(0, 200)}`);
+      noteEmbedFailure(res.status, body);
       return texts.map(() => null);
     }
     const json = (await res.json()) as { data?: Array<{ embedding?: number[]; index?: number }> };
@@ -138,6 +165,7 @@ export async function embedBatch(texts: string[]): Promise<Array<EmbeddingResult
       if (!Array.isArray(v) || v.length !== DIMS) continue;
       out[idx] = { vector: v, contentHash: hashes[idx], model: MODEL, generatedAt: now };
     }
+    if (data.length > 0) noteEmbedSuccess();
     return out;
   } catch (e) {
     console.warn(`[embeddings] batch request failed:`, (e as Error).message);

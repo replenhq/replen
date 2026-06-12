@@ -216,6 +216,30 @@ into the report or the descriptors — the capability is the signal; the
 application is exactly what stays local. When in doubt, describe it as the
 public README does.
 
+### 2c-thesis. Capture the product THESIS (what it's trying to BE)
+
+Capabilities say what a project technically *does*; the **thesis** says what it's
+trying to *be* and where it's *heading* — and that's a far better relevance test
+than any capability slot ("does this advance a contested-airspace decision-
+support platform?" beats "does this do OSINT?"). Replen now matches and triages
+against it, so capture it:
+
+- **First, look for an explicit thesis the user already keeps** — `goals.md`,
+  `GOALS.md`, `handover.md`, `HANDOVER.md`, `ROADMAP.md`, `PRD.md`, `vision.md`,
+  `docs/product*.md`, or the "what it is / active areas" sections of CLAUDE.md.
+  These are the user's own words for the mission — use them as the primary
+  source (same adapter spirit as the knowledge-graph step 2a-pre).
+- **Derive two things:**
+  - `purpose` — 1–2 sentences: what the product is trying to be and what makes
+    it distinct. The mission, not a feature list.
+  - `goals` — a few outcome directions it's heading toward (e.g. "real-time
+    multi-sensor fusion", "sub-second COA ranking").
+- **Respect the cover** exactly as for the report: the thesis describes intent
+  and tech direction, never a sensitive codename / end-user / operational target.
+  Follow the framing the user's own docs use.
+
+Pass both to `replen_set_capabilities` (`purpose`, `goals`) in 2e.
+
 ### 2d. Derive grounded capabilities
 
 From the report + code, produce 8–15 **grounded** capability objects — NOT bare
@@ -244,10 +268,11 @@ specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
    sidesteps the shadow. Ensure each repo has a GitHub remote so it scopes by
    `owner/name`.
 2. **Set domain tags** with `replen_set_tags` — broad domain labels.
-3. **Set capabilities + report** with `replen_set_capabilities`, passing the
-   grounded `capabilities` array AND the `report` from 2c. The server builds the
-   facet vectors immediately and stores the report as grounding for its own
-   summarization. Use the MCP tools, not hand-rolled `curl`.
+3. **Set capabilities + report + thesis** with `replen_set_capabilities`, passing
+   the grounded `capabilities` array, the `report` from 2c, AND the `purpose` +
+   `goals` from 2c-thesis. The server builds the facet vectors immediately, stores
+   the report as grounding, and hands the thesis to the triage agent so candidates
+   are judged against the mission. Use the MCP tools, not hand-rolled `curl`.
    **Include `paths` on each capability** — up to 5 file paths that implement
    it (e.g. `{tag: "computer vision", …, paths: ["src/cv/transformations.py"]}`).
    Paths only, never code. You just read these files; recording WHERE each
