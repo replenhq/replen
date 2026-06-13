@@ -18,17 +18,24 @@ export type GNode = {
   id: number; kind: string; nodeKey: string; label: string; theme: string | null;
   waypoint: boolean; provenance: string | null; stars: number | null; degree: number;
   alertKind: string | null; alertCount: number; blindspot: boolean; queued: number;
+  // Repo size for project/product nodes — file count (a product sums its
+  // members). Drives node radius so bigger repos read bigger. null = unknown.
+  size: number | null;
 };
 export type GEdge = { kind: string; src: number; dst: number; weight: number | null };
 
+// Amber Slate palette: gold leads (your projects + the upgrade recommendations),
+// everything structural recedes into muted slate-blue / grey / olive so the gold
+// is the eye's anchor. Accent kinds (suggestion/goal/product) keep their semantic
+// hues — they signal state, not structure.
 const KIND_COLOR: Record<string, string> = {
-  project: "#ffc857", capability: "#5eb0ef", candidate: "#65a30d", product: "#c084fc", tool: "#f472b6", suggestion: "#2dd4bf", goal: "#f43f5e", modality: "#888",
+  project: "#ffc857", capability: "#6b8cae", candidate: "#8a9a64", product: "#c084fc", tool: "#7f8794", suggestion: "#2dd4bf", goal: "#f43f5e", modality: "#888",
   upgrade: "#fbbf24", // Keystone better_than recommendation — gold
 };
 const EDGE_COLOR: Record<string, string> = {
-  HAS_CAPABILITY: "rgba(94,176,239,0.18)", ADJACENT_TO: "rgba(120,120,140,0.14)", FILLS: "rgba(101,163,13,0.3)",
+  HAS_CAPABILITY: "rgba(107,140,174,0.18)", ADJACENT_TO: "rgba(120,120,140,0.14)", FILLS: "rgba(138,154,100,0.3)",
   EVALUATED: "rgba(217,119,6,0.35)", MEMBER_OF: "rgba(192,132,252,0.3)", RELATES_TO: "rgba(120,120,140,0.10)",
-  USES: "rgba(244,114,182,0.12)", SUGGESTED: "rgba(45,212,191,0.30)", GOAL_OF: "rgba(244,63,94,0.35)",
+  USES: "rgba(127,135,148,0.14)", SUGGESTED: "rgba(45,212,191,0.30)", GOAL_OF: "rgba(244,63,94,0.35)",
   BETTER_THAN: "rgba(251,191,36,0.55)", // Keystone upgrade — gold, stands out
 };
 const ALERT_COLOR: Record<string, string> = { security: "#ef4444", breaking: "#f97316", pricing: "#eab308" };
@@ -68,10 +75,18 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
   const camRef = useRef<{ x: number; y: number; scale: number } | null>(null);
   const orbitRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
   const posRef = useRef<Map<number, { x: number; y: number; z: number }>>(new Map());
-  // Deep-link focus (?node=tool:eslint): node id awaiting a camera-center,
-  // consumed by the draw loop once projection coordinates exist for it.
+  // Deep-link focus (?node=tool:eslint) AND click-to-center: node id the camera
+  // is gliding to center on, consumed frame-by-frame by the draw loop.
   const pendingCenterRef = useRef<number | null>(null);
   const focusedOnceRef = useRef(false);
+  // Auto-orbit freezes the moment the user interacts (click / drag / zoom) and
+  // resumes when they click off onto empty space. A ref so it survives effect
+  // re-inits (a server action's revalidate) without flipping state.
+  const orbitFrozenRef = useRef(false);
+  // Deselecting re-frames the cluster: a peripheral node stays centered after
+  // you click it, so on click-off we glide the camera back to the cluster
+  // center (world origin — the force layout's centering anchor).
+  const recenterRef = useRef(false);
 
   useEffect(() => {
     const _cv = canvasRef.current; if (!_cv) return;
@@ -95,7 +110,17 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
     });
     posRef.current = pos as unknown as Map<number, { x: number; y: number; z: number }>;
     const reinit = camRef.current != null; // had a prior camera → this is a re-init
-    const radius = (n: GNode) => (n.kind === "project" ? 7 : n.kind === "product" ? 8 : n.kind === "tool" ? 3.5 : n.waypoint ? 6 : 3) + Math.min(4, n.degree * 0.15);
+    const radius = (n: GNode) => {
+      // Projects/products scale with repo size (file count, log-scaled so a
+      // 2k-file repo doesn't dwarf a 20-file one). Unknown size → the old fixed
+      // base, so nothing shrinks before the loader has shape data.
+      if (n.kind === "project" || n.kind === "product") {
+        const base = n.kind === "product" ? 6 : 5;
+        const sizeBoost = n.size && n.size > 0 ? Math.min(12, 4 * Math.log10(n.size + 1)) : 2;
+        return base + sizeBoost + Math.min(3, n.degree * 0.1);
+      }
+      return (n.kind === "tool" ? 3.5 : n.waypoint ? 6 : 3) + Math.min(4, n.degree * 0.15);
+    };
 
     let cam = camRef.current ?? { x: 0, y: 0, scale: 0.9 };
     camRef.current = cam;
@@ -206,9 +231,9 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       } else if (!is3d) {
         for (const n of nodes) { const p = pos.get(n.id)!; p.z *= 0.9; }
       }
-      // Idle auto-orbit in 3D: a slow drift until the user grabs the camera —
-      // the "alive" feel for demos without hijacking interaction.
-      if (is3d && !userOrbited) yaw += 0.0018;
+      // Idle auto-orbit in 3D: a slow drift while unengaged. Freezes on any
+      // interaction, resumes when the user clicks off onto empty space.
+      if (is3d && !orbitFrozenRef.current) yaw += 0.0018;
       draw();
       raf = requestAnimationFrame(tick);
     }
@@ -217,16 +242,28 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       const r = cv.getBoundingClientRect();
       cx.clearRect(0, 0, r.width, r.height);
       projectAll();
-      // Deep-link camera center: once the focused node has projected
-      // coordinates, pan so it sits mid-canvas, then re-project this frame.
+      // Camera center (deep-link + click-to-center): glide the focused node to
+      // the middle of the *visible* area. When a node is selected the dossier
+      // panel covers the right ~372px, so aim at the centre of what's left.
       if (pendingCenterRef.current != null) {
         const fp = proj.get(pendingCenterRef.current);
         if (fp) {
-          cam.x += r.width / 2 - fp.sx;
-          cam.y += r.height / 2 - fp.sy;
-          pendingCenterRef.current = null;
+          const tx = (selRef.current != null ? r.width - 372 : r.width) / 2;
+          const dx = tx - fp.sx, dy = r.height / 2 - fp.sy;
+          cam.x += dx * 0.18; cam.y += dy * 0.18;
+          if (Math.abs(dx) < 1 && Math.abs(dy) < 1) pendingCenterRef.current = null;
           projectAll();
+        } else {
+          pendingCenterRef.current = null;
         }
+      } else if (recenterRef.current) {
+        // Glide the camera so world origin (the cluster center) returns to
+        // mid-canvas. Origin always projects to (cam.x, cam.y), so just ease
+        // the camera toward the canvas middle.
+        const dx = r.width / 2 - cam.x, dy = r.height / 2 - cam.y;
+        cam.x += dx * 0.12; cam.y += dy * 0.12;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) recenterRef.current = false;
+        projectAll();
       }
       const is3d = dim3Ref.current;
       const inMap = viewRef.current === "map";
@@ -294,7 +331,6 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
     }
 
     let dragging = false, lastX = 0, lastY = 0, moved = false;
-    let userOrbited = false;
     const hit = (mx: number, my: number): GNode | null => {
       // nearest-first in 3D so the front node wins overlapping hits
       const order = dim3Ref.current
@@ -310,8 +346,10 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       }
       return null;
     };
-    const onWheel = (ev: WheelEvent) => { ev.preventDefault(); const r = cv.getBoundingClientRect(); const mx = ev.clientX - r.left, my = ev.clientY - r.top; const f = ev.deltaY < 0 ? 1.1 : 0.9; const wx = (mx - cam.x) / cam.scale, wy = (my - cam.y) / cam.scale; cam.scale = Math.max(0.2, Math.min(5, cam.scale * f)); cam.x = mx - wx * cam.scale; cam.y = my - wy * cam.scale; };
-    const onDown = (ev: MouseEvent) => { dragging = true; moved = false; lastX = ev.clientX; lastY = ev.clientY; };
+    const onWheel = (ev: WheelEvent) => { ev.preventDefault(); orbitFrozenRef.current = true; pendingCenterRef.current = null; recenterRef.current = false; const r = cv.getBoundingClientRect(); const mx = ev.clientX - r.left, my = ev.clientY - r.top; const f = ev.deltaY < 0 ? 1.1 : 0.9; const wx = (mx - cam.x) / cam.scale, wy = (my - cam.y) / cam.scale; cam.scale = Math.max(0.2, Math.min(5, cam.scale * f)); cam.x = mx - wx * cam.scale; cam.y = my - wy * cam.scale; };
+    // Any mousedown counts as taking control: freeze the auto-orbit, and drop
+    // any in-flight center glide so a drag/pan isn't fought by the camera.
+    const onDown = (ev: MouseEvent) => { dragging = true; moved = false; lastX = ev.clientX; lastY = ev.clientY; orbitFrozenRef.current = true; pendingCenterRef.current = null; recenterRef.current = false; };
     const onMove = (ev: MouseEvent) => {
       const r = cv.getBoundingClientRect(); const mx = ev.clientX - r.left, my = ev.clientY - r.top;
       if (dragging) {
@@ -320,7 +358,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
         if (dim3Ref.current) {
           // 3D: dragging orbits the camera (shift-drag pans)
           if (ev.shiftKey) { cam.x += dx; cam.y += dy; }
-          else { yaw += dx * 0.005; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.005)); orbitRef.current = { yaw, pitch }; userOrbited = true; }
+          else { yaw += dx * 0.005; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.005)); orbitRef.current = { yaw, pitch }; }
         } else {
           cam.x += dx; cam.y += dy;
         }
@@ -332,8 +370,14 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       if (dragging && !moved) {
         const r = cv.getBoundingClientRect();
         const n = hit(ev.clientX - r.left, ev.clientY - r.top);
+        const hadSel = selRef.current != null;
         selRef.current = n?.id ?? null;
         setSelected(n);
+        // Click a node → center it and keep the orbit frozen (you're focused on
+        // it). Click empty space → deselect, resume the idle orbit, and (if a
+        // node was centered) glide back to re-frame the whole cluster.
+        if (n) { pendingCenterRef.current = n.id; recenterRef.current = false; }
+        else { pendingCenterRef.current = null; orbitFrozenRef.current = false; if (hadSel) recenterRef.current = true; }
       }
       dragging = false;
     };
@@ -423,7 +467,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", background: "var(--bg, #0a0a0a)", cursor: "grab" }} />
+      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", background: "radial-gradient(circle at 50% 54%, #0e1118 0%, #000 64%)", cursor: "grab" }} />
 
       {/* controls — one glass panel, collapsible */}
       <div style={{ position: "absolute", top: 12, left: 12, fontSize: 12, color: "#cfcfcf", maxWidth: 380 }}>
@@ -460,7 +504,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
               </div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)", color: "#b8b8b8" }}>
                 <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: `2px solid ${ALERT_COLOR.security}`, marginRight: 5 }} />alert</span>
-                <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px solid #5eb0ef", marginRight: 5 }} />blind spot</span>
+                <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px solid #6b8cae", marginRight: 5 }} />blind spot</span>
                 <span><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 7, background: "#22d3ee", marginRight: 5 }} />queued work</span>
                 <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 8, border: "1.5px dashed #888", marginRight: 5 }} />hover = links</span>
               </div>
@@ -600,7 +644,7 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
             </>
           )}
           <div style={{ color: "#666", marginTop: 12, fontSize: 12 }}>{selected.degree} connections{selected.theme ? ` · theme: ${selected.theme}` : ""}</div>
-          <button onClick={() => { selRef.current = null; setSelected(null); }} style={{ marginTop: 12, background: "none", border: "1px solid #444", color: "#aaa", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>close</button>
+          <button onClick={() => { selRef.current = null; setSelected(null); orbitFrozenRef.current = false; recenterRef.current = true; }} style={{ marginTop: 12, background: "none", border: "1px solid #444", color: "#aaa", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>close</button>
         </div>
       )}
     </div>

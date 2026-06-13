@@ -272,6 +272,8 @@ const TOOLS: Tool[] = [
         facetModality: { type: "string", description: "Data modality of the matched capability (e.g. 'timeseries', 'image'). Helps learn that a repo fits one modality but not another." },
         reasonCode: { type: "string", enum: ["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"], description: "Structured reason for the verdict. Use 'modality-collision' / 'task-collision' for word-collisions where the candidate's real domain diverges from the matched capability." },
         cosine: { type: "number", minimum: -1, maximum: 1, description: "Copy the candidate's `cosine` from the replen_match data. Pairs with your verdict so the relevance floor calibrates itself per project." },
+        depsConfirmed: { type: "array", items: { type: "string" }, description: "OPTIONAL write-back: dependencies you VERIFIED in the source are actually used (esp. any Replen didn't know about). Merged into the project's known deps so matching/upgrades reflect reality. Names only (e.g. ['viem'])." },
+        depsSuperseded: { type: "array", items: { type: "string" }, description: "OPTIONAL write-back: dependencies present but UNUSED or replaced (e.g. a stale 'ethers' once on viem). Marked migrate-off (reversible) so their release/pricing/upgrade noise stops. Names only." },
       },
       required: ["verdict"],
     },
@@ -291,6 +293,8 @@ const TOOLS: Tool[] = [
         facetModality: z.string().max(120).optional(),
         reasonCode: z.enum(["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"]).optional(),
         cosine: z.number().min(-1).max(1).optional(),
+        depsConfirmed: z.array(z.string()).max(20).optional(),
+        depsSuperseded: z.array(z.string()).max(20).optional(),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");
@@ -347,7 +351,10 @@ const TOOLS: Tool[] = [
       "modality:[\"timeseries\"]} is not. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
       "geospatial, graph, 3d, code, network (use [] if none apply). DERIVE all of it from the imports/deps and code, not " +
       "guesses. The server merges in dependency-derived capabilities and builds the facet vectors right away. " +
-      "Replaces the project's current capability set.",
+      "Default (mode='replace') sets the project's full capability set — use during onboarding. " +
+      "During TRIAGE, use mode='merge' to ADD or augment a single capability (e.g. attach the file `paths` you " +
+      "just confirmed implement the matched capability) WITHOUT wiping the rest — this is how 'port this exact file' " +
+      "becomes possible in later sessions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -356,6 +363,7 @@ const TOOLS: Tool[] = [
         report: { type: "string", description: "OPTIONAL grounded project report — your comprehensive code-read write-up (what it does, tech, algos, how/why, architecture, for whom). The richest grounding; stored and weighted highest in Replen's own summarization. Derive it from reading the actual source." },
         purpose: { type: "string", description: "OPTIONAL but HIGH-VALUE: the project's THESIS in 1-2 sentences — what it's trying to BE and what makes it distinct, NOT just what it technically does. This is the mission a candidate should advance, and the relevance test the triage agent judges against ('does this serve a contested-airspace decision-support platform?' beats 'does this do OSINT?'). Ground it in the code AND any goals.md / handover.md / ROADMAP.md / PRD the user keeps. Respect the cover — intent, never sensitive operational detail." },
         goals: { type: "array", items: { type: "string" }, description: "OPTIONAL: where the project is HEADING — a few outcome goals / planned directions (e.g. 'real-time multi-sensor fusion', 'sub-second COA ranking'). Lets Replen surface tools that advance what's NEXT, not just what exists. From the code + roadmap/goals docs." },
+        mode: { type: "string", enum: ["replace", "merge"], description: "'replace' (default): set the full capability set (onboarding). 'merge': additively add/augment the given capabilities (e.g. attach `paths` to one capability discovered during triage) without dropping existing ones." },
         capabilities: {
           type: "array",
           description: "Capabilities — PREFER grounded objects {tag, descriptor, modality}; bare strings also accepted.",
@@ -394,6 +402,7 @@ const TOOLS: Tool[] = [
             paths: z.array(z.string()).max(5).optional(),
           }),
         ])).max(40),
+        mode: z.enum(["replace", "merge"]).optional(),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");

@@ -53,6 +53,12 @@ export async function suggestUpgrades(usedSolutionNames: string[]): Promise<Keys
   for (const e of edges) {
     const better = byId.get(e.fromId); const current = byId.get(e.toId);
     if (!better || !current) continue;
+    // Already-present guard: if the recommended target is ITSELF among the
+    // user's solutions (e.g. they already depend on viem alongside a stale
+    // ethers), the swap is effectively done — don't suggest migrating to
+    // something they're already on. Mirrors the "own dep suggested back" guard
+    // the candidate path already has.
+    if (wanted.has(better.normName)) continue;
     let attrs: { task?: string; margin?: number; source?: string } = {};
     try { attrs = e.attributes ? JSON.parse(e.attributes) : {}; } catch { /* */ }
     out.push({ current: current.name, better: better.name, betterKind: kindById.get(e.fromId) ?? "solution", task: attrs.task ?? "general", margin: attrs.margin ?? null, source: attrs.source ?? null });

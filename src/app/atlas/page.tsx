@@ -47,6 +47,7 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
       alertCount: o?.alerts?.length ?? 0,
       blindspot: !!o?.blindspot,
       queued: o?.queued ?? 0,
+      size: null, // filled below for project/product from repo file counts
     };
   });
   const edges: GEdge[] = rawEdges.map((e) => ({ kind: e.kind, src: e.srcId, dst: e.dstId, weight: e.weight }));
@@ -62,7 +63,7 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
     let synth = -1;
     const mkNode = (kind: string, label: string): number => {
       const id = synth--;
-      nodes.push({ id, kind, nodeKey: label, label, theme: null, waypoint: false, provenance: null, stars: null, degree: 0, alertKind: null, alertCount: 0, blindspot: false, queued: 0 });
+      nodes.push({ id, kind, nodeKey: label, label, theme: null, waypoint: false, provenance: null, stars: null, degree: 0, alertKind: null, alertCount: 0, blindspot: false, queued: 0, size: null });
       return id;
     };
     // Existing graph nodes that can carry an upgrade (tools + facet capabilities).
@@ -73,16 +74,32 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
     // node that has it (so a synthetic capability node can attach to its project).
     const projNodeId = new Map<string, number>();
     for (const n of nodes.filter((n) => n.kind === "project")) projNodeId.set(n.nodeKey, n.id);
-    const profs = await db.select({ slug: schema.projectProfiles.slug, summary: schema.projectProfiles.summaryJson })
+    const profs = await db.select({ slug: schema.projectProfiles.slug, summary: schema.projectProfiles.summaryJson, shape: schema.projectProfiles.shapeJson })
       .from(schema.projectProfiles).where(eq(schema.projectProfiles.userId, user.id));
     const tagToProject = new Map<string, string>();
     const allTags = new Set<string>();
+    const fileCountBySlug = new Map<string, number>(); // repo size proxy → node radius
     for (const pr of profs) {
+      if (pr.shape) {
+        try { const ft = (JSON.parse(pr.shape) as { fileTree?: string[] }).fileTree;
+          if (Array.isArray(ft) && ft.length > 0) fileCountBySlug.set(pr.slug, ft.length); } catch { /* */ }
+      }
       if (!pr.summary) continue;
       try { const tags = (JSON.parse(pr.summary) as { capabilityTags?: string[] }).capabilityTags ?? [];
         for (const t of tags) { if (typeof t === "string") { allTags.add(t); if (!tagToProject.has(norm(t))) tagToProject.set(norm(t), pr.slug); } }
       } catch { /* */ }
     }
+    // Size project nodes by their file count; size product nodes by the sum of
+    // their member projects' file counts (a product groups projects via
+    // MEMBER_OF). Leaves size null where the loader has no shape data yet.
+    for (const n of nodes) if (n.kind === "project") n.size = fileCountBySlug.get(n.nodeKey) ?? null;
+    const slugByNodeId = new Map(nodes.filter((n) => n.kind === "project").map((n) => [n.id, n.nodeKey]));
+    const productSize = new Map<number, number>();
+    for (const e of edges) if (e.kind === "MEMBER_OF") {
+      const slug = slugByNodeId.get(e.src); const fc = slug ? fileCountBySlug.get(slug) : undefined;
+      if (fc) productSize.set(e.dst, (productSize.get(e.dst) ?? 0) + fc);
+    }
+    for (const n of nodes) if (n.kind === "product") n.size = productSize.get(n.id) ?? null;
 
     const probeNames = [...idByName.keys(), ...allTags];
     const ups = await suggestUpgrades(probeNames);

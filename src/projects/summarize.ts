@@ -414,7 +414,9 @@ export function reconcileCapabilities(tags: string[], specs: CapabilitySpec[]): 
     seen.add(k);
     const s = byTag.get(k);
     if (s) {
-      out.push({ tag, descriptor: s.descriptor, modality: s.modality.length ? s.modality : inferCapabilityModality(tag, s.descriptor), provenance: s.provenance ?? (s.descriptor ? "grounded" : "inferred") });
+      // Preserve `paths` (the evidence anchors) — dropping them here is what
+      // left every facet (and so recall) path-less even when onboarding sent them.
+      out.push({ tag, descriptor: s.descriptor, modality: s.modality.length ? s.modality : inferCapabilityModality(tag, s.descriptor), provenance: s.provenance ?? (s.descriptor ? "grounded" : "inferred"), paths: s.paths });
     } else {
       // No spec for this tag = it came from the deterministic dep→capability table.
       out.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "extracted" });

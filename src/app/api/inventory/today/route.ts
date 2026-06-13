@@ -1531,7 +1531,20 @@ export async function GET(req: Request) {
       if (scopedProject?.summaryJson) {
         try { const s = JSON.parse(scopedProject.summaryJson) as { capabilityTags?: string[] }; capTags = Array.isArray(s.capabilityTags) ? s.capabilityTags.filter((t): t is string => typeof t === "string") : []; } catch { /* */ }
       }
-      const upgradeProbe = scopedProject ? [...productDeps, ...projectFacets.map((f) => f.label), ...capTags] : [];
+      // Keystone upgrades are a PER-REPO judgment: probe only THIS repo's own
+      // deps + facets + capability tags, never the product-wide union. An
+      // algorithm/library that lives in one sibling (a-star in the routing repo)
+      // must not fire its upgrade on every product member (the log parser, the
+      // telemetry collector, the marketing site) — that was the loudest noise
+      // source. productDeps/projectFacets stay product-wide for candidate
+      // matching; the upgrade probe is deliberately narrower.
+      const scopedDepProbe = scopedProject
+        ? new Set<string>([...parseTechSummaryDeps(scopedProject.techSummary ?? null), ...parseDepVersionNames(scopedProject.depVersions ?? null)])
+        : new Set<string>();
+      const scopedFacetLabels = projectFacets
+        .filter((f) => { const r = (f as { repo?: string }).repo; return !r || r === scopedProject?.slug; })
+        .map((f) => f.label);
+      const upgradeProbe = scopedProject ? [...scopedDepProbe, ...scopedFacetLabels, ...capTags] : [];
       keystoneUpgrades = upgradeProbe.length > 0 ? await suggestUpgrades(upgradeProbe).catch(() => []) : [];
       let keystoneUp: typeof keystoneUpgrades[number] | null = null;
       if (keystoneUpgrades.length > 0 && scopedProjectId) {

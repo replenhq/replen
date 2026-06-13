@@ -21,7 +21,7 @@ import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "
 //
 // Project resolution is owner-tolerant (exact github_full_name, then repo name).
 
-type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown };
+type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown; mode?: unknown };
 
 // Cap the stored report so a runaway agent can't write megabytes.
 const MAX_REPORT_CHARS = 24_000;
@@ -98,13 +98,45 @@ export async function POST(req: Request) {
     );
   }
 
+  // mode=merge (triage write-back): start from the project's EXISTING grounded
+  // capabilities and add/augment, so a partial call (e.g. one capability + its
+  // file paths discovered during triage) never wipes the rest. Paths from the
+  // incoming specs are unioned onto matching tags; new tags are appended.
+  // mode=replace (default, onboarding's full set): unchanged.
+  const mode = body.mode === "merge" ? "merge" : "replace";
+  let baseTags = agentTags;
+  let baseSpecs = agentSpecs;
+  if (mode === "merge") {
+    let prev: ProjectSummary | null = null;
+    try { prev = project.summaryJson ? (JSON.parse(project.summaryJson) as ProjectSummary) : null; } catch { prev = null; }
+    const prevTags = Array.isArray(prev?.capabilityTags) ? prev!.capabilityTags.filter((t): t is string => typeof t === "string") : [];
+    const prevSpecs = Array.isArray(prev?.capabilities) ? (prev!.capabilities as CapabilitySpec[]) : [];
+    const normTag = (t: string) => t.trim().toLowerCase();
+    const byTag = new Map<string, CapabilitySpec>();
+    for (const s of prevSpecs) if (s?.tag) byTag.set(normTag(s.tag), { ...s });
+    for (const s of agentSpecs) {
+      const k = normTag(s.tag); const ex = byTag.get(k);
+      if (!ex) { byTag.set(k, s); continue; }
+      const paths = Array.from(new Set([...(ex.paths ?? []), ...(s.paths ?? [])])).slice(0, 5);
+      byTag.set(k, {
+        tag: ex.tag,
+        descriptor: ex.descriptor || s.descriptor,
+        modality: ex.modality?.length ? ex.modality : s.modality,
+        provenance: "grounded",
+        paths: paths.length ? paths : undefined,
+      });
+    }
+    baseSpecs = [...byTag.values()];
+    baseTags = Array.from(new Set([...prevTags, ...agentTags]));
+  }
+
   // Merge agent capabilities with the deterministic dep→capability tags, then
   // reconcile grounded specs so every final tag has a descriptor + modality.
-  const merged = mergeCapabilityTags(agentTags, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)));
+  const merged = mergeCapabilityTags(baseTags, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)));
   if (merged.length === 0) {
     return NextResponse.json({ error: "no usable capabilities after cleaning" }, { status: 400, headers: corsHeaders });
   }
-  const mergedSpecs = reconcileCapabilities(merged, agentSpecs);
+  const mergedSpecs = reconcileCapabilities(merged, baseSpecs);
 
   // Store capabilities on the project's summary (preserve an existing summary's
   // other fields; create a minimal one for a fresh project). Marking it fresh

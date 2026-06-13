@@ -239,6 +239,28 @@ A triage that isn't recorded never happened.
 Only the user-judgment actions (star / hide / handoff / queue work) wait
 for the user. Verdicts never do.
 
+#### 3e. Write back what you LEARNED from the code — not just the verdict
+
+Triage is the one moment you actually read the source, so feed what you
+learned back into Replen's model of the project (it's non-destructive and
+makes every future match sharper). Two cheap write-backs, both optional,
+both additive:
+
+- **Capability paths.** When you confirm which file(s) implement the
+  capability a candidate matched — especially if the candidate's
+  `matchedFacet` has no paths yet — call `replen_set_capabilities` with
+  **`mode:"merge"`** and just that one capability:
+  `{ tag: "<matchedFacet>", paths: ["src/…", "lib/…"] }`. Merge mode adds
+  the paths without touching the project's other capabilities. This is what
+  makes "port THIS exact file" possible in later sessions and populates the
+  Atlas dossier + cross-project leaps. Paths only, never code.
+- **Dep corrections.** When the code shows a listed dependency is unused or
+  superseded (e.g. a stale `ethers` in a repo that's actually on `viem`),
+  pass `depsSuperseded: ["ethers"]` on the `replen_record_triage` call —
+  it's marked migrate-off (reversible) so its release/pricing/upgrade noise
+  stops. Pass `depsConfirmed: [...]` for deps you verified are genuinely
+  used that Replen didn't already know. Names only.
+
 No marketing voice. No hype. The user is a working engineer; talk to
 them like a peer. Concrete > clever.
 

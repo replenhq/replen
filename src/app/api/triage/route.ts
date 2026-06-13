@@ -47,6 +47,13 @@ type TriageBody = {
   // The cosine the candidate surfaced at (from replen_match data) — pairs with
   // the verdict to calibrate the relevance floor per project.
   cosine?: number;
+  // Triage → model write-back (Fix #3 slice 1): the agent read the source, so it
+  // can correct the dependency model. depsConfirmed = deps it verified are
+  // actually used (merged into the project's depVersions); depsSuperseded = deps
+  // present but unused / replaced (marked migrate-off so their release/pricing/
+  // upgrade noise stops). Both additive + reversible; never delete a dep.
+  depsConfirmed?: string[];
+  depsSuperseded?: string[];
 };
 
 const VALID_VERDICTS = ["adopt", "port", "skip", "defer"] as const;
@@ -173,8 +180,36 @@ export async function POST(req: Request) {
     console.warn(`[triage] repo_quality recompute failed for repo ${repoId}:`, e);
   }
 
+  // ── Dep write-back (slice 1) — best-effort; the verdict is already durable. ──
+  const cleanDeps = (v: unknown): string[] =>
+    Array.isArray(v) ? Array.from(new Set(v.filter((d): d is string => typeof d === "string").map((d) => d.trim().toLowerCase()).filter(Boolean))).slice(0, 20) : [];
+  const depsConfirmed = cleanDeps(body.depsConfirmed);
+  const depsSuperseded = cleanDeps(body.depsSuperseded);
+  // depsConfirmed → merge into the project's depVersions (never overwrite a known
+  // version, never remove). Only when a project is in scope.
+  if (depsConfirmed.length > 0 && projectId != null) {
+    try {
+      const proj = await db.select({ dv: schema.projectProfiles.depVersions }).from(schema.projectProfiles)
+        .where(and(eq(schema.projectProfiles.id, projectId), eq(schema.projectProfiles.userId, auth.userId))).get();
+      let map: Record<string, string> = {};
+      try { map = proj?.dv ? (JSON.parse(proj.dv) as Record<string, string>) : {}; } catch { map = {}; }
+      let changed = false;
+      for (const d of depsConfirmed) if (!(d in map)) { map[d] = "unknown"; changed = true; }
+      if (changed) await db.update(schema.projectProfiles).set({ depVersions: JSON.stringify(map), updatedAt: new Date() })
+        .where(eq(schema.projectProfiles.id, projectId));
+    } catch (e) { console.warn(`[triage] depsConfirmed merge failed for project ${projectId}:`, e); }
+  }
+  // depsSuperseded → mark migrate-off (reversible; mutes release/pricing/upgrade
+  // noise on a dep the agent found unused or replaced).
+  for (const tool of depsSuperseded) {
+    try {
+      await db.insert(schema.toolPrefs).values({ userId: auth.userId, tool, migrateOff: true, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: [schema.toolPrefs.userId, schema.toolPrefs.tool], set: { migrateOff: true, updatedAt: new Date() } });
+    } catch (e) { console.warn(`[triage] depsSuperseded migrate-off failed for ${tool}:`, e); }
+  }
+
   return NextResponse.json(
-    { ok: true, eventId: inserted?.id, repoId, projectId, verdict: body.verdict },
+    { ok: true, eventId: inserted?.id, repoId, projectId, verdict: body.verdict, depsConfirmed: depsConfirmed.length, depsSuperseded: depsSuperseded.length },
     { headers: corsHeaders },
   );
 }
