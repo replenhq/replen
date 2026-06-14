@@ -66,6 +66,29 @@ export async function suggestUpgrades(usedSolutionNames: string[]): Promise<Keys
   return out;
 }
 
+// Capabilities the user already COVERS — any Keystone capability that one of
+// their existing solutions (deps) `fills`. A NEW candidate matching such a
+// capability is likely "covered" (the largest false-positive bucket in the triage
+// eval: high-cosine repos skipped because a solution is already in place) and
+// should be down-ranked / kept off the headline. Reach grows with Keystone's
+// `fills` edges (workstream B) — dormant when those are sparse, never wrong.
+export async function coveredCapabilities(usedSolutionNames: string[]): Promise<Set<string>> {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const wanted = new Set(usedSolutionNames.map(norm).filter(Boolean));
+  if (wanted.size === 0) return new Set();
+  const sols = await db.select({ id: schema.keystoneSolutions.id, normName: schema.keystoneSolutions.normName }).from(schema.keystoneSolutions);
+  const myIds = sols.filter((s) => wanted.has(s.normName)).map((s) => s.id);
+  if (myIds.length === 0) return new Set();
+  const fills = await db.select({ toId: schema.keystoneEdges.toId }).from(schema.keystoneEdges)
+    .where(and(eq(schema.keystoneEdges.kind, "fills"), eq(schema.keystoneEdges.fromKind, "solution"), inArray(schema.keystoneEdges.fromId, myIds)));
+  if (fills.length === 0) return new Set();
+  const capIds = new Set(fills.map((f) => f.toId));
+  const caps = await db.select({ id: schema.keystoneCapabilities.id, normLabel: schema.keystoneCapabilities.normLabel }).from(schema.keystoneCapabilities);
+  // Re-normalize with THIS function so the caller can match a raw facet label
+  // through the same norm, regardless of how the seeder stored normLabel.
+  return new Set(caps.filter((c) => capIds.has(c.id)).map((c) => norm(c.normLabel)));
+}
+
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings } from "./embeddings";
 
 export type PracticeTransfer = {

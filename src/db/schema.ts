@@ -1447,3 +1447,33 @@ export const keystoneSurfaces = sqliteTable(
   },
   (t) => ({ uniqUserProjectUpgrade: uniqueIndex("uniq_keystone_surface").on(t.userId, t.projectId, t.upgradeKey) }),
 );
+
+// Per-candidate FEATURE LOG at match time (#5). Every candidate surfaced by
+// replen_match writes one row with the features that fed its rank. Joined to
+// triage_events later (by full_name + user/project) it yields (features →
+// verdict) training rows — the prerequisite for a true full-rank eval replay AND
+// for training the learned ranker (workstream A). Append-only; no user code.
+export const matchFeatures = sqliteTable(
+  "match_features",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectId: integer("project_id").references(() => projectProfiles.id, { onDelete: "set null" }),
+    fullName: text("full_name").notNull(),       // candidate owner/name, lowercased — join key to repos/triage
+    surfacedAt: integer("surfaced_at", { mode: "timestamp" }).notNull(),
+    // features that fed the rank (the learned ranker's inputs)
+    cosine: real("cosine"),
+    matchedFacet: text("matched_facet"),
+    facetModality: text("facet_modality"),
+    matchedProvenance: text("matched_provenance"),
+    source: text("source"),
+    repoShape: text("repo_shape"),
+    stars: integer("stars"),
+    language: text("language"),
+    depMatch: integer("dep_match", { mode: "boolean" }).notNull().default(false),
+    covered: integer("covered", { mode: "boolean" }).notNull().default(false),
+    position: integer("position").notNull(),     // 0 = top of candidatesOut
+    headlined: integer("headlined", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({ byUserName: index("idx_match_features_user_name").on(t.userId, t.fullName) }),
+);

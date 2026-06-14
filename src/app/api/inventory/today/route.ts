@@ -13,7 +13,7 @@ import { findSimilarProjectPromotions } from "@/lib/cross-user-promote";
 import { parseDepVersionNames, parseTechSummaryDeps, vendorForDep } from "@/fetchers/stack-watch/registry";
 import { clientUpgradeNudge, withUpgradeNudge } from "@/lib/client-version";
 import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFacetLabel } from "@/lib/triage-memory";
-import { suggestUpgrades, suggestPracticeTransfer } from "@/lib/keystone";
+import { suggestUpgrades, suggestPracticeTransfer, coveredCapabilities } from "@/lib/keystone";
 import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
 import { announcementPs } from "@/announcements/surface";
@@ -590,6 +590,12 @@ export async function GET(req: Request) {
   // (where the footnote fires); zero-knowledge mode and the explicit global
   // firehose (repo='') opt out — there the user has asked to see everything.
   const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.48")));
+  // Headline confidence margin: a candidate clears the inventory FLOOR (so it's
+  // worth keeping for opt-in triage) at projectFloor, but it only earns the
+  // unsolicited "by the way" WOW line if it beats the floor by this margin. Keeps
+  // the footnote trustworthy ("silence beats a weak match") without hiding the
+  // data. Tunable post-deploy.
+  const HEADLINE_MARGIN = Math.max(0, parseFloat(process.env.REPLEN_HEADLINE_MARGIN ?? "0.06"));
   const applyFloor = !!scopedProject && filterMode !== "zero-knowledge";
   // Calibrated floor: once a project has enough (cosine, verdict) pairs, the
   // floor moves to just under where its adoptions actually happen. Only ever
@@ -601,6 +607,16 @@ export async function GET(req: Request) {
   // to lead a surfaced match. Grounded/extracted facets pay nothing.
   const INFERRED_PREMIUM = Math.max(0, parseFloat(process.env.REPLEN_INFERRED_FACET_PREMIUM ?? "0.07"));
   const needsProvenancePremium = (p: Provenance | null | undefined) => p === "inferred" || p === "ambiguous";
+
+  // "Covered" down-rank (#1 — the largest false-positive bucket in the triage
+  // eval: high-cosine candidates skipped because a solution is already in place).
+  // A candidate whose matched capability is already FILLED by one of the user's
+  // deps (via Keystone) is redundant — penalise it. Reach grows with Keystone's
+  // `fills` edges (workstream B); harmless (empty set) when sparse.
+  const coveredCaps = applyFloor ? await coveredCapabilities([...productDeps]).catch(() => new Set<string>()) : new Set<string>();
+  const COVERED_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_COVERED_PENALTY ?? "0.08"));
+  const normForCover = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const isCovered = (facet: string | null | undefined) => !!facet && coveredCaps.size > 0 && coveredCaps.has(normForCover(facet));
 
   // ── Per-facet calibration + specificity (research: matching-precision §1–2) ──
   // Cosine is NOT comparable across facets: a generic facet ("optimization")
@@ -824,6 +840,7 @@ export async function GET(req: Request) {
     let rank = cosine ?? -1;
     rank += tasteBoost(candVec, taste);
     rank += priorBoost(outcomePriors.source, sourcePrefix(c.source));
+    if (isCovered(matchedFacet)) rank -= COVERED_PENALTY; // already filled by a dep
     if (matchedFacet) {
       rank += priorBoost(outcomePriors.facet, matchedFacet);
       const nf = normFacetLabel(matchedFacet);
@@ -1165,6 +1182,7 @@ export async function GET(req: Request) {
       const pushed = catalogueOut[catalogueOut.length - 1];
       if (isCopyleft(m.license)) pushed.whyShortlisted += copyleftNote;
       let cRank = m.cosine + (m.tasteAdj ?? 0) + priorBoost(outcomePriors.source, "catalogue");
+      if (isCovered(m.matchedFacet)) cRank -= COVERED_PENALTY; // already filled by a dep
       if (m.matchedFacet) {
         cRank += priorBoost(outcomePriors.facet, m.matchedFacet);
         const nf = normFacetLabel(m.matchedFacet);
@@ -1409,7 +1427,27 @@ export async function GET(req: Request) {
   // MESSAGE block in its tool response, with the tool description
   // instructing the agent to relay it verbatim.
   let displayText: string | null = null;
-  if (candidatesOut.length > 0 && scopedProject) {
+  // Headline confidence gate (#1 — "silence beats a weak match"). Only let a
+  // candidate become the unsolicited footnote when it's genuinely worth the
+  // interruption. The candidate DATA below is still returned for opt-in triage —
+  // we're gating the WOW line, not hiding results. When this suppresses the
+  // headline, the quiet-day leap path below takes over (#2 — a high-confidence
+  // cross-project leap beats a weak candidate). Rules: dependency/spec/security
+  // matches and deliberate re-checks always qualify (high-signal regardless of
+  // cosine); exploratory adjacency NEVER headlines (it's speculative — this was
+  // the Turing.jl-on-a-CV-repo false positive); a facet match must clear the
+  // floor by HEADLINE_MARGIN, a bare-semantic match by 2× (it's the weakest fit).
+  const headlineTop = candidatesOut[0];
+  const headlineWorthy = !!(headlineTop && scopedProject && (
+    headlineTop.dependencyMatch === true ||
+    headlineTop.source === "re-checked" ||
+    (headlineTop.source !== "catalogue-adjacent" && (
+      headlineTop.matchedFacet
+        ? (headlineTop.cosine ?? 0) >= projectFloor + HEADLINE_MARGIN
+        : (headlineTop.cosine ?? 0) >= projectFloor + 2 * HEADLINE_MARGIN
+    ))
+  ));
+  if (headlineWorthy) {
     const top = candidatesOut[0];
     if (top.dependencyMatch) {
       // Pattern A/B lead: a vendor the project depends on shipped, or a
@@ -1448,6 +1486,35 @@ export async function GET(req: Request) {
       const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
       displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
     }
+  }
+
+  // Feature log (#5): one row per surfaced candidate, capturing the features that
+  // fed its rank + whether it headlined. Joined to triage_events later (by
+  // full_name + user/project) it yields (features → verdict) training rows — the
+  // prerequisite for a true full-rank eval replay and for the learned ranker (A).
+  // Best-effort, never blocks the response; only on the scoped-project path.
+  if (candidatesOut.length > 0 && scopedProject) {
+    try {
+      const now = new Date();
+      await db.insert(schema.matchFeatures).values(candidatesOut.map((c, i) => ({
+        userId: auth.userId,
+        projectId: scopedProjectId ?? null,
+        fullName: c.repo.toLowerCase(),
+        surfacedAt: now,
+        cosine: typeof c.cosine === "number" ? c.cosine : null,
+        matchedFacet: c.matchedFacet ?? null,
+        facetModality: null,
+        matchedProvenance: c.matchedProvenance ?? null,
+        source: c.source ?? null,
+        repoShape: c.repoShape ?? null,
+        stars: typeof c.stars === "number" ? c.stars : null,
+        language: c.language ?? null,
+        depMatch: !!c.dependencyMatch,
+        covered: isCovered(c.matchedFacet),
+        position: i,
+        headlined: i === 0 && headlineWorthy,
+      })));
+    } catch (e) { console.warn("[inventory] match-feature log failed (non-fatal):", e); }
   }
 
   // Quiet-day leap. When the inventory has NOTHING for this repo, occasionally

@@ -29,6 +29,15 @@ import { installSkills } from "./skill-install.js";
 
 const SERVER_NAME = "replen";
 
+// Launch the MCP via a SEMVER RANGE, not a tag-less spec. Bare `npx @replen/mcp`
+// resolves once and reuses the cached build forever, so users silently run stale
+// builds and miss new tools (the paths/mode regression came from exactly this).
+// `@^1` makes npx re-resolve the newest 1.x on every session spawn — auto-updates
+// minors/patches, never jumps a breaking major — so a fresh agent session = latest
+// features with no manual `@latest` step to remember. Each setup run REWRITES this
+// entry, so returning users are migrated off the old tag-less spec automatically.
+const MCP_PKG = "@replen/mcp@^1";
+
 const CLAUDE_CONFIG = join(homedir(), ".claude.json");
 const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
@@ -118,7 +127,7 @@ function setupClaude(token: string, base: string): HostSetupResult {
     mcpServers[SERVER_NAME] = {
       type: "stdio",
       command: "npx",
-      args: ["-y", "@replen/mcp"],
+      args: ["-y", MCP_PKG],
       env: { DIGEST_BASE_URL: base, DIGEST_TOKEN: token },
     };
 
@@ -171,7 +180,7 @@ function setupGemini(token: string, base: string): HostSetupResult {
     // docs/tools/mcp-server.md): command, args, env. No `type` field.
     mcpServers[SERVER_NAME] = {
       command: "npx",
-      args: ["-y", "@replen/mcp"],
+      args: ["-y", MCP_PKG],
       env: { DIGEST_BASE_URL: base, DIGEST_TOKEN: token },
     };
 
@@ -195,7 +204,7 @@ function setupCodex(token: string, base: string): HostSetupResult {
     // handles automatically for small objects.
     mcpServers[SERVER_NAME] = {
       command: "npx",
-      args: ["-y", "@replen/mcp"],
+      args: ["-y", MCP_PKG],
       env: { DIGEST_BASE_URL: base, DIGEST_TOKEN: token },
     };
 
