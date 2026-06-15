@@ -29,14 +29,28 @@ import { installSkills } from "./skill-install.js";
 
 const SERVER_NAME = "replen";
 
-// Launch the MCP via a SEMVER RANGE, not a tag-less spec. Bare `npx @replen/mcp`
-// resolves once and reuses the cached build forever, so users silently run stale
-// builds and miss new tools (the paths/mode regression came from exactly this).
-// `@^1` makes npx re-resolve the newest 1.x on every session spawn — auto-updates
-// minors/patches, never jumps a breaking major — so a fresh agent session = latest
-// features with no manual `@latest` step to remember. Each setup run REWRITES this
-// entry, so returning users are migrated off the old tag-less spec automatically.
-const MCP_PKG = "@replen/mcp@^1";
+// Launch the MCP via an EXACT pinned version, resolved from the npm registry at
+// setup time — mirrors how the SessionStart hook pins replen@<version>. We used
+// `@^1` for "auto-update each session", but npx caches per-spec and happily
+// reuses a stale `@^1` resolution even after `npx @latest` — so the auto-update
+// was illusory AND users got spurious "newer Replen available" nudges right after
+// updating (the server sees the still-stale client version). Pinning the exact
+// version makes each release a distinct, correctly-cached npx entry; re-running
+// `npx replen mcp setup` re-resolves + re-pins to ship an update. Falls back to
+// the `@^1` range only if the registry is unreachable at setup time.
+let MCP_PKG = "@replen/mcp@^1";
+
+// Resolve the exact latest @replen/mcp version to pin (fail-open to the range).
+async function resolveMcpPkg(): Promise<string> {
+  try {
+    const res = await fetch("https://registry.npmjs.org/@replen/mcp/latest", { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const j = (await res.json()) as { version?: string };
+      if (typeof j.version === "string" && j.version) return `@replen/mcp@${j.version}`;
+    }
+  } catch { /* registry unreachable — keep the range fallback */ }
+  return "@replen/mcp@^1";
+}
 
 const CLAUDE_CONFIG = join(homedir(), ".claude.json");
 const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
@@ -67,6 +81,11 @@ const REPLEN_AUTO_ALLOW = [
 
 export async function setupMcp(token: string, base: string): Promise<void> {
   console.log(`  Wiring replen MCP into agent configs…`);
+
+  // Pin the exact latest MCP version (deterministic; avoids npx serving a stale
+  // `@^1` build and the spurious upgrade nudge that follows).
+  MCP_PKG = await resolveMcpPkg();
+  console.log(`  MCP version pinned to ${MCP_PKG}`);
 
   const results: HostSetupResult[] = [];
   results.push(setupClaude(token, base));

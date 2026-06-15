@@ -488,6 +488,39 @@ export const triageEvents = sqliteTable(
   })
 );
 
+// Portfolio insight captures from the multi-vector triage (Passes 3-4): a
+// transferable idea/premise/way-of-working ('lesson') or a sharpened boundary
+// ('boundary') extracted from a candidate — recorded EVEN WHEN the candidate is
+// a direct-use skip (the Graphify→Atlas lane). Distinct from triage_events (a
+// per-candidate use-verdict): an insight is a PORTFOLIO decision, not a fitness
+// call. The graph build reads these into 'lesson'/'boundary' nodes with a `via`
+// provenance edge; Atlas renders them as tiles. Recorded by the /replen skill
+// via the replen_capture_insight MCP tool. High bar — only decision-changing,
+// Graphify-grade insights, never "vaguely interesting".
+export const triageInsights = sqliteTable(
+  "triage_insights",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    // 'lesson' (transferable idea/premise/way-of-working) |
+    // 'boundary' (something we're now explicitly NOT, sharpened by seeing this).
+    kind: text("kind").notNull(),
+    // The insight itself — one or two sentences, the user-legible takeaway.
+    text: text("text").notNull(),
+    // The candidate that prompted it (the `via` of the provenance path).
+    // Nullable + set-null so the insight outlives the repo row.
+    viaCandidateRepoId: integer("via_candidate_repo_id").references(() => repos.id, { onDelete: "set null" }),
+    // The project this insight could touch / influenced (e.g. Graphify→Atlas).
+    // Nullable: an insight can be portfolio-wide.
+    appliesToProjectId: integer("applies_to_project_id").references(() => projectProfiles.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxUserCreated: index("idx_triage_insights_user_created").on(t.userId, t.createdAt),
+    idxUserKind: index("idx_triage_insights_user_kind").on(t.userId, t.kind),
+  })
+);
+
 // Cross-user, cross-tenant quality aggregate for a candidate repo. One row
 // per repo, materialised from triage_events across ALL users (each user
 // counted ONCE by their LATEST verdict on the repo, so a single user

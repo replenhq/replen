@@ -5,7 +5,7 @@ import { recall } from "@/graph/recall";
 // Atlas §2 — Recall. In-session memory across the user's whole portfolio + their
 // decision history. POST { query, verdict?, limit? }
 
-const VALID_VERDICTS = new Set(["adopt", "port", "skip", "defer"]);
+const VALID_VERDICTS = new Set(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"]);
 
 export async function POST(req: Request) {
   const auth = await authenticate(req);

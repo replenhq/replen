@@ -5,14 +5,11 @@ description: Review Replen's suggestions for the current repo against your code.
 
 # Replen Match — in-session candidate triage
 
-You are running **Brainstem**'s matching loop locally. **Watchtower** — Replen's
-maintained network of ~1,250 sources (vendor changelogs, advisories, pricing
-pages, release feeds, standards trackers, EOL calendars) — fetched the raw
-events; **Brainstem** scored them against this codebase's capabilities; you've
-got the user's codebase open and make the final call. Verdicts you record land
-in **Atlas** and tune Brainstem's ranking for every future session.
-Your job is to decide which (if any) are worth their attention, write up the
-strong ones, and capture what they want to do about them.
+You are running the matching loop locally. Replen has fetched a list of
+plausible OSS candidates from the wider ecosystem; you've got the user's
+codebase open. Your job is to decide which (if any) are worth their
+attention, write up the strong ones, and capture what they want to do
+about them.
 
 **This runs entirely on the user's subscription tokens.** No API keys
 get used. Replen's hosted side did the cheap structural filtering; you
@@ -43,85 +40,7 @@ Parse the JSON response. Note:
 
 - `filterMode` — `tags`, `zero-knowledge`, or `fingerprint`
 - `scopedTo` — confirms the project context the user has open
-- `projectThesis` — what this project is trying to BE (`purpose`) and where it's
-  heading (`goals`). **This is your primary relevance lens.** Judge every
-  candidate against the mission, not just the capability match: a library can fit
-  a tech slot and still NOT advance what the product is trying to be (a generic
-  charting lib for a decision-support platform), and a candidate that advances a
-  `goal` is worth surfacing even if it doesn't map to an existing capability.
-  Lead your writeups with mission-fit, not just tech-fit. (Null until the project
-  is onboarded with a thesis — then fall back to capability-fit alone.)
-- `keystoneUpgrades` — task-scoped `better_than` upgrades for solutions this
-  project already uses (from Keystone, the comparative-knowledge ontology): each
-  is `{current, better, betterKind, task, margin, source}`. A deprecated/inferior
-  dependency has a maintained/stronger replacement. The footnote may surface one;
-  if the user wants it, DO the swap (update the dep, adjust call sites). Always
-  cite the `task` — "better" is task-relative (e.g. text-embedding-3-large beats
-  3-small for general retrieval but NOT for short-label matching). Don't push an
-  upgrade the user didn't ask about beyond the one calm line.
 - `candidates[]` — the actual list to triage
-- `candidates[].priorContext` — server-attached MEMORY: the user's earlier
-  verdicts on this repo, and whether the matched capability is already
-  covered by something they adopted/ported. Trust it — fold it into your
-  verdict instead of re-deriving history, and don't push a candidate whose
-  capability is covered unless it's materially better than the incumbent.
-- `candidates[].source === "re-checked"` — a repo the user DEFERRED months
-  ago that is still actively developed. Re-evaluate it against today's
-  state of the project; the original "not now" note is in `priorContext`.
-- `leap` — on quiet days the response may carry ONE portfolio connection
-  (a cross-project / adjacency / cross-user leap) instead of candidates.
-  `displayText` already words it; relay that and offer to explore it.
-- `queuedActions` — work the user queued from their weekly brief / alert
-  emails (or a past session). The footnote offers the oldest one; if the
-  user says yes, DO the work (bump the dep, handle the deprecation,
-  evaluate the repo), then call `replen_queue` with `action: "done"` and
-  the item's id. If they decline for good, `action: "dismiss"`. Never
-  leave a handled item queued — it will keep reminding.
-- `candidates[].alternatives` — on health/security stakes ("your upstream
-  is dying / has a CVE"), maintained catalogue libraries similar to the
-  flagged repo, with cross-user adoption counts. Use them in the writeup:
-  the verdict isn't just "X is risky" but "X is risky; Y is the maintained
-  replacement, N similar projects adopted it".
-
-### Step 2a — JIT grounding: profile this repo if onboarding hasn't yet
-
-A large-portfolio `/replen-onboard` grounds the most-active repos fully and
-gives the long tail a cheap version-only pass — so a registered repo can have
-versions but **no capability profile yet**. Triaging it would fall back to
-coarse tag matching (you'll see `filterMode: "tags"` and few/no facet-led
-candidates). When that happens, ground it inline FIRST — it's just-in-time
-onboarding, and it's why the user opening this repo is the right moment:
-
-1. Confirm the gap: call `replen_onboard_state` and find this repo — if
-   `hasCapabilities` is false, it needs grounding.
-2. Run the grounding contract (same as `/replen-onboard` step 2a–2e, condensed):
-   read the code, derive 8–15 grounded `{tag, descriptor, modality, paths}`
-   capabilities + a technical report, and push via `replen_set_capabilities`
-   (+ `replen_set_tags`, + `replen_set_versions` if not already reported).
-   Respect the cover — describe the tech, never de-sanitize the application.
-3. Re-pull the inventory (Step 2) — now it returns real facet-led matches.
-
-Skip this when `hasCapabilities` is already true (the common case). One quiet
-line to the user is enough: *"This repo wasn't fully profiled yet — grounding
-it now so the matches actually fit."*
-
-### Step 2b — Keep the version picture fresh (cheap, do it)
-
-If `git status` shows the lockfile changed since you last reported, or you
-have never reported for this repo, call `replen_set_versions` with the
-resolved DIRECT dependency versions from the lockfile (package-lock.json /
-poetry.lock / uv.lock / Cargo.lock) plus runtimes under canonical keys
-(`node` from .nvmrc/engines/Dockerfile, `python` from .python-version /
-requires-python, `postgres`/`redis` when pinned in docker-compose). Names
-and versions ONLY — never code. This is what turns Replen's deadline and
-security lines from "worth checking your pins" into "affects `acme`
-(3.10.12)" — and silences alarms for versions this repo verifiably isn't on.
-
-This step is NOT optional, and not only about deadlines: the reported
-names are also the matcher's "already a dependency" exclusion list. A
-repo that never reports versions WILL get its own dependencies suggested
-back to it as candidates (fastapi pinned in requirements.txt, fastapi in
-the shortlist) — a shipped failure this step prevents.
 
 If `candidates.length === 0`, tell the user "No new candidates today for
 `<owner/name>`. Calm-cadence working as designed — 1-3 actionable
@@ -151,50 +70,54 @@ For each candidate, do this loop:
     (e.g. `grep -rln "Canvas\|imageRenderer\|OG"` under `lib/` and `src/`).
   - If you find one, read the file to understand what the user has built.
 
-#### 3b. Form a verdict
+#### 3b. The four-pass funnel — run ALL FOUR, in order, even after a "no"
 
-You're answering: **is this worth the user's attention right now?**
+"Does this fit my repo?" is too narrow: it terminates on the first "no" and
+throws away the lateral value. Evaluating Graphify for Replen was a *skip* on
+direct use — yet it produced Atlas (a borrowed premise) **and** a boundary ("we
+are not Graphify"). The binary question would have lost both.
 
-Verdicts:
+So run **four passes per candidate, in order. Do NOT stop at the first "no"** —
+a skip in Pass 1 does not end the inquiry. Passes 1–2 yield a sourcing
+**verdict**; Passes 3–4 yield optional **insights**.
 
-- **adopt** — drop-in replacement / direct dep. The candidate does
-  something the user genuinely needs and isn't doing well. Wire up.
-- **port** — the candidate has an idea / pattern / algorithm worth
-  copying, but the candidate's runtime / language / license is
-  mismatched. Worth reading + adapting; not worth depending on.
-- **skip** — the candidate is a worse version of what the user has, the
-  candidate's runtime is incompatible, or the candidate's not actively
-  maintained. Honest skips are valuable signal; don't manufacture
-  reasons to keep something.
-- **defer** — genuinely interesting but not NOW (too early / v0.x churn /
-  blocked on a milestone the project hasn't hit). Defer is a real promise,
-  not a soft skip: Replen automatically re-surfaces a deferred repo after
-  ~3 months if it's still actively developed (`source: "re-checked"`).
+**Pass 1 — Direct use.** Could we use their code (we lack this, or do it worse)?
+- **adopt** (use-as-is) — drop-in dependency we genuinely need.
+- **port** — reimplement their idea/algorithm; runtime/language mismatched.
+- **cherry-pick** — lift one specific file / function / technique, not the whole thing.
+- **clean-room** — the premise is strong; rebuild it ourselves from the idea, not the code.
+- *(none apply → continue to Pass 2; do NOT record `skip` yet.)*
 
-**Watch for word-collisions** — the most common bad match. The candidate
-shares a *word* with the matched capability but its real domain diverges:
-the matched facet is "anomaly detection" (the user's is drone TELEMETRY) but
-the candidate does IMAGE anomaly detection; "recommendation" means remediation
-actions for the user but collaborative-filtering for the candidate; "S3" means
-private IAM-managed storage but the candidate scans PUBLIC buckets. These are
-skips — and worth recording precisely (see Step 4) so Replen stops surfacing
-the pairing. Classify the reason: `modality-collision` (different data type),
-`task-collision` (same data, different task), `wrong-posture` (e.g. defensive
-vs offensive), `covered` (already have it), `low-quality` (workshop/abandoned).
+**Pass 2 — Better-than-ours.** Do we **already** do this — and do they do it
+**concretely better**? Read *our* implementation (grep + open the actual file)
+and compare honestly. If they beat us with a *specific, nameable* technique:
+- **upgrade** — set `matchedFacet` to the capability they improve; in the writeup
+  name exactly what's better and how to get it (adopt their lib / port the
+  technique / cherry-pick the algo).
+- Examples: "their scraper defeats Cloudflare via TLS-fingerprint rotation; ours
+  retries naively"; "they triangulate drone detection across video **and** audio;
+  we rely on a single video feed."
+- This flips a `covered` capability from skip → surface. **Bar: a concrete,
+  named superiority — never "theirs also looks good."**
+- *(If neither Pass 1 nor Pass 2 applies → NOW it's a `skip`, with a reasonCode.
+  Still run Passes 3–4.)*
 
-Score the fit on a 0-100 scale:
+**Pass 3 — Transferable idea / premise / way-of-working.** Regardless of whether
+we'd touch their code: is there an idea, premise, or pattern worth keeping? The
+Graphify→Atlas lane. If yes → `replen_capture_insight` with kind **`lesson`**.
 
-- 80-100 = high (strong fit, clear adopt or port path, no major blockers)
-- 50-79 = medium (real value, but caveats — port path required, or
-  partial overlap, or active-area-mismatched)
-- 0-49 = general-awareness or skip (interesting but not directly
-  actionable; or definitely skip)
+**Pass 4 — Boundary.** Does seeing this sharpen what we are explicitly **NOT**?
+("Atlas models decisions, not files — we are not a code-graph tool.") If yes →
+`replen_capture_insight` with kind **`boundary`**.
 
-Estimate effort:
+**Quality bar for Passes 3–4:** they *run* on every candidate but *record*
+rarely — only a **decision-changing**, Graphify-grade insight, the kind that
+would actually have changed a plan. Most candidates produce no insight. A
+tenuous "you could maybe learn X" is noise — do not record it.
 
-- **quick** — <1 day. Single-file swap, drop a dep, copy a file.
-- **moderate** — 1-3 days. Real API delta, multi-site update, light port.
-- **deep** — 1+ week. Framework adoption, paradigm shift, full rewrite.
+Then score the sourcing verdict 0-100 (80-100 strong / 50-79 real-with-caveats /
+0-49 weak-or-skip) and estimate effort: **quick** (<1d) / **moderate** (1-3d) /
+**deep** (1+w).
 
 #### 3c. Compose the writeup
 
@@ -221,63 +144,81 @@ that means here.
 mismatch, security flag. Empty list is fine; don't manufacture.
 ```
 
-#### 3d. Record the verdict NOW — don't wait for the user
-
-As soon as a candidate's verdict is formed, call `replen_record_triage`
-for it — **before** you present the batch, and **without asking**.
-Recording is observation, not action: it captures what you concluded
-(verdict, score, reason code, one-liner, cosine) so the learning loop and
-re-surfacing suppression actually fire. It is non-destructive and doesn't
-foreclose anything — the user's star / hide / handoff choices in Step 4
-are a separate axis layered on top.
-
-The failure mode this rule exists to kill: a session triages four
-candidates, presents them, ends with "want me to record these?", the
-user moves on — and Replen learned NOTHING. The same four will come back.
-A triage that isn't recorded never happened.
-
-Only the user-judgment actions (star / hide / handoff / queue work) wait
-for the user. Verdicts never do.
-
-#### 3e. Write back what you LEARNED from the code — not just the verdict
-
-Triage is the one moment you actually read the source, so feed what you
-learned back into Replen's model of the project (it's non-destructive and
-makes every future match sharper). Two cheap write-backs, both optional,
-both additive:
-
-- **Capability paths.** When you confirm which file(s) implement the
-  capability a candidate matched — especially if the candidate's
-  `matchedFacet` has no paths yet — call `replen_set_capabilities` with
-  **`mode:"merge"`** and just that one capability:
-  `{ tag: "<matchedFacet>", paths: ["src/…", "lib/…"] }`. Merge mode adds
-  the paths without touching the project's other capabilities. This is what
-  makes "port THIS exact file" possible in later sessions and populates the
-  Atlas dossier + cross-project leaps. Paths only, never code.
-- **Dep corrections.** When the code shows a listed dependency is unused or
-  superseded (e.g. a stale `ethers` in a repo that's actually on `viem`),
-  pass `depsSuperseded: ["ethers"]` on the `replen_record_triage` call —
-  it's marked migrate-off (reversible) so its release/pricing/upgrade noise
-  stops. Pass `depsConfirmed: [...]` for deps you verified are genuinely
-  used that Replen didn't already know. Names only.
-
 No marketing voice. No hype. The user is a working engineer; talk to
 them like a peer. Concrete > clever.
 
-### Step 4 — Present + capture actions
+#### 3d. Record the verdict
 
-By this point every verdict is ALREADY recorded (3d). After all
-writeups, summarise, and ask only about the actions that genuinely need
-the user's call — skips need nothing further:
+**After each candidate's writeup**, call the `replen_record_triage` MCP
+tool with the structured verdict so it surfaces on the user's Activity
+feed at the dashboard. Use the same `sessionId` (any opaque string,
+e.g. timestamp `2026-05-26T10-32`) across every call in this session
+so the feed can cluster them as one triage run.
 
 ```
-3 candidates triaged for tech-news-site (all verdicts recorded):
-  ✓ adopt: kribblo/node-ffmpeg-installer (high · quick) — ffmpeg-static swap
-  ⏭ port:  tj/n (medium · moderate) — version-manager pattern
-  ✗ skip:  vercel/turbo (medium · deep) — wrong runtime, already have Vite
-
-Want the adopt wired up, or any of these starred / hidden / handed off?
+mcp__replen__replen_record_triage(
+  repo="owner/name",
+  project="tech-news-site",      // slug, from scopedTo
+  verdict="adopt",               // adopt|port|cherry-pick|clean-room|upgrade|skip|defer
+  matchedFacet="og image",       // REQUIRED for upgrade: the capability they do better
+  score=87,                      // 0-100
+  effortBand="quick",            // quick|moderate|deep
+  oneLine="Drops in for lib/social/imageRenderer.ts — 30 min.",
+  writeup="<full markdown body of the writeup you just composed>",
+  sessionId="2026-05-26T10-32"
+)
 ```
+
+This call is what makes the agent's work visible. Without it, the user
+only sees their own actions (star / hide) — they can't see "the agent
+considered 5 candidates this morning and skipped 4 of them, here's
+why." Record one event per candidate, including skips.
+
+**Pass 3/4 insights are recorded separately** — with `replen_capture_insight`,
+NOT `replen_record_triage` (an insight is a portfolio decision, not a candidate
+verdict). Only when genuinely decision-changing (most candidates produce none):
+
+```
+mcp__replen__replen_capture_insight(
+  kind="lesson",                 // lesson | boundary
+  text="Borrow Graphify's graph-as-memory premise, but link repos not files (→ Atlas).",
+  viaCandidate="owner/name",     // the candidate that prompted it
+  project="atlas"                // optional; omit for a portfolio-wide insight
+)
+```
+
+### Step 4 — Present ONLY the wins (record everything, surface what works)
+
+You already RECORDED every verdict in Step 3d, including skips — those are
+load-bearing (relevance-floor calibration, repo_quality, modality suppression,
+the Activity feed). But **do NOT narrate the skips to the user.** A wall of
+"skip, skip, skip, but…" makes Replen look like it's grasping. Present like an
+Apple keynote: lead with what's good, stay quiet about the rest.
+
+**Surface ONLY the wins** — `adopt` / `port` / `cherry-pick` / `clean-room` /
+`upgrade` + any `lesson` / `boundary`. Skips and defers are recorded silently and
+never listed. Lead with the strongest (an `upgrade` to something they already
+have usually beats a new `adopt`).
+
+If there are wins:
+
+```
+For tech-news-site:
+  ⬆ upgrade: someorg/fast-og — beats your og-image render (streams + caches vs your sync redraw) · moderate
+  ✓ adopt:   kribblo/node-ffmpeg-installer — drop-in ffmpeg-static swap · quick
+  💡 lesson:  borrow graph-as-memory premise, link repos not files (→ Atlas)   [via graphify/graphify]
+
+(Triaged 9 candidates; surfacing the 2 worth acting on + 1 idea worth keeping.)
+
+What would you like to do with each? (star / hide / handoff)
+```
+
+The one-line "(Triaged N…)" footer is the *only* acknowledgement that skips
+happened — honest, but it doesn't parade them.
+
+**If there are NO wins, say nothing** — or at most one calm line ("Nothing
+actionable for `<repo>` today — N triaged."). Never list the skips. Silence on a
+quiet day IS the calm-cadence contract, not a failure.
 
 Then, for each candidate, capture the user's choice. For each action,
 POST to `/api/state`:
@@ -319,107 +260,11 @@ fresh candidate shows up at session start via the hook).
 **Inventory call returns 401.** User's token expired or got rotated.
 Tell them to run `npx replen` to re-auth.
 
-**The project isn't scoped — `scopedTo: null`, a `note` about "repo not in
-your project list", OR the cwd has no git remote.** Replen can only match
-against a repo it has registered, and it scopes by the git remote. When it's
-unscoped you'll get the global trending firehose — which is noise for this
-codebase. **Do NOT triage the firehose** (manufacturing reasons to care about
-random trending repos is exactly what this skill must not do).
-
-Instead, **offer to onboard the project.** Lead with ONE line, not the whole
-checklist: *"This project isn't set up with Replen yet, so I can only see the
-global firehose (not matches for your code). Want me to scope it — init git,
-create the repo, write the docs, and add tags? Then Replen can surface things
-that actually fit."* If the user agrees, run this checklist:
-
-1. **Git + GitHub.** If there's no git repo, `git init`. Create the GitHub
-   repo using the user's existing `gh` auth — ask for owner/name or suggest a
-   sensible default from the folder name, and confirm public vs private:
-   `gh repo create <owner>/<name> --private --source=. --remote=origin --push`.
-   If a repo exists locally but has no remote, just add + push the remote.
-2. **Docs Replen can read.** Replen's scorer reads your `README.md` +
-   `CLAUDE.md` to understand the project — that's the difference between
-   useful matches and noise. Write a concrete `README.md` (what it is, stack,
-   domain) if missing, and a `CLAUDE.md` optimised for Replen (run the
-   `/replen-project-init` protocol, or draft the seven sections directly:
-   what it is · stack · niche/domain · active areas · constraints/non-goals ·
-   anti-patterns · integration preferences). Use the project's real domain
-   vocabulary, not abstractions.
-3. **Register + tag + set capabilities.** Register the repo: `npx replen
-   sync-projects` (scans the local repos and pushes them to Replen). Then, from
-   the code you just read:
-   - **Set domain tags** with `replen_set_tags` — broad domain labels (e.g. for
-     a Python CCXT market-making engine:
-     `["crypto","trading","market-making","ccxt","quant","backtesting"]`).
-   - **Set technical capabilities** with `replen_set_capabilities` — short,
-     GitHub-searchable tech terms for what the project DOES at the tech level.
-     Aim for **8-15** and be **SPECIFIC**. **Send GROUNDED objects, not bare
-     strings** — `{tag, descriptor, modality}` for each capability:
-     - `tag` — the short searchable term (`"anomaly detection"`).
-     - `descriptor` — ONE sentence grounding the tag in the ACTUAL CODE you
-       just read: what DATA it operates on, the specific task, key constraints.
-       This is what stops word-collisions. `"anomaly detection"` alone collides
-       with image-defect libraries; `{tag:"anomaly detection", descriptor:
-       "rule-based detection over drone telemetry time-series — link-loss,
-       GPS-drop, battery-sag; no ML", modality:["timeseries"]}` does not.
-       Read the real source (the taxonomy/model/config files), not the README.
-     - `modality` — array from EXACTLY: `image, video, timeseries, tabular,
-       text, audio, geospatial, graph, 3d, code, network` (`[]` if none apply).
-       A satellite-imagery segmenter is `["image","geospatial"]`; a recsys is
-       `["tabular"]`.
-
-     Break broad capabilities into the concrete techniques the code uses (not
-     just `"web scraping"` but `headless browser`, `cloudflare bypass`,
-     `proxy rotation`, …). Derive all of it from the imports/deps and code, not
-     guesses. This is the highest-leverage step: the server builds the project's
-     facet vectors from these IMMEDIATELY, and the grounded descriptor + modality
-     are exactly what make matching separate "same word, different data" — the
-     single biggest source of bad matches.
-
-   **Do NOT tell the user to set tags/capabilities on the web** — that's the
-   sticky step this replaces; set them with the tools. (They can fine-tune later
-   at app.replen.dev/projects.) These matter most right after onboarding — they
-   give a fresh project working query vectors before any server-side inference.
-4. **Embed it now (don't wait for the daily run).** A freshly-registered
-   project has no embedding yet, so matching falls back to language/tags only
-   (noise) until the next scheduled run. Trigger an immediate run with the
-   `replen_run` tool — it builds the project's summary + embedding + initial
-   candidates from the README/CLAUDE.md you just pushed. It's async: poll
-   `replen_status` until the phase reports inventory ready (~1–3 min). Tell the
-   user it's processing.
-5. **Re-run.** Once the run finishes, call `replen_match` again — now scoped
-   AND embedded, matching against the real code (a dev-tool that only shared the
-   project's language now scores low on cosine and gets floored out).
-
-Note on recording actions: always use the MCP tools — `replen_state` (star /
-hide / handoff), `replen_record_triage` (your verdict), `replen_set_tags` — for
-any write back to Replen. Don't hand-roll `curl` to the API for these; the MCP
-path is the intended mechanism and avoids tripping host permission classifiers
-on the candidate repo name in a curl payload.
-
-**Never record a bare verdict.** Every `replen_record_triage` call — including
-quick skips made outside this full protocol (e.g. from the session-start
-footnote) — must carry at least `oneLine` and `cosine`. A verdict with no
-reasoning shows up in the user's Atlas dossier and vault as "bare verdict —
-the agent recorded no reasoning", which is a bug report with your name on it.
-
-When you call `replen_record_triage`, **pass the contextual fields** so Replen
-learns: `matchedFacet` (copy the `matchedFacet` from the candidate's
-replen_match data), `facetModality` (the data modality of that capability —
-e.g. `"timeseries"`, `"image"`), `reasonCode` (`fit` / `modality-collision`
-/ `task-collision` / `covered` / `wrong-posture` / `low-quality` / `other`),
-and `cosine` (copy the candidate's `cosine` value verbatim — paired with your
-verdict it calibrates the relevance floor for this project, and your
-adopt/skip pattern continuously tunes the ranking via the taste vector).
-A skip coded `modality-collision` teaches Replen that this repo fits a
-*different* modality — so it stays available for the right project but stops
-colliding with this one. A skip coded `covered` is the strongest signal you
-can send: it tells Replen the capability is **already built in this repo**, so
-it stops probing that facet entirely and won't surface a different tool for it
-next session. Use `covered` ONLY when you've confirmed the implementation in
-the code (e.g. the repo has its own `services/llm_client.py`), not just because
-a similar dependency exists — that's what makes "we already do this" stick to
-the capability instead of replaying every session against a new candidate.
+**Inventory returns `scopedTo: null` with a `note` about "repo not in
+your project list"**. The cwd isn't a known project. Ask the user:
+"This repo isn't in your Replen projects yet. Add it via /projects?"
+Then either stop or re-run with `?repo=` (empty) to see the global
+firehose.
 
 **Candidate's README is unreachable (WebFetch 404)**. Note it in the
 writeup (`Caveats: README unreachable; verdict based on description
@@ -437,21 +282,6 @@ only").
 The user hasn't set up filter-mode B's tag list. Mention it once: "Heads
 up — you'd get sharper matches if you set project tags at /settings.
 Continuing with unfiltered for now."
-
-## Atlas tiles — local memory for any agent
-
-Replen keeps an agent-readable markdown vault at `~/.replen/atlas/` — the
-user's whole portfolio as linked notes: every project and what it does,
-every capability (with how it's known: `grounded`/`extracted`/`inferred`),
-every past decision with its reason code, plus themes and blind spots.
-The MCP server refreshes it in the background (at most twice a day);
-`replen atlas` forces a rewrite.
-
-Use it whenever you need CROSS-PROJECT context: "what else does this user
-build?", "have we solved X in another repo?", "what did we decide about
-Y last quarter?". Start at `MAP.md`, or call `replen_recall` for a direct
-query. Reading the tiles beats re-deriving the portfolio from scratch —
-they're the memory layer, and they're already on disk.
 
 ## When NOT to run this skill
 

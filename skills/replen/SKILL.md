@@ -70,35 +70,54 @@ For each candidate, do this loop:
     (e.g. `grep -rln "Canvas\|imageRenderer\|OG"` under `lib/` and `src/`).
   - If you find one, read the file to understand what the user has built.
 
-#### 3b. Form a verdict
+#### 3b. The four-pass funnel — run ALL FOUR, in order, even after a "no"
 
-You're answering: **is this worth the user's attention right now?**
+"Does this fit my repo?" is too narrow: it terminates on the first "no" and
+throws away the lateral value. Evaluating Graphify for Replen was a *skip* on
+direct use — yet it produced Atlas (a borrowed premise) **and** a boundary ("we
+are not Graphify"). The binary question would have lost both.
 
-Verdicts:
+So run **four passes per candidate, in order. Do NOT stop at the first "no"** —
+a skip in Pass 1 does not end the inquiry. Passes 1–2 yield a sourcing
+**verdict**; Passes 3–4 yield optional **insights**.
 
-- **adopt** — drop-in replacement / direct dep. The candidate does
-  something the user genuinely needs and isn't doing well. Wire up.
-- **port** — the candidate has an idea / pattern / algorithm worth
-  copying, but the candidate's runtime / language / license is
-  mismatched. Worth reading + adapting; not worth depending on.
-- **skip** — the candidate is a worse version of what the user has, the
-  candidate's runtime is incompatible, or the candidate's not actively
-  maintained. Honest skips are valuable signal; don't manufacture
-  reasons to keep something.
+**Pass 1 — Direct use.** Could we use their code (we lack this, or do it worse)?
+- **adopt** (use-as-is) — drop-in dependency we genuinely need.
+- **port** — reimplement their idea/algorithm; runtime/language mismatched.
+- **cherry-pick** — lift one specific file / function / technique, not the whole thing.
+- **clean-room** — the premise is strong; rebuild it ourselves from the idea, not the code.
+- *(none apply → continue to Pass 2; do NOT record `skip` yet.)*
 
-Score the fit on a 0-100 scale:
+**Pass 2 — Better-than-ours.** Do we **already** do this — and do they do it
+**concretely better**? Read *our* implementation (grep + open the actual file)
+and compare honestly. If they beat us with a *specific, nameable* technique:
+- **upgrade** — set `matchedFacet` to the capability they improve; in the writeup
+  name exactly what's better and how to get it (adopt their lib / port the
+  technique / cherry-pick the algo).
+- Examples: "their scraper defeats Cloudflare via TLS-fingerprint rotation; ours
+  retries naively"; "they triangulate drone detection across video **and** audio;
+  we rely on a single video feed."
+- This flips a `covered` capability from skip → surface. **Bar: a concrete,
+  named superiority — never "theirs also looks good."**
+- *(If neither Pass 1 nor Pass 2 applies → NOW it's a `skip`, with a reasonCode.
+  Still run Passes 3–4.)*
 
-- 80-100 = high (strong fit, clear adopt or port path, no major blockers)
-- 50-79 = medium (real value, but caveats — port path required, or
-  partial overlap, or active-area-mismatched)
-- 0-49 = general-awareness or skip (interesting but not directly
-  actionable; or definitely skip)
+**Pass 3 — Transferable idea / premise / way-of-working.** Regardless of whether
+we'd touch their code: is there an idea, premise, or pattern worth keeping? The
+Graphify→Atlas lane. If yes → `replen_capture_insight` with kind **`lesson`**.
 
-Estimate effort:
+**Pass 4 — Boundary.** Does seeing this sharpen what we are explicitly **NOT**?
+("Atlas models decisions, not files — we are not a code-graph tool.") If yes →
+`replen_capture_insight` with kind **`boundary`**.
 
-- **quick** — <1 day. Single-file swap, drop a dep, copy a file.
-- **moderate** — 1-3 days. Real API delta, multi-site update, light port.
-- **deep** — 1+ week. Framework adoption, paradigm shift, full rewrite.
+**Quality bar for Passes 3–4:** they *run* on every candidate but *record*
+rarely — only a **decision-changing**, Graphify-grade insight, the kind that
+would actually have changed a plan. Most candidates produce no insight. A
+tenuous "you could maybe learn X" is noise — do not record it.
+
+Then score the sourcing verdict 0-100 (80-100 strong / 50-79 real-with-caveats /
+0-49 weak-or-skip) and estimate effort: **quick** (<1d) / **moderate** (1-3d) /
+**deep** (1+w).
 
 #### 3c. Compose the writeup
 
@@ -140,7 +159,8 @@ so the feed can cluster them as one triage run.
 mcp__replen__replen_record_triage(
   repo="owner/name",
   project="tech-news-site",      // slug, from scopedTo
-  verdict="adopt",               // adopt|port|skip|defer
+  verdict="adopt",               // adopt|port|cherry-pick|clean-room|upgrade|skip|defer
+  matchedFacet="og image",       // REQUIRED for upgrade: the capability they do better
   score=87,                      // 0-100
   effortBand="quick",            // quick|moderate|deep
   oneLine="Drops in for lib/social/imageRenderer.ts — 30 min.",
@@ -154,18 +174,51 @@ only sees their own actions (star / hide) — they can't see "the agent
 considered 5 candidates this morning and skipped 4 of them, here's
 why." Record one event per candidate, including skips.
 
-### Step 4 — Present + capture actions
-
-After all writeups, summarise:
+**Pass 3/4 insights are recorded separately** — with `replen_capture_insight`,
+NOT `replen_record_triage` (an insight is a portfolio decision, not a candidate
+verdict). Only when genuinely decision-changing (most candidates produce none):
 
 ```
-3 candidates triaged for tech-news-site:
-  ✓ adopt: kribblo/node-ffmpeg-installer (high · quick) — ffmpeg-static swap
-  ⏭ port:  tj/n (medium · moderate) — version-manager pattern
-  ✗ skip:  vercel/turbo (medium · deep) — wrong runtime, already have Vite
-
-For each, what would you like to do? (star / hide / handoff / skip)
+mcp__replen__replen_capture_insight(
+  kind="lesson",                 // lesson | boundary
+  text="Borrow Graphify's graph-as-memory premise, but link repos not files (→ Atlas).",
+  viaCandidate="owner/name",     // the candidate that prompted it
+  project="atlas"                // optional; omit for a portfolio-wide insight
+)
 ```
+
+### Step 4 — Present ONLY the wins (record everything, surface what works)
+
+You already RECORDED every verdict in Step 3d, including skips — those are
+load-bearing (relevance-floor calibration, repo_quality, modality suppression,
+the Activity feed). But **do NOT narrate the skips to the user.** A wall of
+"skip, skip, skip, but…" makes Replen look like it's grasping. Present like an
+Apple keynote: lead with what's good, stay quiet about the rest.
+
+**Surface ONLY the wins** — `adopt` / `port` / `cherry-pick` / `clean-room` /
+`upgrade` + any `lesson` / `boundary`. Skips and defers are recorded silently and
+never listed. Lead with the strongest (an `upgrade` to something they already
+have usually beats a new `adopt`).
+
+If there are wins:
+
+```
+For tech-news-site:
+  ⬆ upgrade: someorg/fast-og — beats your og-image render (streams + caches vs your sync redraw) · moderate
+  ✓ adopt:   kribblo/node-ffmpeg-installer — drop-in ffmpeg-static swap · quick
+  💡 lesson:  borrow graph-as-memory premise, link repos not files (→ Atlas)   [via graphify/graphify]
+
+(Triaged 9 candidates; surfacing the 2 worth acting on + 1 idea worth keeping.)
+
+What would you like to do with each? (star / hide / handoff)
+```
+
+The one-line "(Triaged N…)" footer is the *only* acknowledgement that skips
+happened — honest, but it doesn't parade them.
+
+**If there are NO wins, say nothing** — or at most one calm line ("Nothing
+actionable for `<repo>` today — N triaged."). Never list the skips. Silence on a
+quiet day IS the calm-cadence contract, not a failure.
 
 Then, for each candidate, capture the user's choice. For each action,
 POST to `/api/state`:

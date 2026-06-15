@@ -110,7 +110,11 @@ const TOOLS: Tool[] = [
       "\n" +
       "TRIAGE PROTOCOL (only when the user accepts):\n" +
       "  1. For each candidate, WebFetch the candidate's README + grep the user's source for related code (under src/, lib/, app/ — skip node_modules, dist, .next).\n" +
-      "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime), 'defer' (good but not now). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w). For a skip, classify the reason (reasonCode): 'covered' (already built/depended-on — use ONLY when you confirmed the implementation in-code), 'modality-collision', 'task-collision', 'wrong-posture', 'low-quality', 'other'.\n" +
+      "  2. Run the FOUR-PASS FUNNEL per candidate, in order, NOT stopping at the first 'no' (see the /replen skill for the full version): " +
+      "Pass 1 direct-use → 'adopt'(use-as-is) / 'port' / 'cherry-pick' / 'clean-room'; " +
+      "Pass 2 better-than-ours → 'upgrade' (we already do this, they do it concretely better — set matchedFacet to the capability improved); " +
+      "if neither → 'skip' (reasonCode: 'covered' / 'modality-collision' / 'task-collision' / 'wrong-posture' / 'low-quality' / 'other') or 'defer'. " +
+      "Pass 3 (transferable idea/premise → replen_capture_insight kind='lesson') and Pass 4 (sharpened boundary → kind='boundary') RUN EVEN ON A SKIP, but record only decision-changing, Graphify-grade insights. Score 0-100; effort 'quick'(<1d)/'moderate'(1-3d)/'deep'(1+w).\n" +
       "  3. Compose a writeup with concrete file-level impact references — name actual files the candidate replaces or improves.\n" +
       "  4. RECORD EACH VERDICT NOW via replen_record_triage (verdict + score + effort + reasonCode + oneLine + cosine), BEFORE presenting and WITHOUT asking. Recording is observation, not action — it's non-destructive and is what teaches the matcher and stops the same candidate (and the facet it matched) coming back. An unrecorded triage taught Replen nothing and the candidates return next session. Only the user-judgment actions wait for the user.\n" +
       "  5. If the repo's lockfile changed since last report, or it has never reported, call replen_set_versions with the resolved direct dependency versions (names + versions only) — this is what stops the repo's OWN dependencies being suggested back to it.\n" +
@@ -201,12 +205,12 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "What to recall (free text), e.g. 'satellite imagery', 'scraping', 'mapbox/robosat'." },
-        verdict: { type: "string", enum: ["adopt", "port", "skip", "defer"], description: "Optional: only return decisions with this verdict (e.g. 'port' for 'what have we ported')." },
+        verdict: { type: "string", enum: ["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"], description: "Optional: only return decisions with this verdict (e.g. 'port' for 'what have we ported')." },
         limit: { type: "number", minimum: 1, maximum: 20, default: 8 },
       },
     },
     handler: async (cfg, args) => {
-      const parsed = z.object({ query: z.string().optional().default(""), verdict: z.enum(["adopt", "port", "skip", "defer"]).optional(), limit: z.number().int().min(1).max(20).default(8) }).parse(args);
+      const parsed = z.object({ query: z.string().optional().default(""), verdict: z.enum(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"]).optional(), limit: z.number().int().min(1).max(20).default(8) }).parse(args);
       const data = await apiPost(cfg, "/api/graph/recall", parsed);
       return JSON.stringify(data, null, 2);
     },
@@ -264,7 +268,7 @@ const TOOLS: Tool[] = [
         repoId: { type: "number", description: "Alternative to repo — repoId from replen_match output" },
         project: { type: "string", description: "Project slug this verdict was made against. Omit for global verdicts." },
         projectId: { type: "number", description: "Alternative to project — project profile id." },
-        verdict: { type: "string", enum: ["adopt", "port", "skip", "defer"], description: "Your structured call. adopt = drop-in fit; port = idea worth copying, runtime mismatched; skip = worse than current or wrong fit; defer = revisit later." },
+        verdict: { type: "string", enum: ["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"], description: "Your structured call (Pass 1 'direct use', or Pass 2 'better-than-ours'). adopt = drop-in dep/use-as-is; port = reimplement the idea, runtime mismatched; cherry-pick = lift a specific file/technique, not the whole thing; clean-room = premise is strong, rebuild from the idea not the code; upgrade = WE ALREADY DO THIS but they do it concretely better — set matchedFacet to the capability it improves; skip = worse than ours or wrong fit; defer = revisit later." },
         score: { type: "number", minimum: 0, maximum: 100, description: "Agent-assigned relevance score 0-100. Optional." },
         effortBand: { type: "string", enum: ["quick", "moderate", "deep"], description: "quick (<1d), moderate (1-3d), deep (1+w). Optional." },
         oneLine: { type: "string", maxLength: 280, description: "1-sentence summary for the Activity feed." },
@@ -285,7 +289,7 @@ const TOOLS: Tool[] = [
         repoId: z.number().int().positive().optional(),
         project: z.string().optional(),
         projectId: z.number().int().positive().nullable().optional(),
-        verdict: z.enum(["adopt", "port", "skip", "defer"]),
+        verdict: z.enum(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"]),
         score: z.number().min(0).max(100).optional(),
         effortBand: z.enum(["quick", "moderate", "deep"]).optional(),
         oneLine: z.string().max(280).optional(),
@@ -302,6 +306,35 @@ const TOOLS: Tool[] = [
         throw new Error("must specify repo (owner/name) or repoId");
       }
       const data = await apiPost(cfg, "/api/triage", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
+    name: "replen_capture_insight",
+    description:
+      "Capture a PORTFOLIO INSIGHT from triage — Pass 3 (a transferable idea / premise / way-of-working) or Pass 4 (a sharpened boundary). " +
+      "Call this when reading a candidate yields something worth keeping EVEN IF the candidate is a direct-use skip — the generative-skip lane. " +
+      "Archetype: evaluating Graphify for Replen was a skip on direct use, but it gave the 'graph-as-memory' premise (→ Atlas, a 'lesson') AND the 'we are not Graphify' line (a 'boundary'). " +
+      "Distinct from replen_record_triage (a per-candidate use-verdict): an insight is a PORTFOLIO decision, stored as an Atlas node with a `via` path to the candidate that prompted it. " +
+      "HIGH BAR — only decision-changing, Graphify-grade insights; never 'vaguely interesting'. Most candidates produce NO insight.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["lesson", "boundary"], description: "'lesson' = a transferable idea/premise/way-of-working worth borrowing; 'boundary' = something we're now explicitly NOT, sharpened by seeing this candidate." },
+        text: { type: "string", description: "The insight in 1-2 user-legible sentences. E.g. 'Borrow Graphify's graph-as-memory premise but link repos not files (→ Atlas).' / 'We are not a code-level graph tool; Atlas models decisions, not files.'" },
+        viaCandidate: { type: "string", description: "owner/name of the candidate that prompted this insight (the `via` provenance). Optional." },
+        project: { type: "string", description: "Project slug this insight touches / influenced. Omit for portfolio-wide insights." },
+      },
+      required: ["kind", "text"],
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        kind: z.enum(["lesson", "boundary"]),
+        text: z.string().min(3).max(2000),
+        viaCandidate: z.string().optional(),
+        project: z.string().optional(),
+      }).parse(args);
+      const data = await apiPost(cfg, "/api/graph/insight", parsed);
       return JSON.stringify(data, null, 2);
     },
   },

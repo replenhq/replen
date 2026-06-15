@@ -56,7 +56,7 @@ type TriageBody = {
   depsSuperseded?: string[];
 };
 
-const VALID_VERDICTS = ["adopt", "port", "skip", "defer"] as const;
+const VALID_VERDICTS = ["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"] as const;
 const VALID_EFFORTS = ["quick", "moderate", "deep"] as const;
 const VALID_REASONS = ["fit", "modality-collision", "task-collision", "covered", "wrong-posture", "low-quality", "other"] as const;
 
