@@ -28,6 +28,7 @@
 import { db, schema } from "@/db/client";
 import { eq, inArray } from "drizzle-orm";
 import { coerceModalities, type Modality } from "@/projects/modality";
+import { testUserIds } from "./test-cohort";
 
 // Same normalisation the inventory route uses for facet labels.
 export const normFacetLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -108,6 +109,7 @@ export async function loadModalitySuppressions(forUserId: number): Promise<Map<s
 
   const events: TriageEventLite[] = await db.select(eventCols).from(schema.triageEvents);
   if (!events.length) return new Map();
+  const testUids = await testUserIds();
 
   // Latest verdict per (user, repo): a later adopt/port lifts the collision.
   const latest = latestPerKey(events, (e) => `${e.userId}:${e.repoId}`);
@@ -116,6 +118,9 @@ export async function loadModalitySuppressions(forUserId: number): Promise<Map<s
   const byRepoMod = new Map<number, Map<Modality, Set<number>>>();
   for (const e of latest.values()) {
     if (e.verdict !== "skip" || e.reasonCode !== "modality-collision") continue;
+    // Other test-cohort users never count toward cross-user suppression; the
+    // asking user's own collision verdicts still apply to their own matching.
+    if (e.userId !== forUserId && testUids.has(e.userId)) continue;
     const mods = parseModalities(e.facetModality);
     if (!mods.length) continue;
     const modMap = byRepoMod.get(e.repoId) ?? new Map<Modality, Set<number>>();

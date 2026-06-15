@@ -227,7 +227,16 @@ export async function runCheckNew(argv: string[]): Promise<void> {
       }
       return;
     }
-    const inv = await fetchInventoryStatus(cfg, cwdRepo);
+    // Auto-register newly-appeared repos (identity only — owner/name +
+    // manifest tags, no code, no LLM) in parallel with the inventory fetch.
+    // Both are bounded and best-effort; neither may slow or disrupt session
+    // open. When there's nothing new (the common case) auto-register returns
+    // near-instantly, adding no wall-clock over the inventory call alone.
+    const { autoRegisterNewRepos } = await import("./auto-register.js");
+    const [, inv] = await Promise.all([
+      autoRegisterNewRepos({ token: cfg.token, base: cfg.base }).catch(() => undefined),
+      fetchInventoryStatus(cfg, cwdRepo),
+    ]);
     if (inv?.displayText) {
       console.log("[Replen] Relay the following line to the user, verbatim, as a footnote at the very end of your first reply:");
       console.log(inv.displayText);
@@ -584,18 +593,25 @@ async function fetchInventoryStatus(
       candidates?: Array<{ repo?: string; whyShortlisted?: string }>;
     };
     const cands = data.candidates ?? [];
-    if (cands.length === 0) return null;
+    const displayText = (typeof data.displayText === "string" && data.displayText) ? data.displayText : null;
+    // Surface even with ZERO candidates when the server sent a displayText —
+    // notably the onboard-on-first-visit offer for a registered-but-unprofiled
+    // repo (needsOnboarding): it has no candidates yet but IS the line to relay.
+    // Previously `cands.length === 0 → return null` swallowed it, so the
+    // SessionStart hook stayed silent on unprofiled repos.
+    if (cands.length === 0 && !displayText) return null;
     const top = cands[0];
     // Pull the cosine % out of whyShortlisted if present
     // (format: "...; semantic similarity: 58%").
-    const simMatch = top.whyShortlisted?.match(/semantic similarity:\s*(\d+)%/);
+    const simMatch = top?.whyShortlisted?.match(/semantic similarity:\s*(\d+)%/);
     return {
       count: cands.length,
-      topRepo: top.repo ?? null,
+      topRepo: top?.repo ?? null,
       topSimilarity: simMatch ? Number(simMatch[1]) : null,
       // The server's pre-formatted, pattern-aware footnote ("By the way — a
-      // dependency you use just shipped: …" / "… N candidates queued …").
-      displayText: (typeof data.displayText === "string" && data.displayText) ? data.displayText : null,
+      // dependency you use just shipped: …" / "… N candidates queued …" / the
+      // onboard offer).
+      displayText,
     };
   } catch {
     return null;

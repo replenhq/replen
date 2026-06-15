@@ -53,6 +53,18 @@ import type { Modality, Provenance } from "@/projects/modality";
 // Returns: an ordered list of candidates with repo metadata + a
 // cheap server-derived `whyShortlisted` line. The skill ranks and
 // writes up these candidates in-session — that's the whole point.
+// Truncate a description for inline use in the footnote at a WORD boundary, so
+// it never ends mid-word. The old `.slice(0, n)` produced "…image semantic
+// segmentation wi." — chopped mid-word with the template's period stuck on.
+// Trailing punctuation is stripped; the caller's template supplies the period.
+function clipDesc(desc: string, max: number): string {
+  const d = desc.trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+  if (d.length <= max) return d;
+  const cut = d.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:\s]+$/, "");
+}
+
 export async function GET(req: Request) {
   const auth = await authenticate(req);
   if (!auth) {
@@ -141,6 +153,43 @@ export async function GET(req: Request) {
     if (p && p.active && p.included) {
       scopedProjectId = p.id;
       scopedProject = p;
+
+      // Part 2 — onboard-on-first-visit. The repo is registered (identity +
+      // tags — e.g. auto-registered by the SessionStart hook, Part 1) but has
+      // no capability facets yet, so faceted matching would be noise. Instead
+      // of running it, surface a calm offer to profile the repo IN-SESSION:
+      // the agent is already sitting in the code, so it can read the source,
+      // derive grounded capabilities, and call replen_set_capabilities right
+      // now — no separate onboarding step for the user to remember. Once
+      // facetEmbeddings exist, this branch stops firing and matching takes
+      // over. facetEmbeddings is the canonical "is profiled" signal (mirrors
+      // hasCapabilities in /api/projects/state).
+      if (scopedProject.facetEmbeddings == null) {
+        return NextResponse.json(
+          {
+            filterMode,
+            scopedTo: repoFilter,
+            days,
+            totalConsidered: 0,
+            afterEligibility: 0,
+            afterFilter: 0,
+            candidates: [],
+            needsOnboarding: true,
+            displayText: withUpgradeNudge(
+              "This repo is set up in Replen but I haven't profiled its capabilities yet, so I can't surface good matches for it. Want me to read the code and build its capability profile now? (Runs here in-session — no API key, a couple of minutes.)",
+              upgradeNudge,
+            ),
+            note:
+              "This project is registered but UNPROFILED (identity + tags only, no capability facets) — do NOT triage the inventory (there is nothing meaningful to score yet). Instead, ONBOARD it in-session if the user accepts the offer above: " +
+              "(1) read the actual source (src/, lib/, app/ — skip node_modules/dist/.next) to understand what it does; " +
+              "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []); " +
+              "(3) call replen_set_capabilities (mode='replace') with those capabilities, plus a short grounded `report` and a 1-2 sentence `purpose` when you can; " +
+              "(4) read the lockfile and call replen_set_versions with the resolved direct dependency versions. " +
+              "Matching then works on the next replen_match. Lead with the one-line offer; only do the work if the user accepts.",
+          },
+          { headers: corsHeaders },
+        );
+      }
     } else {
       // Stay silent on the inventory in two cases:
       //   - the cwd's repo isn't a known project (surfacing matches for
@@ -550,6 +599,16 @@ export async function GET(req: Request) {
     const v = vendorForDep(d);
     if (v) { knownRepoFullNames.add(v.githubRepo.toLowerCase()); coveredFacets.add(normLabel(v.name)); }
   }
+  // Self-match guard: a user's own project repos must never be surfaced as
+  // candidates to themselves. Matters once projects register by real upstream
+  // owner/name — a notable repo can appear in its own scouted search results.
+  // Applies whether scoped to one repo or running the global firehose.
+  const ownProjects = await db
+    .select({ full: schema.projectProfiles.githubFullName })
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.userId, auth.userId), eq(schema.projectProfiles.active, true)));
+  for (const op of ownProjects) if (op.full) knownRepoFullNames.add(op.full.toLowerCase());
+
   // Punctuation-blind dep set for the exclusion check: the PyPI name
   // "segmentation-models-pytorch" must catch the repo "segmentation_models.pytorch".
   const productDepsNorm = new Set([...productDeps].map((d) => normLabel(d)));
@@ -1468,7 +1527,7 @@ export async function GET(req: Request) {
     } else if (top.source === "catalogue-adjacent") {
       // Exploratory adjacency: a capability the project doesn't have but is
       // near. Frame it as a suggestion, not a fit.
-      const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
+      const topDesc = top.description ? ` — ${clipDesc(top.description, 70)}` : "";
       displayText = `By the way — \`${top.repo}\` could add ${top.matchedFacet} to this project (adjacent to what you already do)${topDesc}. ${candidatesOut.length} Replen suggestion${candidatesOut.length === 1 ? "" : "s"} for this repo — want me to take a look?`;
     } else if (top.source === "re-checked") {
       // Re-check lead: the deferred repo is the only/strongest thing today.
@@ -1477,13 +1536,13 @@ export async function GET(req: Request) {
       // Facet-led: surface WHICH capability it fills, not a bare "% match".
       // This is the component-fit framing — "helps with your X" rather than
       // "looks like your project" (which would be a competitor).
-      const topDesc = top.description ? ` — ${top.description.slice(0, 70).replace(/\.$/, "")}` : "";
+      const topDesc = top.description ? ` — ${clipDesc(top.description, 70)}` : "";
       // Multi-repo: attribute to the sibling repo it's actually for.
       const forWhat = top.matchedRepo ? `your \`${top.matchedRepo}\` repo's ${top.matchedFacet}` : `your ${top.matchedFacet}`;
       displayText = `By the way — \`${top.repo}\` could help with ${forWhat}${topDesc}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
     } else {
       const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
-      const topDesc = top.description ? ` — ${top.description.slice(0, 80).replace(/\.$/, "")}` : "";
+      const topDesc = top.description ? ` — ${clipDesc(top.description, 80)}` : "";
       displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
     }
   }
@@ -1545,7 +1604,7 @@ export async function GET(req: Request) {
         const ptKey = (t: { practice: string; fromProject: string }) => `practice:${normFacetLabel(t.practice)}:${t.fromProject}`;
         const pt = transfers.find((t) => !seenKeys.has(ptKey(t)));
         if (pt) {
-          displayText = `Nothing new for this repo today — but a portfolio pattern: \`${pt.fromProject}\` uses **${pt.practice}** (${pt.description.slice(0, 110).replace(/\.$/, "")}). This project is close enough that it might fit here too — want me to look at whether it'd help?`;
+          displayText = `Nothing new for this repo today — but a portfolio pattern: \`${pt.fromProject}\` uses **${pt.practice}** (${clipDesc(pt.description, 110)}). This project is close enough that it might fit here too — want me to look at whether it'd help?`;
           await db.insert(schema.leapSurfaces).values({ userId: auth.userId, projectId: scopedProjectId, leapKey: ptKey(pt), surfacedAt: new Date() });
         } else {
           const leaps = await computeLeaps(auth.userId, { scopeProject: scopedProject.slug, limit: 6 });

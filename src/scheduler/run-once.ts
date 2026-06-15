@@ -23,6 +23,7 @@ function sha256Hex(text: string): string {
 }
 import { generateProjectSummary, needsRegeneration, PROMPT_VERSION, type ProjectSummary } from "../projects/summarize";
 import { assessDocSparsity } from "../projects/self-improvement";
+import { testUserIds } from "../lib/test-cohort";
 import {
   generateSearchVectors,
   vectorsNeedRegeneration,
@@ -754,20 +755,26 @@ async function refreshCatalogueStep(runId: number, userId: number): Promise<void
     .select({ uid: schema.projectProfiles.userId, summaryJson: schema.projectProfiles.summaryJson })
     .from(schema.projectProfiles)
     .where(and(eq(schema.projectProfiles.active, true), eq(schema.projectProfiles.included, true)));
+  const testUids = await testUserIds();
   const usersByLabel = new Map<string, Set<number>>();
   const myLabels: string[] = [];
   const mySeen = new Set<string>();
   for (const p of all) {
     if (!p.summaryJson || p.uid == null) continue;
     const uid = p.uid;
+    const isTestUser = testUids.has(uid);
     let caps: string[] = [];
     try { caps = (JSON.parse(p.summaryJson) as ProjectSummary).capabilityTags ?? []; } catch { continue; }
     for (const c of caps) {
       if (typeof c !== "string") continue;
       const k = c.toLowerCase();
-      let s = usersByLabel.get(k);
-      if (!s) { s = new Set(); usersByLabel.set(k, s); }
-      s.add(uid);
+      // Only real users count toward k-anon shareability — a test-cohort user
+      // never helps a capability cross the threshold and become searched.
+      if (!isTestUser) {
+        let s = usersByLabel.get(k);
+        if (!s) { s = new Set(); usersByLabel.set(k, s); }
+        s.add(uid);
+      }
       if (uid === userId && !mySeen.has(k)) { mySeen.add(k); myLabels.push(c); }
     }
   }

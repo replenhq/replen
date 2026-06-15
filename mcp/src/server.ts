@@ -106,6 +106,8 @@ const TOOLS: Tool[] = [
       "  2. DATA (the JSON below the divider): the structured candidate list with metadata + cosine scores + whyShortlisted lines. " +
       "Use these for the in-session triage if the user accepts the 'Want me to triage them?' offer. Don't show this raw to the user.\n" +
       "\n" +
+      "ONBOARDING CASE: if the DATA has `needsOnboarding: true`, this repo is registered with Replen but not yet profiled (identity + tags only, no capability facets), so there are no candidates to triage. Relay the USER-FACING MESSAGE (the offer to profile it) and, ONLY if the user accepts, follow the DATA's `note` field — read the code, derive grounded capabilities, and call replen_set_capabilities (+ replen_set_versions). Then matching works next time. Do NOT triage the global firehose in this case.\n" +
+      "\n" +
       "TRIAGE PROTOCOL (only when the user accepts):\n" +
       "  1. For each candidate, WebFetch the candidate's README + grep the user's source for related code (under src/, lib/, app/ — skip node_modules, dist, .next).\n" +
       "  2. Form a verdict: 'adopt' (drop-in fit), 'port' (idea worth copying, runtime mismatched), 'skip' (worse than what they have, or wrong runtime), 'defer' (good but not now). Score 0-100. Effort: 'quick' (<1d), 'moderate' (1-3d), 'deep' (1+w). For a skip, classify the reason (reasonCode): 'covered' (already built/depended-on — use ONLY when you confirmed the implementation in-code), 'modality-collision', 'task-collision', 'wrong-posture', 'low-quality', 'other'.\n" +

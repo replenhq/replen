@@ -69,8 +69,12 @@ export async function findSimilarProjectPromotions(opts: {
     })
     .from(schema.triageEvents)
     .innerJoin(schema.projectProfiles, eq(schema.projectProfiles.id, schema.triageEvents.projectId))
+    .innerJoin(schema.users, eq(schema.users.id, schema.triageEvents.userId))
     .where(and(
       ne(schema.triageEvents.userId, userId),
+      // Exclude the synthetic test cohort — their endorsements must never
+      // promote a repo into a real user's pool.
+      ne(schema.users.role, "test"),
       inArray(schema.triageEvents.verdict, ["adopt", "port"]),
       isNotNull(schema.projectProfiles.embedding),
     ))

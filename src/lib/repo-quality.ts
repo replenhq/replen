@@ -9,7 +9,7 @@
 // aggregate impossible to drift out of sync with the source of truth.
 
 import { db, schema } from "@/db/client";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 
 export type RepoQualityTallies = {
   adoptUsers: number;
@@ -72,7 +72,10 @@ export async function recomputeRepoQuality(repoId: number, now: Date = new Date(
       id: schema.triageEvents.id,
     })
     .from(schema.triageEvents)
-    .where(eq(schema.triageEvents.repoId, repoId));
+    .innerJoin(schema.users, eq(schema.users.id, schema.triageEvents.userId))
+    // Test-cohort triages never enter the cross-user repo_quality aggregate,
+    // so they can't drive global-demote or cross-user leaps for real users.
+    .where(and(eq(schema.triageEvents.repoId, repoId), ne(schema.users.role, "test")));
 
   const t = tallyLatestVerdicts(events);
 
