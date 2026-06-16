@@ -297,6 +297,12 @@ typed properties, computed properties as rows", never the entity names).
      `military-drones`, `counter-uas`). The COLLECTIVE pins the meaning: a
      candidate that hits one term but none of its neighbours is a different
      world and scores low.
+   - QUALIFY AMBIGUOUS HEAD-NOUNS. If a tag's core noun is ambiguous ACROSS
+     fields (`agent`, `carry`, `model`, `pipeline`, `driver`, `mission`),
+     prefix it with the domain so the compound carries the meaning —
+     `estate-agent-matching` NOT `agent-matching`, `funding-carry` NOT `carry`.
+     A bare head-noun like `agent-matching` decomposes in embedding space toward
+     the wrong field (AI agents) and drags the whole project's centroid with it.
    - GROUNDED ONLY — every tag supported by code you actually read; never
      aspirational (don't add `scraping` if it doesn't scrape).
    - EXCLUDE: stack / framework / language (`next.js`, `react`, `firebase`,

@@ -84,6 +84,7 @@ const INFRA_CORE =
   "docker( compose)?|dockerfile|containeri[sz]ation|kubernetes|k8s|helm|" +
   "ci ?/? ?cd|continuous (integration|delivery|deployment)|github actions|gitlab ci|" +
   "terraform|infrastructure as code|deployment|devops|cloud infrastructure|" +
+  "job ?queues?|task ?queues?|message ?queues?|worker ?queues?|queues?|bullmq|celery|sidekiq|" +
   "nginx|reverse proxy|load balancing|environment variables?|configuration|secrets management)";
 const GENERIC_INFRA_RE = new RegExp(
   `^${INFRA_CORE}( (integration|support|setup|config(uration)?|storage|hosting|pipeline|workflows?|deployment|management|automation))?$`,
@@ -107,6 +108,7 @@ const GENERIC_CAP_CORE =
   "database|databases|data ?store|persistence|postgres(ql)?|mysql|sqlite|mongodb|" +
   "caching|cache|logging|monitoring|observability|telemetry|metrics|" +
   "api|apis|rest api|backend|frontend|full ?stack|web app|application|library|framework|" +
+  "html|html5|css|css3|markup|stylesheet|web ?page|static site|" +
   "scanner|scanning|scanner testing|testing|automation|tooling|integration|general)";
 const GENERIC_CAP_RE = new RegExp(
   `^${GENERIC_CAP_CORE}( (support|integration|layer|module|system|engine|service|pipeline|management))?$`,

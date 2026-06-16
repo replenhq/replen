@@ -352,6 +352,9 @@ const TOOLS: Tool[] = [
       "abbreviations, expansions and broader/narrower neighbours — not just 'uas' but 'unmanned-systems', " +
       "'unmanned-aerial-systems', 'uav', 'drone', 'drones', 'military-drones', 'counter-uas'. The COLLECTIVE pins the " +
       "meaning: a candidate hitting one term but none of its neighbours is a different world and scores low.\n" +
+      "- QUALIFY AMBIGUOUS HEAD-NOUNS: if a tag's core noun is ambiguous across fields (agent, carry, model, pipeline, " +
+      "driver), prefix it with the domain so the compound carries the meaning — 'estate-agent-matching' NOT " +
+      "'agent-matching', 'funding-carry' NOT 'carry'. A bare head-noun decomposes toward the wrong field and drags the centroid.\n" +
       "- GROUNDED ONLY — every tag supported by code you actually read; never aspirational.\n" +
       "- EXCLUDE stack/framework/language (next.js, react, firebase, typescript, fastapi, postgres — those go via " +
       "replen_set_versions, NOT here) and generic SaaS plumbing (authentication, signup, user-roles, " +

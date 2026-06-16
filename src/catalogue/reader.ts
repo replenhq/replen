@@ -62,6 +62,11 @@ const CROSS_LANG_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_CATALOGUE_C
 // surface. Stars are a terrible "obvious" proxy; "obvious" = the agent's default,
 // which the commodity filter + known-deps exclusion already capture categorically.
 const COVERED_PENALTY = Math.max(0, parseFloat(process.env.REPLEN_CATALOGUE_COVERED_PENALTY ?? "0.10"));
+// Split floor: a pure-centroid (non-facet-led) match is fuzzier than a grounded
+// capability hit, so it must clear a higher bar — drops off-domain whole-project
+// lookalikes grazing the floor while facet matches stay at the base. Mirrors the
+// inventory route's REPLEN_SEMANTIC_FLOOR_PREMIUM.
+const SEMANTIC_FLOOR_PREMIUM = Math.max(0, parseFloat(process.env.REPLEN_SEMANTIC_FLOOR_PREMIUM ?? "0.03"));
 const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 // Commodity-layer suppression — the core "don't suggest basic stuff" lever.
@@ -245,7 +250,9 @@ export async function catalogueMatches(opts: {
       if (base !== undefined && cosine < base + FACET_CAL_MARGIN) continue;
     }
     const effective = cosine - langPen - commodityPen - coveredPen - infraPen - idfPen(matchedFacet) + provenanceAdj(matchedProvenance ?? undefined);
-    if (!Number.isFinite(effective) || effective < minCosine) continue;
+    // Split floor: facet-led clears the base; pure-centroid must clear base + premium.
+    const floor = facetLed ? minCosine : minCosine + SEMANTIC_FLOOR_PREMIUM;
+    if (!Number.isFinite(effective) || effective < floor) continue;
 
     const facetLeads = Number.isFinite(bestFacet) && bestFacet >= cVal + facetLead;
     // Competitor suppression: an app that matches the whole project (high
@@ -366,9 +373,23 @@ export async function adjacentMatches(opts: {
     .orderBy(desc(schema.catalogueRepos.stars))
     .limit(SCAN_CAP);
 
+  // Project facet vectors by label — used to pick the BEST-FIT repo for an
+  // adjacent capability rather than the highest-star one. The catalogue pool is
+  // pulled star-desc only as a scan bound; selection below is by embedding fit.
+  const facetVecByLabel = new Map<string, number[]>();
+  for (const f of projectFacets) facetVecByLabel.set(f.label.toLowerCase(), f.vec);
+
   const out: AdjacentMatch[] = [];
   const used = new Set<string>();
   for (const a of top) {
+    const probeVec = facetVecByLabel.get(a.nearest.toLowerCase()) ?? null;
+    // Among repos that genuinely provide this adjacent capability, pick the one
+    // whose EMBEDDING fits the project facet best — NOT the highest-star one.
+    // Star-ranking let a mega-platform win an ambiguous label ("scheduler" →
+    // kubernetes, "embeddings" → rocksdb); fit-ranking keeps the word-sense
+    // right and lets a novel niche repo win on relevance.
+    let bestRepo: typeof repos[number] | null = null;
+    let bestFit = -Infinity;
     for (const r of repos) {
       const fn = r.fullName.toLowerCase();
       if (excludeFullNames.has(fn) || used.has(fn)) continue;
@@ -380,17 +401,28 @@ export async function adjacentMatches(opts: {
       let topics: string[] = [];
       try { topics = r.topics ? JSON.parse(r.topics) : []; } catch { /* ignore */ }
       if (commodityPenalty(r.name, r.description, topics) > 0) continue; // skip basic commodity libs
-      used.add(fn);
-      out.push({
-        fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
-        url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
-        topics, repoShape: r.repoShape, cosine: a.cos, matchedFacet: null, matchedProvenance: null, matchedRepo: null,
-        ageDays: r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null,
-        rising: false,
-        adjacentTo: a.nearest, adjacentCapability: a.label,
-      });
-      break;
+      const rv = probeVec ? parseStoredEmbedding(r.embedding) : null;
+      const fit = rv && probeVec ? cosineSimilarity(rv, probeVec) : 0;
+      if (fit > bestFit) { bestFit = fit; bestRepo = r; }
     }
+    // A shared capability LABEL isn't enough — require the chosen repo to sit
+    // genuinely NEAR the project facet (kubernetes "scheduler" embeds nowhere
+    // near an in-process job scheduler, so it fails this and is dropped). When
+    // there's no probe vec to score against, fall back to the old behaviour.
+    if (!bestRepo) continue;
+    if (probeVec && bestFit < adjLo) continue;
+    const r = bestRepo;
+    used.add(r.fullName.toLowerCase());
+    let topics: string[] = [];
+    try { topics = r.topics ? JSON.parse(r.topics) : []; } catch { /* ignore */ }
+    out.push({
+      fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
+      url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
+      topics, repoShape: r.repoShape, cosine: a.cos, matchedFacet: null, matchedProvenance: null, matchedRepo: null,
+      ageDays: r.createdAt ? Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) : null,
+      rising: false,
+      adjacentTo: a.nearest, adjacentCapability: a.label,
+    });
     if (out.length >= limit) break;
   }
   return out;

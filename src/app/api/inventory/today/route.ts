@@ -188,7 +188,7 @@ export async function GET(req: Request) {
               "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []); " +
               "(3) call replen_set_capabilities (mode='replace') with those capabilities, plus a short grounded `report` and a 1-2 sentence `purpose` when you can; " +
               "(4) read the lockfile and call replen_set_versions with the resolved direct dependency versions; " +
-              "(5) call replen_set_tags with a DENSE, RANKED domain tag cloud (aim 25-50+, most-central first) — the WORLD the project operates in: sector + synonyms ('estate-agents','letting-agents','property','proptech'), job-to-be-done ('lead-generation','lead-routing'), and entities/data ('uk-postcodes','uk-addresses','landlords','property-listings'). DISAMBIGUATE BY DENSITY: for any ambiguous term emit its synonyms/abbreviations/neighbours too (not just 'uas' but 'unmanned-systems','uav','drone','drones','military-drones') so the collective pins the meaning. GROUNDED ONLY. EXCLUDE stack ('typescript'/'next.js'/'react'/'firebase' — those go via replen_set_versions) and generic SaaS plumbing ('auth','signup','subscription-management','crud'). The auto-detected stack tags from registration are near-useless for matching; the dense domain cloud is what lets matching surface relevant candidates instead of generic frameworks. " +
+              "(5) call replen_set_tags with a DENSE, RANKED domain tag cloud (aim 25-50+, most-central first) — the WORLD the project operates in: sector + synonyms ('estate-agents','letting-agents','property','proptech'), job-to-be-done ('lead-generation','lead-routing'), and entities/data ('uk-postcodes','uk-addresses','landlords','property-listings'). DISAMBIGUATE BY DENSITY: for any ambiguous term emit its synonyms/abbreviations/neighbours too (not just 'uas' but 'unmanned-systems','uav','drone','drones','military-drones') so the collective pins the meaning. QUALIFY AMBIGUOUS HEAD-NOUNS with the domain ('estate-agent-matching' not 'agent-matching') so a bare noun doesn't drag the centroid toward the wrong field. GROUNDED ONLY. EXCLUDE stack ('typescript'/'next.js'/'react'/'firebase' — those go via replen_set_versions) and generic SaaS plumbing ('auth','signup','subscription-management','crud'). The auto-detected stack tags from registration are near-useless for matching; the dense domain cloud is what lets matching surface relevant candidates instead of generic frameworks. " +
               "Matching then works on the next replen_match. Lead with the one-line offer; only do the work if the user accepts.",
           },
           { headers: corsHeaders },
@@ -575,11 +575,31 @@ export async function GET(req: Request) {
   // when set as a goal (you may build it now AND want better tooling later).
   const coveredSkipFacets = new Set<string>();
   for (const slug of productSlugs) for (const f of prior.coveredSkips.get(slug) ?? []) coveredSkipFacets.add(f);
+  // Map deps to their canonical GitHub repos (next → vercel/next.js), so the
+  // exclusion catches libraries whose package name ≠ repo name. Computed BEFORE
+  // probe selection so dep-covered facets can be barred from leading.
+  const knownRepoFullNames = new Set<string>();
+  // Capability facets the project ALREADY has a dependency for ("Tailwind CSS"
+  // because it uses tailwindcss; "web push" because it uses web-push). A facet
+  // you have a DEP for is SOLVED — surfacing more of the same stack-library is
+  // low value ("another TanStack util"). It stays valid for coverage, but must
+  // not LEAD a match or pull catalogue.
+  const coveredFacets = new Set<string>();
+  const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  for (const d of productDeps) {
+    coveredFacets.add(normLabel(d));
+    const v = vendorForDep(d);
+    if (v) { knownRepoFullNames.add(v.githubRepo.toLowerCase()); coveredFacets.add(normLabel(v.name)); }
+  }
   const probeFacets = projectFacets.filter((f) => {
     const nf = normFacetLabel(f.label);
     if (goalLabels.has(nf)) return true; // stated intent overrides every suppression
     if (isGenericProbeFacetLabel(f.label)) return false; // infra + vague-generic
     if (coveredSkipFacets.has(nf)) return false;
+    // Domain-over-stack: a facet you already have a dependency for is solved —
+    // it can't LEAD a match or pull catalogue, so a same-stack library never
+    // headlines and the lead goes to genuine gaps + domain capabilities.
+    if (coveredFacets.has(normLabel(f.label))) return false;
     return true;
   });
   // Modality per facet label (union across product repos) — for checking a
@@ -589,19 +609,6 @@ export async function GET(req: Request) {
     if (!f.modality?.length) continue;
     const k = normFacetLabel(f.label);
     facetModsByLabel.set(k, [...new Set([...(facetModsByLabel.get(k) ?? []), ...f.modality])]);
-  }
-  // Map deps to their canonical GitHub repos (next → vercel/next.js), so the
-  // exclusion catches libraries whose package name ≠ repo name.
-  const knownRepoFullNames = new Set<string>();
-  // Capability facets the project ALREADY has a dependency for ("Tailwind CSS"
-  // because it uses tailwindcss). Matches led by these are "more of what you
-  // have" — down-ranked so genuine gaps + non-obvious finds surface instead.
-  const coveredFacets = new Set<string>();
-  const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  for (const d of productDeps) {
-    coveredFacets.add(normLabel(d));
-    const v = vendorForDep(d);
-    if (v) { knownRepoFullNames.add(v.githubRepo.toLowerCase()); coveredFacets.add(normLabel(v.name)); }
   }
   // Self-match guard: a user's own project repos must never be surfaced as
   // candidates to themselves. Matters once projects register by real upstream
@@ -653,6 +660,13 @@ export async function GET(req: Request) {
   // (where the footnote fires); zero-knowledge mode and the explicit global
   // firehose (repo='') opt out — there the user has asked to see everything.
   const MIN_COSINE = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_MIN_COSINE ?? "0.48")));
+  // Split floor: a PURE-CENTROID match (no specific capability led — just whole-
+  // project similarity) is fuzzier than a grounded facet hit, so it must clear a
+  // higher bar. This drops the off-domain whole-project lookalikes that graze
+  // the base floor (an AI-agent repo near an estate-AGENT project, a research
+  // assistant near a consulting tool) while leaving genuine facet matches — which
+  // are anchored to a real capability — at the base floor.
+  const SEMANTIC_FLOOR_PREMIUM = Math.max(0, parseFloat(process.env.REPLEN_SEMANTIC_FLOOR_PREMIUM ?? "0.03"));
   // Headline confidence margin: a candidate clears the inventory FLOOR (so it's
   // worth keeping for opt-in triage) at projectFloor, but it only earns the
   // unsolicited "by the way" WOW line if it beats the floor by this margin. Keeps
@@ -871,6 +885,8 @@ export async function GET(req: Request) {
     // LED by an inferred/ambiguous facet pays the provenance premium on top.
     if (applyFloor && !depMatch) {
       let bar = projectFloor + (matchedFacet !== null && needsProvenancePremium(matchedProvenance) ? INFERRED_PREMIUM : 0);
+      // Split floor: no facet led → pure whole-project similarity → higher bar.
+      if (matchedFacet === null) bar = Math.max(bar, projectFloor + SEMANTIC_FLOOR_PREMIUM);
       // Per-facet calibration: a facet-led match must clear that facet's OWN
       // pool noise floor by a margin, not just the global floor. This is what
       // suppresses the disk-cleaner-at-0.82-on-"optimization" class — 0.82 is
@@ -1504,15 +1520,20 @@ export async function GET(req: Request) {
   // cross-project leap beats a weak candidate). Rules: dependency/spec/security
   // matches and deliberate re-checks always qualify (high-signal regardless of
   // cosine); exploratory adjacency NEVER headlines (it's speculative — this was
-  // the Turing.jl-on-a-CV-repo false positive); a facet match must clear the
-  // floor by HEADLINE_MARGIN, a bare-semantic match by 2× (it's the weakest fit).
+  // the Turing.jl-on-a-CV-repo false positive). The facet bar is graduated by
+  // TRUST, not raw cosine: a GROUNDED facet (the agent confirmed it with a
+  // descriptor) headlines at half-margin; an extracted/inferred facet at the
+  // full margin; a bare-semantic match at 2× (weakest fit). This stops a
+  // commodity-but-high-cosine match (a job-queue lib you already cover) from
+  // out-shouting a grounded domain match that sits a hair under the full bar.
   const headlineTop = candidatesOut[0];
+  const facetHeadlineBar = projectFloor + (headlineTop?.matchedProvenance === "grounded" ? HEADLINE_MARGIN / 2 : HEADLINE_MARGIN);
   const headlineWorthy = !!(headlineTop && scopedProject && (
     headlineTop.dependencyMatch === true ||
     headlineTop.source === "re-checked" ||
     (headlineTop.source !== "catalogue-adjacent" && (
       headlineTop.matchedFacet
-        ? (headlineTop.cosine ?? 0) >= projectFloor + HEADLINE_MARGIN
+        ? (headlineTop.cosine ?? 0) >= facetHeadlineBar
         : (headlineTop.cosine ?? 0) >= projectFloor + 2 * HEADLINE_MARGIN
     ))
   ));

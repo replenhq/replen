@@ -429,6 +429,18 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
     setSelected(n);
   }, [nodes, initialFocus]);
 
+  // Click a connection in the dossier → focus that node in the graph (same
+  // select-and-center path as a canvas click / the deep-link focus).
+  const navigateTo = (t: { kind: string; nodeKey: string }) => {
+    const n = nodes.find((x) => x.kind === t.kind && x.nodeKey === t.nodeKey)
+      ?? nodes.find((x) => x.kind === t.kind && x.label.toLowerCase() === t.nodeKey.toLowerCase());
+    if (!n) return;
+    selRef.current = n.id;
+    pendingCenterRef.current = n.id;
+    orbitFrozenRef.current = true;
+    setSelected(n);
+  };
+
   const toggleKind = (k: string) => {
     const next = new Set(kinds);
     if (next.has(k)) next.delete(k); else next.add(k);
@@ -576,7 +588,17 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
                 <div key={s.heading} style={{ marginTop: 12 }}>
                   <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.heading}</div>
                   <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {s.items.map((it, i) => <li key={i} style={{ margin: "3px 0", color: "#ccc" }}>{it}</li>)}
+                    {s.items.map((it, i) => {
+                      const nav = s.links?.[i];
+                      return nav ? (
+                        <li key={i} style={{ margin: "3px 0" }}>
+                          <span onClick={() => navigateTo(nav)} title="Go to this node"
+                            style={{ color: "#7fb2e8", cursor: "pointer" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{it}</span>
+                        </li>
+                      ) : <li key={i} style={{ margin: "3px 0", color: "#ccc" }}>{it}</li>;
+                    })}
                   </ul>
                 </div>
               ))}

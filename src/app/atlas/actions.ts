@@ -24,11 +24,16 @@ function rebuildAndRevalidate(userId: number): void {
     .catch((e) => console.warn("[atlas] post-action graph rebuild failed:", e));
 }
 
+// A navigable reference from a dossier item to another graph node. When set,
+// the panel renders the item as a link that focuses that node in the graph.
+export type NavTarget = { kind: string; nodeKey: string };
+
 export type Dossier = {
   kind: string;
   title: string;
   subtitle?: string | null;
-  sections: Array<{ heading: string; items: string[] }>;
+  // `links[i]` (when present) is the node `items[i]` navigates to on click.
+  sections: Array<{ heading: string; items: string[]; links?: (NavTarget | null)[] }>;
   url?: string | null;
   blindspot?: boolean;
   queueSuggestion?: string | null; // prefilled title for the queue button
@@ -49,6 +54,14 @@ export type Dossier = {
 };
 
 const j = (s: string | null): Record<string, unknown> => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
+
+// Build a navigable section from {text, to} items (to = the node it links to).
+// Sorts items + their links together so the parallel arrays stay aligned.
+type NavItem = { text: string; to?: NavTarget };
+const navSection = (heading: string, items: NavItem[], sort = true): { heading: string; items: string[]; links: (NavTarget | null)[] } => {
+  const arr = sort ? items.slice().sort((a, b) => a.text.localeCompare(b.text)) : items;
+  return { heading, items: arr.map((i) => i.text), links: arr.map((i) => i.to ?? null) };
+};
 const fmtDate = (iso: string | null | undefined) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -69,9 +82,9 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
   const anchoredNote = noteRow?.note ?? null;
 
   if (kind === "project") {
-    const caps: string[] = [];
-    const decisions: string[] = [];
-    const tools: string[] = [];
+    const caps: NavItem[] = [];
+    const decisions: NavItem[] = [];
+    const tools: NavItem[] = [];
     for (const e of edges) {
       if (e.srcId !== node.id) continue;
       const dst = byId.get(e.dstId);
@@ -79,17 +92,17 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
       const ed = j(e.data);
       if (e.kind === "HAS_CAPABILITY") {
         const paths = Array.isArray(ed.paths) ? (ed.paths as string[]) : [];
-        caps.push(`${dst.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths[0]}` : ""}`);
+        caps.push({ text: `${dst.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths[0]}` : ""}`, to: { kind: "capability", nodeKey: dst.nodeKey } });
       }
-      if (e.kind === "EVALUATED") decisions.push(`${ed.verdict} — ${dst.label}${ed.reasonCode ? ` (${ed.reasonCode})` : ""}${ed.oneLine ? `: ${ed.oneLine}` : ""}${ed.at ? ` · ${fmtDate(String(ed.at))}` : ""}`);
-      if (e.kind === "USES") tools.push(`${dst.label}${ed.version ? `@${ed.version}` : ""}`);
+      if (e.kind === "EVALUATED") decisions.push({ text: `${ed.verdict} — ${dst.label}${ed.reasonCode ? ` (${ed.reasonCode})` : ""}${ed.oneLine ? `: ${ed.oneLine}` : ""}${ed.at ? ` · ${fmtDate(String(ed.at))}` : ""}`, to: { kind: "candidate", nodeKey: dst.nodeKey } });
+      if (e.kind === "USES") tools.push({ text: `${dst.label}${ed.version ? `@${ed.version}` : ""}`, to: { kind: "tool", nodeKey: dst.nodeKey } });
     }
     // Why is this project connected to others? RELATES_TO carries the reason
     // (shared meaningful capabilities, or centroid similarity); IN_DOMAIN gives
     // sector membership; INSIGHT_FOR the lessons/boundaries it produced.
-    const related: string[] = [];
-    const domains: string[] = [];
-    const insights: string[] = [];
+    const related: NavItem[] = [];
+    const domains: NavItem[] = [];
+    const insights: NavItem[] = [];
     for (const e of edges) {
       const ed = j(e.data);
       if (e.kind === "RELATES_TO" && (e.srcId === node.id || e.dstId === node.id)) {
@@ -99,11 +112,11 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
           const why = sc.length
             ? `shares ${sc.slice(0, 4).join(", ")}`
             : (typeof e.weight === "number" ? `${Math.round(e.weight * 100)}% similar` : "related");
-          related.push(`${other.label} — ${why}`);
+          related.push({ text: `${other.label} — ${why}`, to: { kind: "project", nodeKey: other.nodeKey } });
         }
       }
-      if (e.kind === "IN_DOMAIN" && e.srcId === node.id) { const d = byId.get(e.dstId); if (d) domains.push(d.label); }
-      if (e.kind === "INSIGHT_FOR" && e.srcId === node.id) { const ins = byId.get(e.dstId); if (ins) insights.push(`${ins.kind}: ${ins.label}`); }
+      if (e.kind === "IN_DOMAIN" && e.srcId === node.id) { const d = byId.get(e.dstId); if (d) domains.push({ text: d.label, to: { kind: "domain", nodeKey: d.nodeKey } }); }
+      if (e.kind === "INSIGHT_FOR" && e.srcId === node.id) { const ins = byId.get(e.dstId); if (ins) insights.push({ text: `${ins.kind}: ${ins.label}`, to: { kind: ins.kind, nodeKey: ins.nodeKey } }); }
     }
     const profile = await db.select({ summaryJson: schema.projectProfiles.summaryJson, githubFullName: schema.projectProfiles.githubFullName })
       .from(schema.projectProfiles)
@@ -112,12 +125,12 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     const queued = await db.select({ title: schema.queuedActions.title }).from(schema.queuedActions)
       .where(and(eq(schema.queuedActions.userId, user.id), eq(schema.queuedActions.status, "queued"), eq(schema.queuedActions.projectSlug, nodeKey)));
     const sections: Dossier["sections"] = [];
-    if (caps.length) sections.push({ heading: `Capabilities (${caps.length})`, items: caps.sort() });
-    if (domains.length) sections.push({ heading: `Domains (${domains.length})`, items: domains.sort() });
-    if (related.length) sections.push({ heading: `Related projects (${related.length})`, items: related.sort() });
-    if (tools.length) sections.push({ heading: `Uses (${tools.length})`, items: tools.sort().slice(0, 40) });
-    if (insights.length) sections.push({ heading: `Insights (${insights.length})`, items: insights });
-    if (decisions.length) sections.push({ heading: `Decisions (${decisions.length})`, items: decisions });
+    if (caps.length) sections.push(navSection(`Capabilities (${caps.length})`, caps));
+    if (domains.length) sections.push(navSection(`Domains (${domains.length})`, domains));
+    if (related.length) sections.push(navSection(`Related projects (${related.length})`, related));
+    if (tools.length) sections.push(navSection(`Uses (${tools.length})`, tools.slice().sort((a, b) => a.text.localeCompare(b.text)).slice(0, 40), false));
+    if (insights.length) sections.push(navSection(`Insights (${insights.length})`, insights, false));
+    if (decisions.length) sections.push(navSection(`Decisions (${decisions.length})`, decisions, false));
     if (queued.length) sections.push({ heading: "Queued work", items: queued.map((q) => q.title) });
     const projGoals = await db.select().from(schema.capabilityGoals)
       .where(and(eq(schema.capabilityGoals.userId, user.id), eq(schema.capabilityGoals.status, "active"), eq(schema.capabilityGoals.projectSlug, nodeKey)));
@@ -130,31 +143,31 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
   }
 
   if (kind === "capability") {
-    const usedIn: string[] = [];
-    const adjacent: string[] = [];
-    const fills: string[] = [];
+    const usedIn: NavItem[] = [];
+    const adjacent: NavItem[] = [];
+    const fills: NavItem[] = [];
     for (const e of edges) {
       if (e.kind === "HAS_CAPABILITY" && e.dstId === node.id) {
         const src = byId.get(e.srcId);
         const ed = j(e.data);
         const paths = Array.isArray(ed.paths) ? (ed.paths as string[]) : [];
-        if (src) usedIn.push(`${src.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths.join(", ")}` : ""}`);
+        if (src) usedIn.push({ text: `${src.label} · ${ed.provenance ?? "inferred"}${paths.length ? ` — ${paths.join(", ")}` : ""}`, to: { kind: "project", nodeKey: src.nodeKey } });
       }
       if (e.kind === "ADJACENT_TO" && (e.srcId === node.id || e.dstId === node.id)) {
         const other = byId.get(e.srcId === node.id ? e.dstId : e.srcId);
-        if (other) adjacent.push(`${other.label}${e.weight != null ? ` (${e.weight.toFixed(2)})` : ""}`);
+        if (other) adjacent.push({ text: `${other.label}${e.weight != null ? ` (${e.weight.toFixed(2)})` : ""}`, to: { kind: "capability", nodeKey: other.nodeKey } });
       }
       if (e.kind === "FILLS" && e.dstId === node.id) {
         const cand = byId.get(e.srcId);
-        if (cand) fills.push(cand.label);
+        if (cand) fills.push({ text: cand.label, to: { kind: "candidate", nodeKey: cand.nodeKey } });
       }
     }
     const blindspot = fills.length === 0;
     const sections: Dossier["sections"] = [];
-    if (usedIn.length) sections.push({ heading: `Used in (${usedIn.length})`, items: usedIn.sort() });
-    if (fills.length) sections.push({ heading: "Filled by", items: fills });
+    if (usedIn.length) sections.push(navSection(`Used in (${usedIn.length})`, usedIn));
+    if (fills.length) sections.push(navSection("Filled by", fills, false));
     else sections.push({ heading: "Coverage", items: ["Blind spot — nothing has ever been evaluated against this capability. Blind-spot scouting searches it on the next pipeline run."] });
-    if (adjacent.length) sections.push({ heading: "Adjacent capabilities", items: adjacent.slice(0, 8) });
+    if (adjacent.length) sections.push(navSection("Adjacent capabilities", adjacent.slice(0, 8), false));
     const mods = Array.isArray(data.modality) ? (data.modality as string[]) : [];
     const aliases = Array.isArray(data.aliases) ? (data.aliases as string[]) : [];
     if (aliases.length) sections.push({ heading: "Also known as", items: aliases });
@@ -162,18 +175,18 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
       kind, title: node.label,
       subtitle: [data.themeName ? `theme: ${data.themeName}` : null, data.waypoint ? "waypoint" : null, mods.length ? `modality: ${mods.join(", ")}` : null].filter(Boolean).join(" · ") || null,
       sections, blindspot, note: anchoredNote,
-      capability: { label: node.label, provenance: usedIn.some((u) => u.includes("grounded")) ? "grounded" : null },
+      capability: { label: node.label, provenance: usedIn.some((u) => u.text.includes("grounded")) ? "grounded" : null },
       queueSuggestion: blindspot ? `Find a library for "${node.label}" (coverage blind spot)` : null,
     };
   }
 
   if (kind === "candidate") {
     const fullName = String(data.fullName ?? node.label);
-    const fillsC: string[] = [];
+    const fillsC: NavItem[] = [];
     for (const e of edges) {
       if (e.kind === "FILLS" && e.srcId === node.id) {
         const cap = byId.get(e.dstId);
-        if (cap) fillsC.push(cap.label);
+        if (cap) fillsC.push({ text: cap.label, to: { kind: "capability", nodeKey: cap.nodeKey } });
       }
     }
     // The decision log straight from triage_events — NOT the graph edges, so
@@ -206,7 +219,7 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     }
     const alts = await alternativesFor(fullName, 3).catch(() => []);
     const sections: Dossier["sections"] = [];
-    if (fillsC.length) sections.push({ heading: "Fills", items: fillsC });
+    if (fillsC.length) sections.push(navSection("Fills", fillsC, false));
     if (alts.length) sections.push({ heading: "Similar maintained libraries", items: alts.map((a) => `${a.fullName}${a.stars ? ` · ${a.stars}★` : ""}${a.adoptedBy ? ` · adopted by ${a.adoptedBy}` : ""}`) });
     return {
       kind, title: fullName,
@@ -217,18 +230,18 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
   }
 
   if (kind === "tool") {
-    const usedBy: string[] = [];
+    const usedBy: NavItem[] = [];
     for (const e of edges) {
       if (e.kind === "USES" && e.dstId === node.id) {
         const proj = byId.get(e.srcId);
         const v = j(e.data).version;
-        if (proj) usedBy.push(`${proj.label}${v ? ` @ ${v}` : ""}`);
+        if (proj) usedBy.push({ text: `${proj.label}${v ? ` @ ${v}` : ""}`, to: { kind: "project", nodeKey: proj.nodeKey } });
       }
     }
     const overlay = await computeOverlay(user.id);
     const o = overlay.get(`tool ${node.nodeKey}`);
     const sections: Dossier["sections"] = [];
-    if (usedBy.length) sections.push({ heading: `Used by (${usedBy.length})`, items: usedBy.sort() });
+    if (usedBy.length) sections.push(navSection(`Used by (${usedBy.length})`, usedBy));
     if (o?.alerts?.length) sections.push({ heading: "Last 14 days", items: o.alerts.map((a) => `[${a.type}/${a.severity}] ${a.title}`) });
     const pref = await db.select().from(schema.toolPrefs)
       .where(and(eq(schema.toolPrefs.userId, user.id), eq(schema.toolPrefs.tool, node.nodeKey))).get();
@@ -291,30 +304,30 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
   }
 
   if (kind === "product") {
-    const members: string[] = [];
+    const members: NavItem[] = [];
     for (const e of edges) {
       if (e.kind === "MEMBER_OF" && e.dstId === node.id) {
         const proj = byId.get(e.srcId);
-        if (proj) members.push(proj.label);
+        if (proj) members.push({ text: proj.label, to: { kind: "project", nodeKey: proj.nodeKey } });
       }
     }
-    return { kind, title: node.label, subtitle: `${members.length}-repo product`, sections: [{ heading: "Repos", items: members.sort() }] };
+    return { kind, title: node.label, subtitle: `${members.length}-repo product`, sections: [navSection("Repos", members)] };
   }
 
   if (kind === "domain") {
-    const projectsIn: string[] = [];
-    const relatedDomains: string[] = [];
+    const projectsIn: NavItem[] = [];
+    const relatedDomains: NavItem[] = [];
     for (const e of edges) {
-      if (e.kind === "IN_DOMAIN" && e.dstId === node.id) { const p = byId.get(e.srcId); if (p) projectsIn.push(p.label); }
+      if (e.kind === "IN_DOMAIN" && e.dstId === node.id) { const p = byId.get(e.srcId); if (p) projectsIn.push({ text: p.label, to: { kind: "project", nodeKey: p.nodeKey } }); }
       if (e.kind === "RELATED_DOMAIN" && (e.srcId === node.id || e.dstId === node.id)) {
         const other = byId.get(e.srcId === node.id ? e.dstId : e.srcId);
-        if (other) relatedDomains.push(`${other.label}${typeof e.weight === "number" ? ` (${e.weight} shared)` : ""}`);
+        if (other) relatedDomains.push({ text: `${other.label}${typeof e.weight === "number" ? ` (${e.weight} shared)` : ""}`, to: { kind: "domain", nodeKey: other.nodeKey } });
       }
     }
     const crossUsers = typeof data.crossUserUsers === "number" ? data.crossUserUsers : null;
     const sections: Dossier["sections"] = [];
-    if (projectsIn.length) sections.push({ heading: `Your projects here (${projectsIn.length})`, items: projectsIn.sort() });
-    if (relatedDomains.length) sections.push({ heading: "Related domains", items: relatedDomains.slice(0, 12) });
+    if (projectsIn.length) sections.push(navSection(`Your projects here (${projectsIn.length})`, projectsIn));
+    if (relatedDomains.length) sections.push(navSection("Related domains", relatedDomains.slice().sort((a, b) => a.text.localeCompare(b.text)).slice(0, 12), false));
     if (crossUsers) sections.push({ heading: "Across Replen", items: [`${crossUsers} distinct users work in this domain`] });
     return {
       kind, title: node.label,
@@ -324,15 +337,15 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
   }
 
   if (kind === "lesson" || kind === "boundary") {
-    const forProjects: string[] = [];
-    const fromCandidates: string[] = [];
+    const forProjects: NavItem[] = [];
+    const fromCandidates: NavItem[] = [];
     for (const e of edges) {
-      if (e.kind === "INSIGHT_FOR" && e.dstId === node.id) { const p = byId.get(e.srcId); if (p) forProjects.push(p.label); }
-      if (e.kind === "FROM_CANDIDATE" && e.srcId === node.id) { const c = byId.get(e.dstId); if (c) fromCandidates.push(c.label); }
+      if (e.kind === "INSIGHT_FOR" && e.dstId === node.id) { const p = byId.get(e.srcId); if (p) forProjects.push({ text: p.label, to: { kind: "project", nodeKey: p.nodeKey } }); }
+      if (e.kind === "FROM_CANDIDATE" && e.srcId === node.id) { const c = byId.get(e.dstId); if (c) fromCandidates.push({ text: c.label, to: { kind: "candidate", nodeKey: c.nodeKey } }); }
     }
     const sections: Dossier["sections"] = [{ heading: kind === "boundary" ? "Boundary" : "Lesson", items: [String(data.text ?? node.label)] }];
-    if (forProjects.length) sections.push({ heading: "Applies to", items: forProjects });
-    if (fromCandidates.length) sections.push({ heading: "Prompted by", items: fromCandidates });
+    if (forProjects.length) sections.push(navSection("Applies to", forProjects, false));
+    if (fromCandidates.length) sections.push(navSection("Prompted by", fromCandidates, false));
     return { kind, title: kind === "boundary" ? "Boundary" : "Lesson", subtitle: "generative-skip insight", sections, note: anchoredNote };
   }
 
