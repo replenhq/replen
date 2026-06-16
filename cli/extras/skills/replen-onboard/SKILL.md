@@ -280,7 +280,30 @@ typed properties, computed properties as rows", never the entity names).
    not determine executable to run". `npx replen@latest sync-projects` also
    sidesteps the shadow. Ensure each repo has a GitHub remote so it scopes by
    `owner/name`.
-2. **Set domain tags** with `replen_set_tags` — broad domain labels.
+2. **Set the domain tag cloud** with `replen_set_tags`. This is the single
+   biggest lever on match quality — do it DENSE and RANKED, not a handful of
+   broad labels:
+   - Emit AS MANY grounded tags as the code genuinely supports (aim 25–50+, no
+     hard cap), ordered MOST-CENTRAL FIRST. Density is what makes matching work.
+   - Describe the WORLD the project operates in, NOT how it's built: the
+     industry/sector (`estate-agents`, `letting-agents`, `property`, `proptech`),
+     the job-to-be-done (`lead-generation`, `lead-routing`), and the
+     entities/data it touches (`uk-postcodes`, `uk-addresses`, `landlords`,
+     `property-listings`).
+   - DISAMBIGUATE BY DENSITY. A lone ambiguous tag is dangerous — `uas` could
+     mean anything. Whenever a term is ambiguous, ALSO emit its synonyms,
+     abbreviations, expansions and broader/narrower neighbours (`uas`,
+     `unmanned-systems`, `unmanned-aerial-systems`, `uav`, `drone`, `drones`,
+     `military-drones`, `counter-uas`). The COLLECTIVE pins the meaning: a
+     candidate that hits one term but none of its neighbours is a different
+     world and scores low.
+   - GROUNDED ONLY — every tag supported by code you actually read; never
+     aspirational (don't add `scraping` if it doesn't scrape).
+   - EXCLUDE: stack / framework / language (`next.js`, `react`, `firebase`,
+     `typescript`, `fastapi`, `postgres` — captured by `replen_set_versions`,
+     not domain) and generic SaaS plumbing every app has (`authentication`,
+     `signup`, `user-roles`, `subscription-management`, `form-validation`,
+     `crud`, `admin-dashboard`). They match everything, so distinguish nothing.
 3. **Set capabilities + report + thesis** with `replen_set_capabilities`, passing
    the grounded `capabilities` array, the `report` from 2c, AND the `purpose` +
    `goals` from 2c-thesis. The server builds the facet vectors immediately, stores

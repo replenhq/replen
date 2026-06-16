@@ -341,19 +341,28 @@ const TOOLS: Tool[] = [
   {
     name: "replen_set_tags",
     description:
-      "Set the domain tags on one of the user's registered Replen projects. " +
-      "Use this during ONBOARDING (and any time the project's focus changes) to give the matcher domain context — " +
-      "tags sharpen matching and matter MOST for a freshly-registered project that has no embedding yet, which would " +
-      "otherwise fall back to language-only matching and surface noise. " +
-      "DERIVE the tags from the project's actual code + docs, not generic guesses — e.g. for a Python crypto " +
-      "market-making bot: [\"crypto\",\"trading\",\"market-making\",\"ccxt\",\"quant\",\"backtesting\"]. " +
+      "Set the DOMAIN TAG CLOUD on one of the user's registered Replen projects — the single biggest lever on match " +
+      "quality. Use during ONBOARDING (and whenever focus changes). Make it DENSE and RANKED, not a few broad labels:\n" +
+      "- Emit AS MANY grounded tags as the code genuinely supports (aim 25-50+, no hard cap), MOST-CENTRAL FIRST. " +
+      "Density is what makes matching work.\n" +
+      "- Describe the WORLD the project operates in, NOT how it's built: sector (estate-agents, letting-agents, " +
+      "property, proptech), job-to-be-done (lead-generation, lead-routing), entities/data (uk-postcodes, uk-addresses, " +
+      "landlords, property-listings).\n" +
+      "- DISAMBIGUATE BY DENSITY: a lone ambiguous tag is dangerous. For any ambiguous term ALSO emit its synonyms, " +
+      "abbreviations, expansions and broader/narrower neighbours — not just 'uas' but 'unmanned-systems', " +
+      "'unmanned-aerial-systems', 'uav', 'drone', 'drones', 'military-drones', 'counter-uas'. The COLLECTIVE pins the " +
+      "meaning: a candidate hitting one term but none of its neighbours is a different world and scores low.\n" +
+      "- GROUNDED ONLY — every tag supported by code you actually read; never aspirational.\n" +
+      "- EXCLUDE stack/framework/language (next.js, react, firebase, typescript, fastapi, postgres — those go via " +
+      "replen_set_versions, NOT here) and generic SaaS plumbing (authentication, signup, user-roles, " +
+      "subscription-management, form-validation, crud, admin-dashboard) — they match everything, so distinguish nothing.\n" +
       "Do NOT tell the user to set tags on the web — set them here. Replaces the project's current tag list.",
     inputSchema: {
       type: "object",
       properties: {
         repo: { type: "string", description: "owner/name of the project repo (owner-tolerant — resolves even if the org drifted)" },
         repoId: { type: "number", description: "Alternative to repo — the project's id" },
-        tags: { type: "array", items: { type: "string" }, description: "Domain tags. Lowercased + deduped server-side; max 30 kept." },
+        tags: { type: "array", items: { type: "string" }, description: "Ranked domain tag cloud (most-central first), 25-50+. Lowercased + deduped server-side; max 60 kept." },
       },
       required: ["tags"],
     },
@@ -361,7 +370,7 @@ const TOOLS: Tool[] = [
       const parsed = z.object({
         repo: z.string().optional(),
         repoId: z.number().int().positive().optional(),
-        tags: z.array(z.string()).max(50),
+        tags: z.array(z.string()).max(120),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");

@@ -7,17 +7,19 @@
 // the thing), so the inventory route treats it like Pattern A/B/C matches: it
 // bypasses the relevance floor and leads the footnote.
 //
-// This is the "a Node CVE shows up next time you open the project" signal.
+// This is the "a CVE shows up next time you open the project" signal.
 // Coarse first cut: we match by package name + ecosystem (not exact installed
-// version) and gate on severity + recency. Refining to affected version ranges
-// (so a patched project stays quiet) is a follow-up — it needs the lockfile,
-// which the project profile doesn't carry yet.
+// version) and gate on severity + recency. Dep names come from BOTH the
+// tech_summary deps line (Node) and the agent-reported depVersions map (the
+// authoritative source for Python/Rust/Go). Refining to affected version ranges
+// (so a patched project stays quiet) is a follow-up — depVersions now carries
+// the pinned versions to make that possible.
 
 import type { Fetcher, FetchedCandidate } from "../types";
 import { db, schema } from "../../db/client";
 import { and, eq } from "drizzle-orm";
 import type { DepEcosystem } from "../../projects/manifest-parser";
-import { parseTechSummaryDeps } from "../stack-watch/registry";
+import { parseTechSummaryDeps, parseDepVersionNames } from "../stack-watch/registry";
 
 const WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_SECURITY_WINDOW_DAYS ?? "180", 10) || 180);
 const MAX_DEPS = Math.max(1, parseInt(process.env.REPLEN_SECURITY_MAX_DEPS ?? "60", 10) || 60);
@@ -39,7 +41,7 @@ export const securityWatchFetcher: Fetcher = {
     const userId = ctx.userId;
 
     const projects = await db
-      .select({ techSummary: schema.projectProfiles.techSummary })
+      .select({ techSummary: schema.projectProfiles.techSummary, depVersions: schema.projectProfiles.depVersions })
       .from(schema.projectProfiles)
       .where(and(
         eq(schema.projectProfiles.userId, userId),
@@ -52,7 +54,8 @@ export const securityWatchFetcher: Fetcher = {
     const depEco = new Map<string, DepEcosystem>();
     for (const p of projects) {
       const eco = inferEcosystem(p.techSummary);
-      for (const name of parseTechSummaryDeps(p.techSummary)) {
+      // Union tech_summary deps (Node) with depVersions names (Python/Rust/Go).
+      for (const name of new Set([...parseTechSummaryDeps(p.techSummary), ...parseDepVersionNames(p.depVersions)])) {
         if (!depEco.has(name)) depEco.set(name, eco);
       }
     }

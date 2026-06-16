@@ -20,7 +20,7 @@ import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../../analyzer/run-context";
 import { probeDepHealth } from "../../projects/dep-health";
 import type { ProjectDep, DepEcosystem } from "../../projects/manifest-parser";
-import { parseTechSummaryDeps } from "../stack-watch/registry";
+import { parseTechSummaryDeps, parseDepVersionNames } from "../stack-watch/registry";
 import { statusVendorsForDeps } from "./status-registry";
 
 const MAX_DEPS_PROBED = Math.max(1, parseInt(process.env.REPLEN_HEALTH_MAX_DEPS ?? "30", 10) || 30);
@@ -45,7 +45,7 @@ export const healthWatchFetcher: Fetcher = {
     const userId = ctx.userId;
 
     const projects = await db
-      .select({ techSummary: schema.projectProfiles.techSummary })
+      .select({ techSummary: schema.projectProfiles.techSummary, depVersions: schema.projectProfiles.depVersions })
       .from(schema.projectProfiles)
       .where(and(
         eq(schema.projectProfiles.userId, userId),
@@ -53,12 +53,13 @@ export const healthWatchFetcher: Fetcher = {
         eq(schema.projectProfiles.active, true),
       ));
 
-    // Collect distinct deps across projects, with an inferred ecosystem.
+    // Collect distinct deps across projects, with an inferred ecosystem. Names
+    // come from tech_summary (Node) AND depVersions (Python/Rust/Go).
     const depByName = new Map<string, ProjectDep>();
     const allDepNames = new Set<string>();
     for (const p of projects) {
       const ecosystem = inferEcosystem(p.techSummary);
-      for (const name of parseTechSummaryDeps(p.techSummary)) {
+      for (const name of new Set([...parseTechSummaryDeps(p.techSummary), ...parseDepVersionNames(p.depVersions)])) {
         allDepNames.add(name);
         if (!depByName.has(name)) {
           depByName.set(name, { name, version: "*", ecosystem, kind: "runtime" });

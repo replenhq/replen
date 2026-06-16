@@ -265,6 +265,10 @@ export const projectProfiles = sqliteTable(
     slug: text("slug").notNull(),
     path: text("path").notNull(),
     name: text("name").notNull(),
+    // GitHub/manifest-detected primary language (e.g. "typescript", "python").
+    // Sent at registration; fed into the project centroid as a soft language
+    // signal (see projectEmbeddingText). NULL until a registration reports it.
+    primaryLanguage: text("primary_language"),
     readmeMd: text("readme_md"),
     claudeMd: text("claude_md"),
     techSummary: text("tech_summary"),
@@ -283,8 +287,11 @@ export const projectProfiles = sqliteTable(
     // Sprint 5 loader expansion: structured project-shape blob captured at
     // loader time. JSON object: { fileTree: string[], structured: string }.
     // - fileTree: sorted repo paths (denylist-filtered, lockfiles + build
-    //   artefacts excluded). Lets the scorer existence-prune candidates that
-    //   duplicate code the user already has.
+    //   artefacts excluded). Fed to the Stage-1 summarizer as ground-truth
+    //   project shape (trusted over prose docs). NOTE: an earlier comment
+    //   claimed the scorer existence-prunes candidates that duplicate code you
+    //   already have — that was never implemented; fileTree is summarizer input
+    //   only.
     // - structured: concatenated non-markdown signal files (prisma schema,
     //   migrations, Mermaid/PlantUML diagrams, runtime configs). Captures
     //   architecture detail the markdown blob misses.
@@ -350,10 +357,11 @@ export const projectProfiles = sqliteTable(
     // "news", "social-syndication"]). Auto-suggested at project-onboard
     // time from the project shape; user-editable in /settings.
     tags: text("tags"),
-    // Skill-mode filter C (opt-in): opaque hash of the project shape
-    // (file-tree fingerprint + dep set MinHash) used for similarity-
-    // based pre-filtering. Computed locally by the CLI and pushed once.
-    // The source is never sent — only the hash.
+    // RESERVED / UNUSED. Was specced as skill-mode filter C — an opaque
+    // LSH-style shape hash (file-tree fingerprint + dep-set MinHash) for a
+    // similarity pre-filter — but the 'fingerprint' filter mode was never
+    // implemented (the inventory route normalises it to 'tags'). Nothing reads
+    // this column; kept only to avoid a destructive migration.
     fingerprintHash: text("fingerprint_hash"),
     // Semantic embedding of the project's profile (summary statement +
     // outcome goals + tags + name + niche) using OpenAI text-embedding-

@@ -645,7 +645,7 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
       niche: summary?.keyCapabilities?.join(", ") ?? null,
       outcomeGoals: summary?.outcomeGoals?.map((g) => g.statement) ?? null,
       tags,
-      primaryLanguage: null,
+      primaryLanguage: p.primaryLanguage ?? null,
     });
     if (!text) continue;
 

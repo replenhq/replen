@@ -11,7 +11,6 @@ import {
   facetSetHash,
   type FacetEmbedding,
 } from "../lib/embeddings";
-import { extractDocSections } from "./doc-sections";
 import { inferCapabilityModality, type CapabilitySpec, type Modality, type Provenance } from "./modality";
 
 export type FacetInput = { label: string; text: string; modality: Modality[]; provenance: Provenance; paths?: string[] };
@@ -47,8 +46,13 @@ export function facetInputsFor(input: {
   const bareSource = (input.capabilityTags?.length ? input.capabilityTags : input.keyCapabilities) ?? [];
   const allTags = [...(input.capabilities ?? []).map((c) => c?.tag), ...bareSource];
   const capLabels = selectFacetLabels(allTags);
-  const sections = extractDocSections(input.readmeMd ?? null, input.claudeMd ?? null, input.projectName ?? null, input.projectSlug ?? null);
 
+  // Facets are CAPABILITY probes only. Doc-section heading facets (formerly
+  // appended here via extractDocSections) are dropped as of FACET_SCHEME "5":
+  // they were a noise source (README headings such as "Makefile Targets" or
+  // "Q5 — 9D004.e" became match probes), and the dense grounded domain cloud —
+  // now embedded into the project centroid (see projectEmbeddingText) — covers
+  // the recall they were added for, without the junk.
   const inputs: FacetInput[] = [];
   const seen = new Set<string>();
   for (const l of capLabels) {
@@ -62,14 +66,6 @@ export function facetInputsFor(input: {
     // implies grounded, and a bare tag with no spec is inferred.
     const provenance: Provenance = spec?.provenance ?? (descriptor ? "grounded" : "inferred");
     inputs.push({ label: l, text: facetEmbeddingText(l, descriptor), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
-  }
-  for (const s of sections) {
-    const k = s.label.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    // Doc-section facets are freeform prose — leave modality unknown so they
-    // never gate, and tag them ambiguous (raw doc text, lowest confidence).
-    inputs.push({ label: s.label, text: s.text, modality: [], provenance: "ambiguous" });
   }
   const hash = facetSetHash(inputs.map((f) => `${f.label}::${f.text}::${f.modality.join(",")}::${f.provenance}`));
   return { hash, inputs };

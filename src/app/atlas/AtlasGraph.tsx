@@ -31,15 +31,20 @@ export type GEdge = { kind: string; src: number; dst: number; weight: number | n
 const KIND_COLOR: Record<string, string> = {
   project: "#ffc857", capability: "#6b8cae", candidate: "#8a9a64", product: "#c084fc", tool: "#7f8794", suggestion: "#2dd4bf", goal: "#f43f5e", modality: "#888",
   upgrade: "#fbbf24", // Keystone better_than recommendation — gold
+  domain: "#e08e5a", // sector/domain cluster from the tag cloud — warm terracotta
+  lesson: "#34d399", // generative-skip lesson — green (kept the idea)
+  boundary: "#a78bfa", // sharpened "what we're NOT" — violet
 };
 const EDGE_COLOR: Record<string, string> = {
   HAS_CAPABILITY: "rgba(107,140,174,0.18)", ADJACENT_TO: "rgba(120,120,140,0.14)", FILLS: "rgba(138,154,100,0.3)",
   EVALUATED: "rgba(217,119,6,0.35)", MEMBER_OF: "rgba(192,132,252,0.3)", RELATES_TO: "rgba(120,120,140,0.10)",
   USES: "rgba(127,135,148,0.14)", SUGGESTED: "rgba(45,212,191,0.30)", GOAL_OF: "rgba(244,63,94,0.35)",
   BETTER_THAN: "rgba(251,191,36,0.55)", // Keystone upgrade — gold, stands out
+  IN_DOMAIN: "rgba(224,142,90,0.22)", INSIGHT_FOR: "rgba(52,211,153,0.30)", FROM_CANDIDATE: "rgba(167,139,250,0.28)",
+  RELATED_DOMAIN: "rgba(224,142,90,0.42)", // domain↔domain co-occurrence — stronger terracotta
 };
 const ALERT_COLOR: Record<string, string> = { security: "#ef4444", breaking: "#f97316", pricing: "#eab308" };
-const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "tool", "product", "upgrade"];
+const ALL_KINDS = ["project", "capability", "candidate", "suggestion", "goal", "tool", "product", "upgrade", "domain", "lesson", "boundary"];
 
 type P = { x: number; y: number; z: number; vx: number; vy: number; vz: number };
 
@@ -114,11 +119,15 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
       // Projects/products scale with repo size (file count, log-scaled so a
       // 2k-file repo doesn't dwarf a 20-file one). Unknown size → the old fixed
       // base, so nothing shrinks before the loader has shape data.
-      if (n.kind === "project" || n.kind === "product") {
-        const base = n.kind === "product" ? 6 : 5;
+      if (n.kind === "project") {
         const sizeBoost = n.size && n.size > 0 ? Math.min(12, 4 * Math.log10(n.size + 1)) : 2;
-        return base + sizeBoost + Math.min(3, n.degree * 0.1);
+        return 5 + sizeBoost + Math.min(3, n.degree * 0.1);
       }
+      // Products group repos — size by how many they group (degree), NOT the
+      // summed member file-count (which made a 1-repo product look huge).
+      if (n.kind === "product") return 4 + Math.min(7, n.degree * 1.6);
+      // Domain clusters read bigger when more projects share the sector.
+      if (n.kind === "domain") return 4 + Math.min(8, n.degree * 0.8);
       return (n.kind === "tool" ? 3.5 : n.waypoint ? 6 : 3) + Math.min(4, n.degree * 0.15);
     };
 

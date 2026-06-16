@@ -17,7 +17,7 @@ import type { Fetcher, FetchedCandidate } from "../types";
 import { db, schema } from "../../db/client";
 import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../../analyzer/run-context";
-import { vendorsForDeps, parseTechSummaryDeps, type StackVendor } from "./registry";
+import { vendorsForDeps, parseTechSummaryDeps, parseDepVersionNames, type StackVendor } from "./registry";
 import { userToolTokens } from "../../lib/detect-tokens";
 
 const RELEASE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_STACK_WINDOW_DAYS ?? "90", 10) || 90);
@@ -56,6 +56,7 @@ export const stackWatchFetcher: Fetcher = {
       .select({
         slug: schema.projectProfiles.slug,
         techSummary: schema.projectProfiles.techSummary,
+        depVersions: schema.projectProfiles.depVersions,
         tags: schema.projectProfiles.tags,
       })
       .from(schema.projectProfiles)
@@ -70,7 +71,9 @@ export const stackWatchFetcher: Fetcher = {
     const allDeps = new Set<string>();
     const allTags = new Set<string>();
     for (const p of projects) {
-      const deps = parseTechSummaryDeps(p.techSummary);
+      // techSummary's deps line only ever existed for Node projects; depVersions
+      // is the authoritative dep source for Python/Rust/Go repos. Union both.
+      const deps = new Set([...parseTechSummaryDeps(p.techSummary), ...parseDepVersionNames(p.depVersions)]);
       for (const d of deps) allDeps.add(d);
       try {
         const t = JSON.parse(p.tags ?? "[]");

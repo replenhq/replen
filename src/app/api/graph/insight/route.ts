@@ -9,8 +9,10 @@ import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 // (something we're now explicitly NOT), recorded EVEN WHEN the prompting
 // candidate is a direct-use skip — the Graphify→Atlas lane. Distinct from
 // /api/triage (a per-candidate use-verdict): an insight is a portfolio
-// decision. The graph build reads triage_insights into lesson/boundary nodes
-// with a `via` provenance edge; Atlas renders them as tiles.
+// decision. The graph build (src/graph/build.ts) reads triage_insights into
+// lesson/boundary nodes — INSIGHT_FOR edge to the project they touch, plus a
+// FROM_CANDIDATE provenance edge to the repo that prompted them — so they
+// appear in the Atlas graph.
 //   POST { kind: 'lesson'|'boundary', text, viaCandidate?: "owner/name", project?: slug }
 const VALID_KINDS = new Set(["lesson", "boundary"]);
 const MAX_TEXT = 2000;

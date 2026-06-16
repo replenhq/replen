@@ -293,7 +293,12 @@ export function projectEmbeddingText(input: {
     parts.push(`Outcome goals: ${input.outcomeGoals.join("; ")}`);
   }
   if (input.tags && input.tags.length > 0) {
-    parts.push(`Stack: ${input.tags.join(", ")}`);
+    // The `tags` column is the DENSE, RANKED domain cloud (see replen_set_tags),
+    // not a stack list. Feeding it as domain context is the collective-
+    // disambiguation mechanism: a 40-term drone cloud lands the centroid firmly
+    // in drone-space, so a candidate that merely shares one ambiguous term (a
+    // "uas" that means something else) sits far from the centroid and scores low.
+    parts.push(`Domain & capability context: ${input.tags.join(", ")}`);
   }
   if (input.primaryLanguage) parts.push(`Primary language: ${input.primaryLanguage}`);
   return parts.join(". ");
@@ -329,7 +334,7 @@ const GENERIC_FACETS = new Set([
  * dedupe but keeps the first-seen original casing for display, and caps the
  * count so a sprawling capability list doesn't balloon storage / API cost.
  */
-export function selectFacetLabels(labels: Array<string | null | undefined>, cap = 8): string[] {
+export function selectFacetLabels(labels: Array<string | null | undefined>, cap = 40): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of labels) {
@@ -394,7 +399,12 @@ export function parseStoredFacetEmbeddings(raw: string | null | undefined): Face
 // facets with the richer, modality-aware probes.
 // "4" (provenance): each facet carries a provenance tag (grounded/extracted/
 // inferred/ambiguous). Bumping regenerates so every facet is tagged.
-export const FACET_SCHEME_VERSION = "4";
+// "5" (dense domain cloud): doc-section heading facets are dropped entirely —
+// they were a noise source (README headings like "Makefile Targets" / "Q5 —
+// 9D004.e" became probes), and the dense grounded domain cloud (now embedded
+// into the centroid) covers the recall they were added for. Facets are now
+// capability probes only. Bumping regenerates every project's facet set.
+export const FACET_SCHEME_VERSION = "5";
 export function facetSetHash(labels: string[]): string {
   return sha256(`${FACET_SCHEME_VERSION}:${labels.map((l) => l.toLowerCase()).join("|")}`);
 }

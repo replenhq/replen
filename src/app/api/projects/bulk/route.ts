@@ -184,6 +184,7 @@ export async function POST(req: Request) {
           githubFullName: c.githubFullName,
           path,
           ...(tagsJson ? { tags: tagsJson } : {}),
+          ...(c.primaryLanguage ? { primaryLanguage: c.primaryLanguage } : {}),
           updatedAt: now,
         })
         .where(eq(schema.projectProfiles.id, target.id));
@@ -208,6 +209,7 @@ export async function POST(req: Request) {
         sensitivity: "low",
         llmProvider: "auto",
         ...(tagsJson ? { tags: tagsJson } : {}),
+        ...(c.primaryLanguage ? { primaryLanguage: c.primaryLanguage } : {}),
         updatedAt: now,
       }).returning({ id: schema.projectProfiles.id });
       const newId = inserted[0]?.id ?? -1;

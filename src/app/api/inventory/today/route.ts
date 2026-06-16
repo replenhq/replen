@@ -34,16 +34,17 @@ import type { Modality, Provenance } from "@/projects/modality";
 // using the user's subscription tokens.
 //
 // What this IS: a per-user, filter-mode-aware view of the last N days
-// of fetched candidates. Three filter modes:
+// of fetched candidates. Two filter modes:
 //   - 'zero-knowledge': passthrough (full firehose). Most private.
 //     User opts in to send Replen literally nothing about their
 //     projects beyond a DIGEST_TOKEN for identity.
 //   - 'tags' (default): intersect candidate
 //     primaryLanguage/topics with the user's project_profiles.tags
 //     JSON array. Tags are user-curated metadata, not source code.
-//   - 'fingerprint': similarity-based pre-filter using the project's
-//     LSH-style shape hash. Sharpest pre-filter; explicit opt-in.
-//     v1: not yet implemented — falls back to 'tags' behaviour.
+// (A third 'fingerprint' mode was specced — an LSH-style shape-hash
+// pre-filter — but never implemented; any stored 'fingerprint' value is
+// normalised to 'tags' below. The project_profiles.fingerprint_hash column
+// is reserved/unused.)
 //
 // Exclusion of user-state: candidates whose repo already has a
 // user_match_state row of 'starred', 'hidden', or 'handed_off' for
@@ -106,7 +107,9 @@ export async function GET(req: Request) {
     : STEADY_DAYS;
   let windowReason = hasExplicitDays ? "explicit" : "steady";
 
-  const filterMode = (auth.settings.filterMode ?? "tags") as "zero-knowledge" | "tags" | "fingerprint";
+  // Only two real modes; a legacy/stored 'fingerprint' value (never implemented)
+  // normalises to 'tags'.
+  const filterMode: "zero-knowledge" | "tags" = auth.settings.filterMode === "zero-knowledge" ? "zero-knowledge" : "tags";
 
   // Resolve the project scope. When ?repo=owner/name is set we scope
   // to the matching projectProfile (and its tags, for filter mode
@@ -184,7 +187,8 @@ export async function GET(req: Request) {
               "(1) read the actual source (src/, lib/, app/ — skip node_modules/dist/.next) to understand what it does; " +
               "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []); " +
               "(3) call replen_set_capabilities (mode='replace') with those capabilities, plus a short grounded `report` and a 1-2 sentence `purpose` when you can; " +
-              "(4) read the lockfile and call replen_set_versions with the resolved direct dependency versions. " +
+              "(4) read the lockfile and call replen_set_versions with the resolved direct dependency versions; " +
+              "(5) call replen_set_tags with a DENSE, RANKED domain tag cloud (aim 25-50+, most-central first) — the WORLD the project operates in: sector + synonyms ('estate-agents','letting-agents','property','proptech'), job-to-be-done ('lead-generation','lead-routing'), and entities/data ('uk-postcodes','uk-addresses','landlords','property-listings'). DISAMBIGUATE BY DENSITY: for any ambiguous term emit its synonyms/abbreviations/neighbours too (not just 'uas' but 'unmanned-systems','uav','drone','drones','military-drones') so the collective pins the meaning. GROUNDED ONLY. EXCLUDE stack ('typescript'/'next.js'/'react'/'firebase' — those go via replen_set_versions) and generic SaaS plumbing ('auth','signup','subscription-management','crud'). The auto-detected stack tags from registration are near-useless for matching; the dense domain cloud is what lets matching surface relevant candidates instead of generic frameworks. " +
               "Matching then works on the next replen_match. Lead with the one-line offer; only do the work if the user accepts.",
           },
           { headers: corsHeaders },
@@ -252,7 +256,7 @@ export async function GET(req: Request) {
   // project, use that project's tags only; otherwise union across all
   // included projects.
   let userTagSet = new Set<string>();
-  if (filterMode === "tags" || filterMode === "fingerprint") {
+  if (filterMode === "tags") {
     const tagSourceRows = scopedProjectId
       ? [scopedProject!]
       : await db
@@ -752,9 +756,7 @@ export async function GET(req: Request) {
 
     if (filterMode === "zero-knowledge") {
       reasons.push("zero-knowledge mode: no per-user filter applied");
-    } else if (filterMode === "tags" || filterMode === "fingerprint") {
-      // v1: fingerprint mode falls back to tags. Real LSH similarity
-      // ranking is a follow-up.
+    } else {
       try {
         const candTopics: string[] = c.topics ? JSON.parse(c.topics) : [];
         topicHits = candTopics.map((t) => t.toLowerCase()).filter((t) => userTagSet.has(t));
@@ -767,7 +769,15 @@ export async function GET(req: Request) {
         // returning an empty inventory and looking broken.
         reasons.push("no project tags configured; showing unfiltered");
       } else if (topicHits.length === 0 && !langHit) {
-        continue; // coarse pre-filter: drop hard misses even when embeddings agree
+        // Coarse tag pre-filter — but ONLY drop when there's no grounded embedding
+        // to judge by. For an ONBOARDED project (centroid + facet vectors present),
+        // a strong facet match must NOT be discarded just because the candidate
+        // lacks a generic STACK tag (typescript/next.js/firebase/…). Those stack
+        // tags are exactly what made well-onboarded repos surface framework-junk;
+        // here we defer to the facet/centroid match + relevance floor instead, so
+        // onboarding's grounded capabilities actually drive matching.
+        if (!projectEmbedding && probeFacets.length === 0) continue;
+        reasons.push("tag miss — deferring to facet/centroid match + floor");
       } else {
         if (langHit) reasons.push(`language match: ${c.primaryLanguage}`);
         if (topicHits.length > 0) reasons.push(`topic overlap: ${topicHits.slice(0, 3).join(", ")}`);

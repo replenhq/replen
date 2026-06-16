@@ -13,7 +13,7 @@ import { db, schema } from "../../db/client";
 import { and, eq } from "drizzle-orm";
 import { readRunOrEnv } from "../../analyzer/run-context";
 import { specSourcesForDeps, type SpecSource } from "./registry";
-import { parseTechSummaryDeps } from "../stack-watch/registry";
+import { parseTechSummaryDeps, parseDepVersionNames } from "../stack-watch/registry";
 import { fetchRecentForSource } from "./sources";
 
 const WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_SPEC_WINDOW_DAYS ?? "30", 10) || 30);
@@ -26,7 +26,7 @@ export const specWatchFetcher: Fetcher = {
     const userId = ctx.userId;
 
     const projects = await db
-      .select({ techSummary: schema.projectProfiles.techSummary })
+      .select({ techSummary: schema.projectProfiles.techSummary, depVersions: schema.projectProfiles.depVersions })
       .from(schema.projectProfiles)
       .where(and(
         eq(schema.projectProfiles.userId, userId),
@@ -34,10 +34,12 @@ export const specWatchFetcher: Fetcher = {
         eq(schema.projectProfiles.active, true),
       ));
 
-    // Union the spec sources the user's projects have a stake in.
+    // Union the spec sources the user's projects have a stake in. Dep names come
+    // from tech_summary (Node) AND depVersions (Python/Rust/Go).
     const sources = new Map<string, SpecSource>();
     for (const p of projects) {
-      for (const s of specSourcesForDeps(parseTechSummaryDeps(p.techSummary))) {
+      const deps = new Set([...parseTechSummaryDeps(p.techSummary), ...parseDepVersionNames(p.depVersions)]);
+      for (const s of specSourcesForDeps(deps)) {
         sources.set(s.id, s);
       }
     }

@@ -39,9 +39,9 @@ export async function POST(req: Request) {
     new Set(
       body.tags
         .map((t) => (typeof t === "string" ? t.trim().toLowerCase() : ""))
-        .filter((t) => t.length > 0 && t.length <= 40),
+        .filter((t) => t.length > 0 && t.length <= 48),
     ),
-  ).slice(0, 30);
+  ).slice(0, 60);
 
   // Resolve the project (owner-tolerant), scoped to this user.
   let project: typeof schema.projectProfiles.$inferSelect | null = null;

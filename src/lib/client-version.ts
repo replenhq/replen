@@ -50,9 +50,15 @@ export async function clientUpgradeNudge(clientHeader: string | null): Promise<s
   const latest = await latestMcpVersion();
   if (!latest) return ""; // can't determine a target → say nothing
   const cur = clientHeader?.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null;
-  // Up to date → nothing. Behind, or no version header at all (an old build that
-  // predates this signal — i.e. a stale npx cache) → nudge.
-  if (cur && !semverLt(cur, latest)) return "";
+  // Only nudge when we can SEE the client is genuinely behind. A MISSING version
+  // header is no longer treated as stale: the in-session /replen skill fetches the
+  // inventory via raw `curl` (x-digest-token only, no x-replen-client), which
+  // falsely tripped this on every up-to-date session. The stale-npx-cache case
+  // that "no header → nudge" was meant to catch is now handled properly by exact
+  // MCP version pinning in `mcp setup`. So: no version → say nothing; only the
+  // MCP tool path (which sends its version) can trigger a real, correct nudge.
+  if (!cur) return "";
+  if (!semverLt(cur, latest)) return "";
   return "_Heads up, a newer Replen is available (this is how you get new features like Leaps and Recall). Run `npx -y @replen/mcp@latest` and restart your session to update — it clears the stale npx cache._";
 }
 

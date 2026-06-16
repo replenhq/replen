@@ -4,14 +4,23 @@
 // idempotent: rebuilding replaces the user's graph atomically, and a content
 // hash lets the pipeline skip rebuilds when nothing changed.
 //
-// Nodes:  project · product · capability · candidate · modality
+// Nodes:  project · product · capability · tool · candidate · suggestion ·
+//         goal · domain · lesson · boundary
 // Edges (within-user, all built here):
 //   MEMBER_OF      project   → product
-//   HAS_CAPABILITY project   → capability   {provenance, modality, descriptor}
+//   USES           project   → tool          {version}
+//   HAS_CAPABILITY project   → capability   {provenance, modality, paths}
 //   ADJACENT_TO    capability→ capability   {cosine}      (band: related-but-distinct)
 //   RELATES_TO     project   → project      {cosine, sharedCaps}
 //   EVALUATED      project   → candidate    {verdict, reasonCode, score, effort, oneLine, at}
 //   FILLS          candidate → capability   (from the matched facet at triage time)
+//   SUGGESTED      project   → suggestion
+//   GOAL_OF        project   → goal
+//   IN_DOMAIN      project   → domain        (from the dense tag cloud; domain
+//                  nodes carry projectCount + a k-anon cross-user user count so
+//                  sector patterns surface — "these 5 are UK-property")
+//   INSIGHT_FOR    project   → lesson|boundary   (generative-skip insights)
+//   FROM_CANDIDATE lesson|boundary → candidate   (the repo that prompted it)
 // (ENDORSED_BY_SIMILAR is the one cross-user edge; added by Leaps in §1.)
 
 import { createHash } from "node:crypto";
@@ -21,7 +30,7 @@ import { parseStoredFacetEmbeddings, parseStoredEmbedding, cosineSimilarity, nor
 import { deriveProductKey } from "../projects/product-key";
 import { louvain } from "./community";
 import { type Modality, type Provenance } from "../projects/modality";
-import { isNoiseFacetLabel } from "../projects/doc-sections";
+import { isNoiseFacetLabel, isGenericProbeFacetLabel } from "../projects/doc-sections";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -91,15 +100,16 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
   // ── projects, products, capabilities, HAS_CAPABILITY, MEMBER_OF ──
   const projCentroid = new Map<string, number[] | null>(); // slug → centroid
   const projCaps = new Map<string, Set<string>>();          // slug → cap keys
+  const productMembers = new Map<string, string[]>();        // productKey → slugs
   for (const p of projects) {
     addNode({ kind: "project", nodeKey: p.slug, label: p.name ?? p.slug, data: { slug: p.slug, name: p.name, githubFullName: p.githubFullName } });
     projCentroid.set(p.slug, parseStoredEmbedding(p.embedding ?? null));
 
+    // Collect product membership; emitted AFTER the loop, but only for products
+    // that actually group ≥2 repos. A single-repo "product" is just the repo —
+    // an oversized lonely node with one MEMBER_OF edge — so it's suppressed.
     const productKey = p.productKey ?? deriveProductKey(p.githubFullName);
-    if (productKey) {
-      addNode({ kind: "product", nodeKey: productKey, label: productKey, data: { key: productKey } });
-      edges.push({ kind: "MEMBER_OF", srcKey: nk("project", p.slug), dstKey: nk("product", productKey), weight: null, data: {} });
-    }
+    if (productKey) (productMembers.get(productKey) ?? productMembers.set(productKey, []).get(productKey)!).push(p.slug);
 
     // Tools — the external products/runtimes the project actually uses (from
     // the manifest deps, with pinned versions when the agent reported them).
@@ -143,6 +153,14 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       if (provenance === "ambiguous") continue;
       rawFacets.push({ slug: p.slug, key, label, vec: f.vec, modality: f.modality ?? [], provenance, paths: f.paths ?? [] });
     }
+  }
+
+  // Emit product nodes + MEMBER_OF edges, but only where the product groups
+  // ≥2 of the user's repos (a 1-repo product is noise — see the loop above).
+  for (const [productKey, members] of productMembers) {
+    if (members.length < 2) continue;
+    addNode({ kind: "product", nodeKey: productKey, label: productKey, data: { key: productKey, repoCount: members.length } });
+    for (const slug of members) edges.push({ kind: "MEMBER_OF", srcKey: nk("project", slug), dstKey: nk("product", productKey), weight: null, data: {} });
   }
 
   // ── capability merging: near-duplicate labels collapse into ONE node ──
@@ -322,7 +340,15 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
   for (let i = 0; i < slugs.length; i++) {
     for (let j = i + 1; j < slugs.length; j++) {
       const a = projCentroid.get(slugs[i]); const b = projCentroid.get(slugs[j]);
-      const shared = [...(projCaps.get(slugs[i]) ?? [])].filter((c) => projCaps.get(slugs[j])?.has(c));
+      // Shared capabilities, but NOT the generic-infra ones (FastAPI, PostgreSQL,
+      // Redis…): two projects both using FastAPI is not a meaningful relationship,
+      // and counting them linked unrelated domains (a defence backend to a
+      // property CRM). Map cap keys to labels to apply the generic filter, then
+      // surface the human-readable shared labels as the edge's reason.
+      const shared = [...(projCaps.get(slugs[i]) ?? [])]
+        .filter((c) => projCaps.get(slugs[j])?.has(c))
+        .map((c) => nodes.get(nk("capability", c))?.label ?? c)
+        .filter((label) => !isGenericProbeFacetLabel(label));
       const cos = a && b ? cosineSimilarity(a, b) : NaN;
       if ((Number.isFinite(cos) && cos >= RELATES_MIN) || shared.length >= 2) {
         edges.push({ kind: "RELATES_TO", srcKey: nk("project", slugs[i]), dstKey: nk("project", slugs[j]), weight: Number.isFinite(cos) ? cos : null, data: { sharedCaps: shared.slice(0, 12) } });
@@ -354,6 +380,11 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     const at = e.createdAt?.getTime() ?? 0;
     if (!prev || at > (prev.createdAt?.getTime() ?? 0) || (at === (prev.createdAt?.getTime() ?? 0) && e.id > prev.id)) latestEval.set(k, e);
   }
+  // Generative-skip insights (lesson/boundary) — load now so the candidate
+  // repos that prompted them resolve alongside the triaged ones below.
+  const insights = await db.select().from(schema.triageInsights)
+    .where(eq(schema.triageInsights.userId, userId));
+  for (const ins of insights) if (ins.viaCandidateRepoId != null) repoIds.add(ins.viaCandidateRepoId);
   // resolve repo owner/name for candidate node keys
   const repoRows = repoIds.size
     ? await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name, stars: schema.repos.stars, url: schema.repos.url })
@@ -375,6 +406,31 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     if (e.matchedFacet) {
       const capKey = norm(e.matchedFacet);
       if (capKey && nodes.has(nk("capability", capKey))) edges.push({ kind: "FILLS", srcKey: nk("candidate", candKey), dstKey: nk("capability", capKey), weight: null, data: {} });
+    }
+  }
+
+  // ── LESSON / BOUNDARY nodes (generative-skip insights) ──
+  // replen_capture_insight records transferable lessons + sharpened boundaries
+  // during triage. They were write-only until now; surface them as their own
+  // nodes, anchored to the project they touch and the candidate that prompted
+  // them, so the "skipped the repo but kept the idea" lane is legible in Atlas.
+  for (const ins of insights) {
+    const kind = ins.kind === "boundary" ? "boundary" : "lesson";
+    const key = `insight-${ins.id}`;
+    addNode({ kind, nodeKey: key, label: ins.text.slice(0, 80), data: { id: ins.id, kind, text: ins.text, createdAt: ins.createdAt.toISOString() } });
+    const slug = ins.appliesToProjectId != null ? projIdToSlug.get(ins.appliesToProjectId) : null;
+    if (slug && projects.some((p) => p.slug === slug)) {
+      edges.push({ kind: "INSIGHT_FOR", srcKey: nk("project", slug), dstKey: nk(kind, key), weight: null, data: {} });
+    }
+    if (ins.viaCandidateRepoId != null) {
+      const repo = repoById.get(ins.viaCandidateRepoId);
+      if (repo) {
+        const candKey = `${repo.owner}/${repo.name}`.toLowerCase();
+        if (!nodes.has(nk("candidate", candKey))) {
+          addNode({ kind: "candidate", nodeKey: candKey, label: `${repo.owner}/${repo.name}`, data: { fullName: `${repo.owner}/${repo.name}`, stars: repo.stars, url: repo.url } });
+        }
+        edges.push({ kind: "FROM_CANDIDATE", srcKey: nk(kind, key), dstKey: nk("candidate", candKey), weight: null, data: {} });
+      }
     }
   }
 
@@ -453,6 +509,104 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     }
   }
 
+  // ── DOMAIN nodes + IN_DOMAIN edges (the dense tag cloud → patterns) ──
+  // The per-project domain tag cloud (replen_set_tags) is the richest sector
+  // signal we collect, and it was feeding only the centroid + pre-filter, never
+  // the graph. Turn it into nodes so cross-repo patterns surface ("these 5 are
+  // all UK-property"). A tag becomes a node when ≥2 of THIS user's projects
+  // share it (an intra-user cluster) OR it's a common sector across ≥K distinct
+  // users (the k-anon cross-user signal, gated like the catalogue). The
+  // cross-user user-count is decorative (attached to node data) and deliberately
+  // kept OUT of the rebuild hash so another user re-tagging never churns this
+  // graph. Capped to stay lean.
+  const MIN_DOMAIN_USERS = Math.max(2, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2);
+  const DOMAIN_NODE_CAP = Math.max(10, parseInt(process.env.REPLEN_GRAPH_DOMAIN_CAP ?? "80", 10) || 80);
+  const parseTags = (raw: string | null): string[] => {
+    try { const a = JSON.parse(raw ?? "[]"); return Array.isArray(a) ? a.filter((t): t is string => typeof t === "string") : []; }
+    catch { return []; }
+  };
+  const domainProjects = new Map<string, Set<string>>(); // tag → this user's slugs
+  for (const p of projects) {
+    for (const t of parseTags(p.tags)) {
+      const tag = t.trim().toLowerCase();
+      if (!tag) continue;
+      const s = domainProjects.get(tag) ?? new Set<string>();
+      s.add(p.slug); domainProjects.set(tag, s);
+    }
+  }
+  // Cross-user distinct-user count per domain tag (non-test users), k-anon gated.
+  const crossUserDomain = new Map<string, number>();
+  {
+    const allTagRows = await db
+      .select({ userId: schema.projectProfiles.userId, tags: schema.projectProfiles.tags, role: schema.users.role })
+      .from(schema.projectProfiles)
+      .leftJoin(schema.users, eq(schema.projectProfiles.userId, schema.users.id))
+      .where(eq(schema.projectProfiles.active, true));
+    const tagUsers = new Map<string, Set<number>>();
+    for (const r of allTagRows) {
+      if (r.role === "test" || r.userId == null) continue;
+      for (const t of parseTags(r.tags)) {
+        const tag = t.trim().toLowerCase(); if (!tag) continue;
+        const s = tagUsers.get(tag) ?? new Set<number>(); s.add(r.userId); tagUsers.set(tag, s);
+      }
+    }
+    for (const [tag, users] of tagUsers) if (users.size >= MIN_DOMAIN_USERS) crossUserDomain.set(tag, users.size);
+  }
+  const domainNodes = [...domainProjects.entries()]
+    .filter(([tag, slugs]) => slugs.size >= 2 || crossUserDomain.has(tag))
+    .sort((a, b) => (b[1].size - a[1].size) || ((crossUserDomain.get(b[0]) ?? 0) - (crossUserDomain.get(a[0]) ?? 0)))
+    .slice(0, DOMAIN_NODE_CAP);
+  for (const [tag, slugs] of domainNodes) {
+    const crossUsers = crossUserDomain.get(tag);
+    addNode({ kind: "domain", nodeKey: tag, label: tag, data: { tag, projectCount: slugs.size, ...(crossUsers ? { crossUserUsers: crossUsers } : {}) } });
+    for (const slug of slugs) edges.push({ kind: "IN_DOMAIN", srcKey: nk("project", slug), dstKey: nk("domain", tag), weight: null, data: {} });
+  }
+
+  // ── domain clustering: RELATED_DOMAIN edges + themes ──
+  // Synonyms and sub-concepts of one real-world field (drones / uav / uas / px4
+  // / mavlink / ardupilot) co-occur on the same repos but were scattered, flat
+  // nodes. Link domains that share ≥2 projects (top-K each) so the field reads
+  // as one connected cluster, and run Louvain to give each cluster a theme name.
+  {
+    const dKeys = domainNodes.map(([tag]) => tag);
+    const dSlugs = new Map(domainNodes.map(([tag, s]) => [tag, s] as const));
+    const dCooc: Array<{ a: string; b: string; w: number }> = [];
+    for (let i = 0; i < dKeys.length; i++) {
+      const ai = dSlugs.get(dKeys[i])!;
+      const neigh: Array<{ k: string; w: number }> = [];
+      for (let jx = 0; jx < dKeys.length; jx++) {
+        if (i === jx) continue;
+        const bj = dSlugs.get(dKeys[jx])!;
+        let shared = 0; for (const s of ai) if (bj.has(s)) shared++;
+        if (shared >= 2) neigh.push({ k: dKeys[jx], w: shared });
+      }
+      neigh.sort((x, y) => y.w - x.w);
+      for (const { k, w } of neigh.slice(0, 6)) {
+        if (dKeys[i] < k) {
+          edges.push({ kind: "RELATED_DOMAIN", srcKey: nk("domain", dKeys[i]), dstKey: nk("domain", k), weight: w, data: { sharedProjects: w } });
+          dCooc.push({ a: dKeys[i], b: k, w });
+        }
+      }
+    }
+    if (dKeys.length) {
+      const didx = new Map<string, number>(); dKeys.forEach((k, i) => didx.set(k, i));
+      const dEdges = dCooc.map((e) => ({ a: didx.get(e.a)!, b: didx.get(e.b)!, w: e.w }));
+      const dcomm = louvain(dKeys.map((_, i) => i), dEdges);
+      const members = new Map<number, string[]>();
+      dKeys.forEach((k, i) => { const c = dcomm.get(i)!; (members.get(c) ?? members.set(c, []).get(c)!).push(k); });
+      const themeName = new Map<number, string>();
+      for (const [c, ms] of members) {
+        const ranked = ms.slice().sort((x, y) => (dSlugs.get(y)!.size - dSlugs.get(x)!.size));
+        themeName.set(c, ranked.slice(0, 2).join(" / "));
+      }
+      dKeys.forEach((k, i) => {
+        const node = nodes.get(nk("domain", k));
+        const c = dcomm.get(i);
+        if (node && c != null) { node.data.theme = `d${c}`; node.data.themeName = themeName.get(c) ?? null; }
+      });
+    }
+  }
+
   // ── content hash (rebuild only when inputs changed) ──
   const hashInput = JSON.stringify({
     p: projects.map((p) => [p.slug, p.facetEmbeddings ? sha256(p.facetEmbeddings) : null, p.embeddingContentHash, p.productKey, p.depVersions ? sha256(p.depVersions) : null, p.techSummary ? sha256(p.techSummary) : null]).sort(),
@@ -461,6 +615,10 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     c: curations.map((c) => [c.normLabel, c.action, c.target]).sort(),
     t: toolPrefRows.map((t) => [t.tool, t.plan, t.migrateOff]).sort(),
     g: goalRows.map((g) => [g.id, g.label, g.projectSlug]).sort(),
+    // Intra-user domain structure only — cross-user counts are excluded so
+    // another user re-tagging can't churn this graph.
+    d: [...domainProjects].filter(([, s]) => s.size >= 2).map(([tag, s]) => [tag, s.size]).sort(),
+    i: insights.map((x) => [x.id, x.kind, x.appliesToProjectId, x.viaCandidateRepoId]).sort(),
   });
   const hash = sha256(hashInput);
 
