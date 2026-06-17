@@ -359,10 +359,79 @@ export function selectFacetLabels(labels: Array<string | null | undefined>, cap 
  * from an image-defect library. Without a descriptor we fall back to the bare
  * "Capability: <label>" anchor (legacy behaviour). Trimmed to the embed cap.
  */
-export function facetEmbeddingText(label: string, descriptor?: string | null): string {
+export function facetEmbeddingText(label: string, descriptor?: string | null, domainContext?: string | null): string {
   const d = descriptor?.trim();
-  if (d) return `Capability: ${label.trim()} — ${d}`.slice(0, 7000);
-  return `Capability: ${label.trim()}`;
+  const dom = domainContext?.trim();
+  const base = d ? `Capability: ${label.trim()} — ${d}` : `Capability: ${label.trim()}`;
+  // Light domain qualifier (Step 1, domain-context matching). Anchors the facet
+  // in the project's FIELD so a bare head-noun ("market data ingestion") doesn't
+  // float in generic space and collide cross-domain — FX-futures OHLCV ingestion
+  // vs a prediction-market trade collector are both "market data ingestion", but
+  // a different domain. Kept SHORT and APPENDED (not prepended) so a sharp
+  // grounded descriptor still dominates the vector: the domain nudges the facet
+  // toward its field, it never owns it. See docs/matching-domain-context-and-ir-roadmap.md.
+  const text = dom ? `${base} (project domain: ${dom})` : base;
+  return text.slice(0, 7000);
+}
+
+// Stack/infra tokens that must NOT be treated as a project's DOMAIN. The audit
+// (src/cli/audit-project-fields.ts) found ~46% of projects have a `tags` field
+// that is mostly these — auto-detected at registration, never replaced by a real
+// domain cloud. Reading domain from such tags anchors a facet toward generic
+// stack tooling (the acme-clinic-api `webhooks` → adnanh/webhook collision). So
+// the domain qualifier is DERIVED from the richest reliable signal — the summary
+// `purpose` (the sector, present even when tags are stack) + non-stack tags — not
+// from raw tags. Keep broad; matched on normalised equality.
+const STACK_DOMAIN_TOKENS = new Set([
+  "python", "typescript", "javascript", "js", "ts", "node", "nodejs", "node.js",
+  "fastapi", "flask", "django", "next", "nextjs", "next.js", "react", "vue",
+  "svelte", "angular", "express", "nestjs", "rails", "go", "golang", "rust",
+  "java", "kotlin", "swift", "php", "laravel", "spring",
+  "postgres", "postgresql", "sqlite", "mysql", "redis", "mongodb", "libsql",
+  "openai", "anthropic", "deepseek", "llm", "firebase", "supabase",
+  "aws", "gcp", "azure", "docker", "kubernetes", "k8s", "vercel", "cloudflare",
+  "tailwind", "tailwindcss", "drizzle", "prisma", "sqlalchemy", "graphql",
+  "rest", "api", "html", "css", "sass", "webpack", "vite", "esbuild",
+]);
+export function isStackToken(t: string): boolean { return STACK_DOMAIN_TOKENS.has(t.trim().toLowerCase()); }
+
+// First sentence/clause of a purpose blurb, bounded — the project's sector/field
+// ("a CRM and intake/booking funnel for a naturopathic-nutrition practice").
+function firstClause(s: string): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  const dot = t.indexOf(". ");
+  return (dot > 20 ? t.slice(0, dot) : t).slice(0, 160);
+}
+
+// The project's DOMAIN context, derived from the most reliable carriers and
+// appended as a compact qualifier to each facet's embed text (see
+// facetEmbeddingText). Priority: purpose's sector clause (reliable) → non-stack
+// tags (specific) → keyCapabilities (fallback when both thin). Stack tokens are
+// stripped so a stack-polluted `tags` field can't masquerade as the domain.
+// Set REPLEN_FACET_DOMAIN_TERMS=0 to disable the qualifier entirely.
+const FACET_DOMAIN_TERMS = Math.max(0, parseInt(process.env.REPLEN_FACET_DOMAIN_TERMS ?? "6", 10));
+export function projectDomainContext(input: {
+  purpose?: string | null;
+  keyCapabilities?: string[] | null;
+  tags?: string[] | null;
+}): string | null {
+  if (FACET_DOMAIN_TERMS === 0) return null;
+  const parts: string[] = [];
+  const purpose = input.purpose?.trim();
+  if (purpose) parts.push(firstClause(purpose));
+  const domainTags = (input.tags ?? [])
+    .map((t) => (typeof t === "string" ? t.trim() : ""))
+    .filter((t) => t.length > 0 && !isStackToken(t));
+  parts.push(...domainTags.slice(0, 10));
+  if (parts.length === 0) {
+    // No purpose, no domain tags — better the capability phrases than nothing.
+    parts.push(...(input.keyCapabilities ?? []).map((k) => k?.trim()).filter((k): k is string => !!k).slice(0, 6));
+  }
+  if (parts.length === 0) return null;
+  // Dedupe (case-insensitive), cap length so it nudges rather than dominates.
+  const seen = new Set<string>();
+  const deduped = parts.filter((p) => { const k = p.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  return deduped.join("; ").slice(0, 280);
 }
 
 export function serialiseFacetEmbeddings(v: StoredFacetEmbeddings): string {
@@ -404,7 +473,18 @@ export function parseStoredFacetEmbeddings(raw: string | null | undefined): Face
 // 9D004.e" became probes), and the dense grounded domain cloud (now embedded
 // into the centroid) covers the recall they were added for. Facets are now
 // capability probes only. Bumping regenerates every project's facet set.
-export const FACET_SCHEME_VERSION = "5";
+// "6" (domain-qualified facets): each facet embed text now carries a light
+// "(project domain: …)" qualifier from the head of the domain cloud, so a bare
+// head-noun facet is anchored in its field and stops colliding cross-domain
+// (demo-trading vs prediction-market "market data ingestion"). Bumping re-embeds
+// every project's facets — an operational cost; schedule it, don't ship silently.
+// "7" (domain from purpose, not stack tags): the v6 qualifier read the `tags`
+// field, which the audit found is stack-polluted for ~46% of projects (acme-clinic-api
+// tags = python/fastapi/postgres → anchored `webhooks` toward devops tooling). v7
+// derives the qualifier via projectDomainContext from the summary `purpose` (the
+// sector) + non-stack tags, so the domain is correct even when tags are just stack.
+// Bumping re-embeds every project's facets.
+export const FACET_SCHEME_VERSION = "7";
 export function facetSetHash(labels: string[]): string {
   return sha256(`${FACET_SCHEME_VERSION}:${labels.map((l) => l.toLowerCase()).join("|")}`);
 }

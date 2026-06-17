@@ -184,7 +184,12 @@ export async function POST(req: Request) {
     : project.agentReport;
 
   // Build facet vectors now (grounded capabilities + any doc sections). Embeddings only.
-  const { hash, inputs } = facetInputsFor({ capabilities: mergedSpecs, capabilityTags: merged, readmeMd: project.readmeMd, claudeMd: project.claudeMd, projectName: project.name ?? project.slug, projectSlug: project.slug });
+  // The stored domain cloud anchors each facet in the project's field (Step 1).
+  let domainTags: string[] = [];
+  if (project.tags) {
+    try { const a = JSON.parse(project.tags); if (Array.isArray(a)) domainTags = a.filter((t): t is string => typeof t === "string"); } catch { /* no domain qualifier */ }
+  }
+  const { hash, inputs } = facetInputsFor({ capabilities: mergedSpecs, capabilityTags: merged, keyCapabilities: summary?.keyCapabilities, readmeMd: project.readmeMd, claudeMd: project.claudeMd, projectName: project.name ?? project.slug, projectSlug: project.slug, purpose: summary?.purpose, domainTags });
   const facets = inputs.length > 0 ? await embedFacets(inputs) : [];
 
   await db.update(schema.projectProfiles).set({

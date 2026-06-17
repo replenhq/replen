@@ -395,7 +395,9 @@ const TOOLS: Tool[] = [
       "one sentence grounding the tag in the ACTUAL CODE — what DATA it operates on, the specific task, key constraints — " +
       "read from the real source files. This is what prevents word-collisions: \"anomaly detection\" is ambiguous, but " +
       "{tag:\"anomaly detection\", descriptor:\"rule-based detection over drone telemetry time-series (link-loss, GPS-drop); no ML\", " +
-      "modality:[\"timeseries\"]} is not. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
+      "modality:[\"timeseries\"]} is not. QUALIFY THE DESCRIPTOR WITH THE DOMAIN/DATA so a generic head-noun can't collide " +
+      "cross-field: \"market data ingestion\" matches BOTH a prediction-market trade collector and an FX-futures bar loader — " +
+      "write \"ingestion of 1-minute index-futures OHLCV bars\" instead. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
       "geospatial, graph, 3d, code, network (use [] if none apply). DERIVE all of it from the imports/deps and code, not " +
       "guesses. The server merges in dependency-derived capabilities and builds the facet vectors right away. " +
       "Default (mode='replace') sets the project's full capability set — use during onboarding. " +

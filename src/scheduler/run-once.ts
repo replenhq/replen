@@ -14,6 +14,7 @@ import {
   serialiseFacetEmbeddings,
 } from "../lib/embeddings";
 import { facetInputsFor, embedFacets } from "../projects/facets";
+import { projectQualityIssues, qualityGateSummary } from "../projects/quality";
 import { buildUserGraph } from "../graph/build";
 import { refreshCatalogue } from "../catalogue/builder";
 import { SEED_CAPABILITIES, isSeedCapability } from "../catalogue/seed-capabilities";
@@ -212,6 +213,25 @@ async function executePipeline(
     await refreshStaleProjectEmbeddings(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} project embeddings failed:`, e),
     );
+
+    // Field-quality gate. Audits each project's grounding fields (domain, summary,
+    // descriptors, versions, docs) and emits one concise run event flagging what's
+    // below bar + the worst repos to onboard. Observability only — the domain
+    // auto-repair is already applied above via projectDomainContext on re-embed;
+    // code-grounded richness must come from a local /replen-onboard. Non-fatal.
+    await (async () => {
+      const projs = await db
+        .select({
+          slug: schema.projectProfiles.slug, summaryJson: schema.projectProfiles.summaryJson,
+          tags: schema.projectProfiles.tags, facetEmbeddings: schema.projectProfiles.facetEmbeddings,
+          embedding: schema.projectProfiles.embedding, depVersions: schema.projectProfiles.depVersions,
+          readmeMd: schema.projectProfiles.readmeMd, claudeMd: schema.projectProfiles.claudeMd,
+        })
+        .from(schema.projectProfiles)
+        .where(and(eq(schema.projectProfiles.userId, userId), eq(schema.projectProfiles.active, true)));
+      const msg = qualityGateSummary(projs.map((p) => ({ slug: p.slug ?? "?", issues: projectQualityIssues(p) })));
+      if (msg) void recordEvent(runId, userId, "scan", msg);
+    })().catch((e) => console.warn(`[pipeline] user=${userId} quality gate failed:`, e));
 
     // Atlas — rebuild the user's knowledge graph from the freshened facets +
     // triage history. Deterministic + hash-gated, so it's a no-op when nothing
@@ -671,6 +691,8 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
       claudeMd: p.claudeMd,
       projectName: p.name ?? p.slug,
       projectSlug: p.slug,
+      purpose: summary?.purpose,
+      domainTags: tags,
     });
     let storedFacetHash: string | null = null;
     if (p.facetEmbeddings) {

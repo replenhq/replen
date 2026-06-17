@@ -48,10 +48,14 @@ async function main() {
         summaryPromptVersion: PROMPT_VERSION,
       }).where(eq(schema.projectProfiles.id, p.id));
 
+      let domainTags: string[] = [];
+      if (p.tags) {
+        try { const a = JSON.parse(p.tags); if (Array.isArray(a)) domainTags = a.filter((t): t is string => typeof t === "string"); } catch { /* no domain qualifier */ }
+      }
       const { hash, inputs } = facetInputsFor({
         capabilities: summary.capabilities, capabilityTags: summary.capabilityTags,
         keyCapabilities: summary.keyCapabilities, readmeMd: p.readmeMd, claudeMd: p.claudeMd,
-        projectName: p.name ?? p.slug, projectSlug: p.slug,
+        projectName: p.name ?? p.slug, projectSlug: p.slug, purpose: summary.purpose, domainTags,
       });
       const facets = inputs.length > 0 ? await embedFacets(inputs) : [];
       await db.update(schema.projectProfiles).set({

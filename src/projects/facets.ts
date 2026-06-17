@@ -8,6 +8,7 @@ import {
   embedBatch,
   selectFacetLabels,
   facetEmbeddingText,
+  projectDomainContext,
   facetSetHash,
   type FacetEmbedding,
 } from "../lib/embeddings";
@@ -33,6 +34,12 @@ export function facetInputsFor(input: {
   claudeMd?: string | null;
   projectName?: string | null;
   projectSlug?: string | null;
+  // Domain signal for the per-facet qualifier (see projectDomainContext). Derived
+  // from the summary `purpose` (the sector — reliable even when tags are stack) +
+  // non-stack `domainTags`, NOT raw tags. `purpose`/`keyCapabilities` come straight
+  // from summaryJson.
+  purpose?: string | null;
+  domainTags?: string[] | null;
 }): { hash: string; inputs: FacetInput[] } {
   // Build a spec map keyed by lowercased tag (grounded specs win; bare tags fill
   // in). The label set then runs through the same dedup/generic filter as before.
@@ -53,6 +60,7 @@ export function facetInputsFor(input: {
   // "Q5 — 9D004.e" became match probes), and the dense grounded domain cloud —
   // now embedded into the project centroid (see projectEmbeddingText) — covers
   // the recall they were added for, without the junk.
+  const domainContext = projectDomainContext({ purpose: input.purpose, keyCapabilities: input.keyCapabilities, tags: input.domainTags });
   const inputs: FacetInput[] = [];
   const seen = new Set<string>();
   for (const l of capLabels) {
@@ -65,7 +73,7 @@ export function facetInputsFor(input: {
     // Provenance comes from the spec when set; otherwise a grounded descriptor
     // implies grounded, and a bare tag with no spec is inferred.
     const provenance: Provenance = spec?.provenance ?? (descriptor ? "grounded" : "inferred");
-    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
+    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor, domainContext), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
   }
   const hash = facetSetHash(inputs.map((f) => `${f.label}::${f.text}::${f.modality.join(",")}::${f.provenance}`));
   return { hash, inputs };
