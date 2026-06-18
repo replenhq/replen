@@ -209,6 +209,13 @@ export const candidates = sqliteTable(
     // when the candidate's surface signal hasn't changed.
     embeddingContentHash: text("embedding_content_hash"),
     embeddingGeneratedAt: integer("embedding_generated_at", { mode: "timestamp" }),
+    // Candidate-side enrichment (parity with the catalogue, which already carries
+    // these). Title+description alone was the retrieval ceiling (~50 words); a
+    // README head lifts it, and a deterministic topic→modality lets the modality
+    // gate fire on the fetcher pool too (not just the catalogue). See
+    // src/fetchers/index.ts (population) + inventory route (gate).
+    readmeHead: text("readme_head"),       // cleaned first ~1.5k chars of the repo README
+    modality: text("modality"),            // JSON Modality[] from topics (modalityFromTopics)
   },
   (t) => ({
     uniqSourceItem: uniqueIndex("uniq_source_item_user").on(t.userId, t.source, t.sourceItemId),

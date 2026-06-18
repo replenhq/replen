@@ -24,6 +24,7 @@ import { loadOutcomePriors, priorBoost, sourcePrefix } from "@/lib/outcome-prior
 import { calibratedFloor } from "@/lib/calibration";
 import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance } from "@/projects/modality";
+import { modalitiesDisjoint, coerceModalities } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
 //
@@ -822,6 +823,12 @@ export async function GET(req: Request) {
         const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
         if (Number.isFinite(cSim)) centroidCos = cSim;
 
+        // The candidate's own data modality (deterministic topic→modality, set on
+        // the fetcher pool in src/fetchers/index.ts). Lets the gate fire here, not
+        // just in the catalogue reader.
+        let candModality: Modality[] = [];
+        try { candModality = coerceModalities(c.modality ? JSON.parse(c.modality) : []); } catch { /* unknown → no gate */ }
+
         let bestFacetCos = -Infinity;
         let bestFacetLabel: string | null = null;
         let bestFacetProv: Provenance | null = null;
@@ -829,6 +836,10 @@ export async function GET(req: Request) {
           // Contextual modality suppression: agents recorded this repo as a
           // modality collision for facets of this modality — don't probe with them.
           if (suppressedMods && f.modality?.length && f.modality.some((m) => suppressedMods.has(m))) continue;
+          // Deterministic modality gate: a facet can't lead a candidate whose data
+          // modality is disjoint from it (an image lib never leads a timeseries
+          // capability). Unknown on either side → no gate. Mirrors catalogue/reader.
+          if (modalitiesDisjoint(f.modality, candModality)) continue;
           const fSim = cosineSimilarity(f.vec, candEmbedding);
           if (Number.isFinite(fSim) && fSim > bestFacetCos) {
             bestFacetCos = fSim;

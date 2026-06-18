@@ -10,7 +10,7 @@
 // gradually rather than hammering the API.
 
 import { db, schema } from "../db/client";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { embed, embedBatch, candidateEmbeddingText, cleanReadmeHead, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { looksLikeHype } from "./derive-capabilities";
@@ -92,7 +92,7 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
     if (hits.length > 0) {
       // Library-vs-hype + modality classification (one pass).
       const cls = await classifyRepos(hits.map((h) => ({ fullName: h.fullName, description: h.description, topics: h.topics, stars: h.stars })));
-      const keep = hits.map((h, i) => ({ h, kind: cls[i].kind, modality: cls[i].modality })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
+      const keep = hits.map((h, i) => ({ h, kind: cls[i].kind, modality: cls[i].modality, summary: cls[i].summary })).filter((x) => x.kind === "unknown" || KEEP_KINDS.has(x.kind));
       if (keep.length > 0) {
         // README head per kept repo: reuse a stored one, else fetch (one API
         // call per NEW repo). The README is the difference between matching
@@ -103,8 +103,8 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
             .from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, h.fullName)).get();
           readmeHeads.push(existing?.readmeHead ?? await fetchReadmeHead(h.fullName, ghToken));
         }
-        const vecs = await embedBatch(keep.map(({ h }, i) =>
-          candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language, readmeHead: readmeHeads[i] }),
+        const vecs = await embedBatch(keep.map(({ h, summary }, i) =>
+          candidateEmbeddingText({ title: h.fullName, description: h.description, topics: h.topics, repoShape: h.shape, primaryLanguage: h.language, readmeHead: readmeHeads[i], capabilitySummary: summary }),
         ));
         for (let i = 0; i < keep.length; i++) {
           await upsertRepo(keep[i].h, label, vecs[i]?.vector ?? null, keep[i].kind, keep[i].modality, readmeHeads[i]);
@@ -162,6 +162,93 @@ async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, ki
       embedding: vector ? serialiseEmbedding(vector) : null,
       capabilities: JSON.stringify([label]), firstSeen: now, lastSeen: now, updatedAt: now,
     });
+  }
+}
+
+// #3 — flywheel promotion. A fetcher candidate that independently surfaced for
+// ≥K DISTINCT users is generically useful (not one user's niche), so it earns a
+// place in the warm cross-user catalogue, where it gets the full enrichment
+// (kind/modality/capability descriptor + README embed) ONCE, shared by everyone.
+// k-anonymity holds exactly as for capability sharing (run-once.ts §5): only the
+// repo's OWN public GitHub metadata enters — never a user_id, a repo of theirs,
+// or a capability term of theirs. The label seeded into the catalogue comes from
+// the repo's own topics, not any user vocabulary. Runs once per all-users run.
+export async function promoteCandidatesToCatalogue(): Promise<{ promoted: number }> {
+  const K = Math.max(2, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2);
+  const CAP = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_PROMOTE_CAP ?? "40", 10) || 40);
+  const ghToken = readRunOrEnv("githubToken", "GITHUB_TOKEN");
+
+  // Distinct-user count per GitHub repo across the whole candidate pool.
+  const rows = await db
+    .select({ githubUrl: schema.candidates.githubUrl, userId: schema.candidates.userId })
+    .from(schema.candidates)
+    .where(isNotNull(schema.candidates.githubUrl));
+  const byRepo = new Map<string, Set<number>>();
+  for (const r of rows) {
+    const m = r.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/);
+    if (!m || r.userId == null) continue;
+    const fn = m[1].replace(/\.git$/, "");
+    let s = byRepo.get(fn);
+    if (!s) { s = new Set(); byRepo.set(fn, s); }
+    s.add(r.userId);
+  }
+  const qualified = [...byRepo.entries()].filter(([, users]) => users.size >= K).map(([fn]) => fn);
+  if (qualified.length === 0) return { promoted: 0 };
+
+  const already = new Set(
+    (await db.select({ fullName: schema.catalogueRepos.fullName }).from(schema.catalogueRepos))
+      .map((r) => r.fullName.toLowerCase()),
+  );
+  const todo = qualified.filter((fn) => !already.has(fn)).slice(0, CAP);
+  let promoted = 0;
+  for (const fn of todo) {
+    const hit = await fetchRepoMeta(fn, ghToken);
+    if (!hit) continue;
+    const [cls] = await classifyRepos([{ fullName: hit.fullName, description: hit.description, topics: hit.topics, stars: hit.stars }]);
+    // Drop viral hype / curated-content repos — the catalogue is adoptable libs.
+    if (!cls || !(cls.kind === "unknown" || KEEP_KINDS.has(cls.kind))) continue;
+    const readmeHead = await fetchReadmeHead(fn, ghToken);
+    const vec = await embed(candidateEmbeddingText({
+      title: hit.fullName, description: hit.description, topics: hit.topics,
+      repoShape: hit.shape, primaryLanguage: hit.language, readmeHead, capabilitySummary: cls.summary,
+    }));
+    // Sourcing label from the repo's OWN vocabulary (never a user's capability term).
+    const label = (hit.topics.find((t) => t && t.length > 2) ?? hit.language ?? "discovered").toLowerCase();
+    await upsertRepo(hit, label, vec?.vector ?? null, cls.kind, cls.modality, readmeHead);
+    promoted++;
+  }
+  if (promoted > 0) console.log(`[catalogue] promoted ${promoted} k-anon candidate(s) (≥${K} users) into the catalogue`);
+  return { promoted };
+}
+
+// Authoritative repo metadata (stars/dates/description/topics) for a promoted
+// candidate — the candidate row doesn't carry it. One GET /repos per promotion.
+async function fetchRepoMeta(fullName: string, token: string | undefined): Promise<RepoHit | null> {
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github+json", "user-agent": "replen/catalogue", "x-github-api-version": "2022-11-28",
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    const res = await fetch(`https://api.github.com/repos/${fullName}`, { headers, signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = (await res.json()) as Record<string, unknown>;
+    const [owner, name] = fullName.split("/");
+    return {
+      fullName, owner: owner ?? "", name: name ?? "",
+      description: typeof j.description === "string" ? j.description : null,
+      url: typeof j.html_url === "string" ? j.html_url : `https://github.com/${fullName}`,
+      topics: Array.isArray(j.topics) ? (j.topics as unknown[]).filter((t): t is string => typeof t === "string") : [],
+      stars: typeof j.stargazers_count === "number" ? j.stargazers_count : null,
+      language: typeof j.language === "string" ? j.language : null,
+      shape: "unknown",
+      pushedAt: typeof j.pushed_at === "string" ? new Date(j.pushed_at) : null,
+      createdAt: typeof j.created_at === "string" ? new Date(j.created_at) : null,
+    };
+  } catch {
+    return null;
   }
 }
 

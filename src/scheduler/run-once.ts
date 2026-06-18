@@ -16,7 +16,7 @@ import {
 import { facetInputsFor, embedFacets } from "../projects/facets";
 import { projectQualityIssues, qualityGateSummary } from "../projects/quality";
 import { buildUserGraph } from "../graph/build";
-import { refreshCatalogue } from "../catalogue/builder";
+import { refreshCatalogue, promoteCandidatesToCatalogue } from "../catalogue/builder";
 import { SEED_CAPABILITIES, isSeedCapability } from "../catalogue/seed-capabilities";
 import { createHash } from "node:crypto";
 function sha256Hex(text: string): string {
@@ -405,6 +405,14 @@ export async function runPipeline() {
     }
   });
   await Promise.all(workers);
+
+  // Flywheel (#3): once all users are processed, promote candidates that
+  // independently surfaced for ≥K distinct users into the warm cross-user
+  // catalogue (k-anonymous; public OSS metadata only). Cross-user, so it runs
+  // once here, not per-user. Non-fatal.
+  await promoteCandidatesToCatalogue().catch((e) =>
+    console.warn(`[pipeline] candidate→catalogue promotion failed:`, e),
+  );
 }
 
 // Reads the user's project READMEs / CLAUDE.md files via the GitHub

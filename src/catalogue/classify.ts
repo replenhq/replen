@@ -9,7 +9,7 @@ import { modalityFromTopics, coerceModalities, type Modality } from "../projects
 
 export type RepoKind = "library" | "framework" | "app" | "experiment" | "content" | "unknown";
 
-export type RepoClassification = { kind: RepoKind; modality: Modality[] };
+export type RepoClassification = { kind: RepoKind; modality: Modality[]; summary: string };
 
 // Kinds worth keeping in the catalogue (things you'd actually adopt/use).
 export const KEEP_KINDS = new Set<RepoKind>(["library", "framework", "app"]);
@@ -35,8 +35,14 @@ Examples: an image anomaly-detection lib → ["image"]; a telemetry/time-series 
 ["timeseries"]; a recommender → ["tabular"]; a satellite-imagery segmenter → ["image","geospatial"];
 an NLP/LLM lib → ["text"]; a web framework or ORM → [].
 
-Output JSON only: {"v": {"0":{"k":"library","m":["image"]}, "1":{"k":"experiment","m":[]}, ...}}
-with an entry for EVERY index. "k" is the kind, "m" is the modality array.`;
+Also write "s": ONE concise sentence saying what the repo DOES as a reusable capability — the
+data it operates on + the specific task — grounded and factual, no marketing. This is the
+candidate-side analog of a project capability descriptor, so it must read like one: e.g.
+"TLS-fingerprint-rotating HTTP client that defeats Cloudflare bot detection for scraping", or
+"on-device OCR + receipt-field parsing over phone-camera images". Keep it under ~25 words.
+
+Output JSON only: {"v": {"0":{"k":"library","m":["image"],"s":"…"}, "1":{"k":"experiment","m":[],"s":"…"}, ...}}
+with an entry for EVERY index. "k" is the kind, "m" is the modality array, "s" is the capability sentence.`;
 
 /**
  * Classify a batch of repos into {kind, modality}, parallel-indexed to the
@@ -49,7 +55,7 @@ export async function classifyRepos(
 ): Promise<RepoClassification[]> {
   if (repos.length === 0) return [];
   // Deterministic modality from topics first — this never fails.
-  const out: RepoClassification[] = repos.map((r) => ({ kind: "unknown" as RepoKind, modality: modalityFromTopics(r.topics) }));
+  const out: RepoClassification[] = repos.map((r) => ({ kind: "unknown" as RepoKind, modality: modalityFromTopics(r.topics), summary: "" }));
   const list = repos
     .map((r, i) => `${i}. ${r.fullName} (${r.stars ?? "?"}★) — ${(r.description ?? "").replace(/\s+/g, " ").slice(0, 160)} [${r.topics.slice(0, 6).join(", ")}]`)
     .join("\n");
@@ -65,7 +71,7 @@ export async function classifyRepos(
       { timeoutMs: 60_000, retries: 1 },
     );
     const text = res.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(text) as { v?: Record<string, { k?: string; m?: unknown } | string> };
+    const parsed = JSON.parse(text) as { v?: Record<string, { k?: string; m?: unknown; s?: unknown } | string> };
     const v = parsed.v ?? {};
     for (const [key, val] of Object.entries(v)) {
       const idx = parseInt(key, 10);
@@ -82,6 +88,7 @@ export async function classifyRepos(
           const merged = new Set<Modality>([...out[idx].modality, ...llmMods]);
           out[idx].modality = [...merged];
         }
+        if (typeof val.s === "string" && val.s.trim()) out[idx].summary = val.s.trim().slice(0, 300);
       }
     }
   } catch (e) {

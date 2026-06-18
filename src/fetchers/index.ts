@@ -1,6 +1,8 @@
 import { db, schema } from "../db/client";
 import { errorMsg } from "../lib/error-msg";
 import { candidateEmbeddingText, embedBatch, serialiseEmbedding } from "../lib/embeddings";
+import { fetchReadmeHead } from "../catalogue/builder";
+import { modalityFromTopics } from "../projects/modality";
 import { sql, eq, isNull, and, gte } from "drizzle-orm";
 import { hnFetcher } from "./hn";
 import { redditFetcher } from "./reddit";
@@ -182,7 +184,7 @@ async function runFetchersInner(userId: number, cfg: UserConfig, fetchers: Fetch
   // logged but never poison the fetcher's success — the inventory
   // query has a tag-intersection fallback when an embedding is missing.
   try {
-    await backfillCandidateEmbeddings(userId, now);
+    await backfillCandidateEmbeddings(userId, now, cfg.githubToken);
   } catch (e) {
     console.warn(`[fetch] user=${userId} embedding backfill failed:`, errorMsg(e));
   }
@@ -203,7 +205,18 @@ const EMBED_BATCH_SIZE = 100;
 const EMBED_BATCH_CAP = 5; // max 5 batches × 100 = 500 candidates per fetcher run
 const EMBED_HORIZON_DAYS = 30;
 
-async function backfillCandidateEmbeddings(userId: number, asOf: Date): Promise<void> {
+// Bounded-concurrency map — keeps GitHub README fetches from either stalling
+// (100 sequential 10s timeouts) or hammering the rate limit (100 at once).
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]); }
+  }));
+  return out;
+}
+
+async function backfillCandidateEmbeddings(userId: number, asOf: Date, githubToken: string | undefined): Promise<void> {
   const horizon = new Date(asOf.getTime() - EMBED_HORIZON_DAYS * 24 * 3600 * 1000);
   for (let batch = 0; batch < EMBED_BATCH_CAP; batch++) {
     const pending = await db
@@ -218,14 +231,27 @@ async function backfillCandidateEmbeddings(userId: number, asOf: Date): Promise<
       .limit(EMBED_BATCH_SIZE);
     if (pending.length === 0) return;
 
-    const texts = pending.map((c) => candidateEmbeddingText({
-      title: c.title,
-      description: extractDescription(c.rawJson),
-      topics: c.topics ? safeParseStringArray(c.topics) : null,
-      repoShape: c.repoShape,
-      primaryLanguage: c.primaryLanguage,
-    }));
-    const results = await embedBatch(texts);
+    // Candidate-side enrichment (parity with the catalogue): a deterministic
+    // topic→modality (free, lets the modality gate fire on the fetcher pool) and
+    // a README head (lifts retrieval above the ~50-word title+description ceiling).
+    // README is fetched once per candidate (cached in readme_head) and only for
+    // GitHub repos; cap concurrency to respect the rate limit.
+    const enriched = await mapLimit(pending, 8, async (c) => {
+      const topics = c.topics ? safeParseStringArray(c.topics) : null;
+      const modality = modalityFromTopics(topics ?? []);
+      const fullName = c.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/)?.[1] ?? null;
+      const readmeHead = c.readmeHead ?? (fullName ? await fetchReadmeHead(fullName, githubToken) : null);
+      const text = candidateEmbeddingText({
+        title: c.title,
+        description: extractDescription(c.rawJson),
+        topics,
+        repoShape: c.repoShape,
+        primaryLanguage: c.primaryLanguage,
+        readmeHead,
+      });
+      return { modality, readmeHead, text };
+    });
+    const results = await embedBatch(enriched.map((e) => e.text));
     let writes = 0;
     for (let i = 0; i < pending.length; i++) {
       const r = results[i];
@@ -236,6 +262,8 @@ async function backfillCandidateEmbeddings(userId: number, asOf: Date): Promise<
           embedding: serialiseEmbedding(r.vector),
           embeddingContentHash: r.contentHash,
           embeddingGeneratedAt: r.generatedAt,
+          readmeHead: enriched[i].readmeHead ?? pending[i].readmeHead,
+          modality: JSON.stringify(enriched[i].modality),
         })
         .where(eq(schema.candidates.id, pending[i].id));
       writes++;

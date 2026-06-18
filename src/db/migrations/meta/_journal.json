@@ -491,6 +491,13 @@
 			"when": 1781568000000,
 			"tag": "0069_project_primary_language",
 			"breakpoints": true
+		},
+		{
+			"idx": 70,
+			"version": "6",
+			"when": 1781654400000,
+			"tag": "0070_candidate_enrichment",
+			"breakpoints": true
 		}
 	]
 }
