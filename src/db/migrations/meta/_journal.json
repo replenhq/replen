@@ -498,6 +498,13 @@
 			"when": 1781654400000,
 			"tag": "0070_candidate_enrichment",
 			"breakpoints": true
+		},
+		{
+			"idx": 71,
+			"version": "6",
+			"when": 1781740800000,
+			"tag": "0071_project_domain_anchor",
+			"breakpoints": true
 		}
 	]
 }

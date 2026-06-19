@@ -709,7 +709,7 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
 
     const centroidStale = !(p.embeddingContentHash === contentHash && p.embedding);
     const facetsStale = storedFacetHash !== facetHash;
-    if (!centroidStale && !facetsStale) continue; // cache hit on both
+    if (!centroidStale && !facetsStale && (p.domainAnchor || tags.length === 0)) continue; // cache hit on all (incl. domain-anchor backfill)
 
     const set: Partial<typeof schema.projectProfiles.$inferInsert> = { updatedAt: new Date() };
 
@@ -719,6 +719,14 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
       set.embedding = serialiseEmbedding(result.vector);
       set.embeddingContentHash = contentHash;
       set.embeddingGeneratedAt = result.generatedAt;
+    }
+
+    // Domain-anchor: embed the project's domain TAGS alone (the subject-area vector
+    // that powers the soft prior). Rebuilt when the centroid is stale; also
+    // backfilled when missing. Empty tags → nothing to anchor.
+    if ((centroidStale || !p.domainAnchor) && tags.length > 0) {
+      const a = await embed(tags.join(" "));
+      if (a) set.domainAnchor = serialiseEmbedding(a.vector);
     }
 
     if (facetsStale) {
@@ -737,7 +745,7 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
 
     // Nothing actually produced (e.g. facets stale but batch failed and centroid
     // fresh) — skip the write.
-    if (set.embedding === undefined && set.facetEmbeddings === undefined) continue;
+    if (set.embedding === undefined && set.facetEmbeddings === undefined && set.domainAnchor === undefined) continue;
 
     await db
       .update(schema.projectProfiles)

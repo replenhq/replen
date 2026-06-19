@@ -387,6 +387,11 @@ export const projectProfiles = sqliteTable(
     // BEST facet (a CV library matches the "computer vision" facet even though
     // it's nowhere near the centroid). JSON: { hash, facets: [{label, vec[]}] }.
     facetEmbeddings: text("facet_embeddings"),
+    // Domain-anchor: an embedding of the project's domain TAGS alone (not the
+    // blended centroid) — the "is this candidate in my subject area?" vector that
+    // powers the soft subject-area prior (matching precision). Rebuilt with the
+    // centroid when tags change; backfilled lazily on the next pipeline run when null.
+    domainAnchor: text("domain_anchor"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

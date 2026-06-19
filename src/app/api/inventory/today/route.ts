@@ -5,6 +5,7 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
+import { domainPriorPenalty } from "@/lib/domain-prior";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
 import { isGenericProbeFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
@@ -469,6 +470,12 @@ export async function GET(req: Request) {
   const projectEmbedding = scopedProject
     ? parseStoredEmbedding(scopedProject.embedding ?? null)
     : null;
+  // Domain-anchor: the project's subject-area-terms vector (its domain tags embedded
+  // alone). Powers the soft subject-area prior — separates off-topic collisions better
+  // at the safe operating point than the blended centroid. Null until backfilled.
+  const projectDomainAnchor = scopedProject
+    ? parseStoredEmbedding(scopedProject.domainAnchor ?? null)
+    : null;
 
   // Faceted matching (Phase 1). Per-capability vectors for the scoped project.
   // A candidate is scored on its BEST facet, not the centroid — so a library
@@ -696,6 +703,16 @@ export async function GET(req: Request) {
   const normForCover = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const isCovered = (facet: string | null | undefined) => !!facet && coveredCaps.size > 0 && coveredCaps.has(normForCover(facet));
 
+  // Soft subject-area prior (ON by default). A facet-led candidate far OUTSIDE the
+  // project's subject area (domain-anchor cosine < floor) is the demo-trading collision
+  // shape — matches a capability facet's words but isn't in the project's field.
+  // Bounded RANK penalty only (never a hard cut, never touches the displayed cosine).
+  // Validated offline (branch experiment/learned-reranker): the domain-anchor at floor
+  // 0.30 sinks ~56% of off-subject facet-led collisions while touching ZERO keepers.
+  // Tunable / disable via env (weight 0 ⇒ off). See src/lib/domain-prior.ts.
+  const DOMAIN_PRIOR_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_DOMAIN_PRIOR_WEIGHT ?? "0.5"));
+  const DOMAIN_PRIOR_FLOOR = Math.min(1, Math.max(0, parseFloat(process.env.REPLEN_DOMAIN_PRIOR_FLOOR ?? "0.30")));
+
   // ── Per-facet calibration + specificity (research: matching-precision §1–2) ──
   // Cosine is NOT comparable across facets: a generic facet ("optimization")
   // sits at elevated similarity against EVERYTHING, so an 0.82 match is noise;
@@ -811,6 +828,7 @@ export async function GET(req: Request) {
     // ranks on that strength even when its centroid match is near zero.
     let cosine: number | null = null;
     let centroidCos: number | null = null;
+    let domainAnchorCos: number | null = null; // candidate ↔ project subject-area terms (soft prior)
     let matchedFacet: string | null = null;
     let matchedProvenance: Provenance | null = null;
     let facetLeadsCentroid = false; // a capability beats the whole-project match by a margin
@@ -822,6 +840,7 @@ export async function GET(req: Request) {
       if (candEmbedding) {
         const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
         if (Number.isFinite(cSim)) centroidCos = cSim;
+        if (projectDomainAnchor) { const aSim = cosineSimilarity(projectDomainAnchor, candEmbedding); if (Number.isFinite(aSim)) domainAnchorCos = aSim; }
 
         // The candidate's own data modality (deterministic topic→modality, set on
         // the fetcher pool in src/fetchers/index.ts). Lets the gate fire here, not
@@ -950,6 +969,11 @@ export async function GET(req: Request) {
       // below genuine specific-capability fills.
       const base = facetBaseline.get(matchedFacet);
       if (base !== undefined) rank -= FACET_IDF_WEIGHT * base;
+      // Soft subject-area prior: sink a facet-led match sitting far outside the
+      // project's subject area. Uses the domain-anchor (subject-area-terms vector),
+      // which catches more off-topic collisions at zero keeper cost than the centroid.
+      // Fires only once the anchor is backfilled for this project (null ⇒ no-op).
+      if (domainAnchorCos !== null) rank -= domainPriorPenalty(domainAnchorCos, DOMAIN_PRIOR_WEIGHT, DOMAIN_PRIOR_FLOOR);
     }
 
     filtered.push({

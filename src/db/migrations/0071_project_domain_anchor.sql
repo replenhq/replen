@@ -1,0 +1,1 @@
+ALTER TABLE `project_profiles` ADD `domain_anchor` text;
