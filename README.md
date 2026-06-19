@@ -23,6 +23,10 @@
   </p>
 </div>
 
+<p align="center">
+  <a href="https://replen.dev"><img src="assets/replen-demo.gif" alt="Replen in a Claude Code session — surfacing a match, triaging it against the real code, and porting the one worth porting" width="820"></a>
+</p>
+
 ---
 
 **Replen brings the outside world into your AI coding tools.**
@@ -148,6 +152,10 @@ The bar is deliberately high: a *named, specific* superiority, never "this also 
 ## Atlas
 
 Discovery brings the outside world in. Atlas is the other half, a living map of everything you have already built and the connections inside it.
+
+<p align="center">
+  <a href="https://app.replen.dev/atlas"><img src="assets/atlas-demo.gif" alt="Atlas — your whole dev world as an interactive graph: projects, capabilities, tools, and the connections across them" width="820"></a>
+</p>
 
 As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
 

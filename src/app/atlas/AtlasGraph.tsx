@@ -558,50 +558,78 @@ export function AtlasGraph({ nodes, edges, mapPos, initialFocus = null }: { node
             <>
               {dossier.subtitle && <div style={{ color: "#999", marginBottom: 8 }}>{dossier.subtitle}</div>}
               {dossier.url && <div style={{ marginBottom: 8 }}><a href={dossier.url} target="_blank" rel="noreferrer" style={{ color: "#5eb0ef" }}>{dossier.url.replace(/^https?:\/\//, "")}</a></div>}
-              {(dossier.decisions?.length ?? 0) > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
-                    Your decisions ({dossier.decisions!.length})
+              {(dossier.decisions?.length ?? 0) > 0 && (() => {
+                const decs = dossier.decisions!;
+                const vColor = (v: string) => v === "adopt" ? "#86efac" : (v === "port" || v === "cherry-pick") ? "#93c5fd" : (v === "upgrade" || v === "clean-room") ? "#c4b5fd" : v === "defer" ? "#fcd34d" : v === "skip" ? "#f87171" : "#aaa";
+                // Group by verdict + count so the panel scans (e.g. "skip · 14")
+                // instead of listing every card. Action verdicts open; skips
+                // and big groups collapsed.
+                const groups = new Map<string, typeof decs>();
+                for (const d of decs) { const k = d.verdict || "other"; const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); }
+                const rank = (v: string) => v === "skip" ? 9 : v === "defer" ? 6 : 0;
+                const ordered = [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || b[1].length - a[1].length);
+                return (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Your decisions ({decs.length})</div>
+                    {ordered.map(([v, ds]) => (
+                      <details key={v} open={v !== "skip" && ds.length <= 6} style={{ marginBottom: 6 }}>
+                        <summary style={{ cursor: "pointer", color: vColor(v), fontSize: 12, fontWeight: 700, textTransform: "capitalize" }}>{v} · {ds.length}</summary>
+                        {ds.map((d, i) => (
+                          <div key={i} style={{ margin: "6px 0 10px", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8 }}>
+                            <div style={{ color: "#999" }}>
+                              {d.score != null && <span>{d.score}/100</span>}
+                              {d.effort && <span>{d.score != null ? " · " : ""}{d.effort}</span>}
+                              {d.reason && <span> · {d.reason}</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#888", margin: "2px 0" }}>triaged in {d.project} · {d.at}</div>
+                            {d.oneLine && <div style={{ color: "#ccc", marginTop: 4 }}>{d.oneLine}</div>}
+                            {!d.oneLine && !d.writeup && <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>bare verdict — the agent recorded no reasoning</div>}
+                            {d.writeup && (
+                              <details style={{ marginTop: 6 }}>
+                                <summary style={{ cursor: "pointer", color: "#5eb0ef", fontSize: 12 }}>show write-up</summary>
+                                <div style={{ whiteSpace: "pre-wrap", color: "#bbb", fontSize: 12, marginTop: 6, maxHeight: 320, overflowY: "auto" }}>{d.writeup}</div>
+                              </details>
+                            )}
+                          </div>
+                        ))}
+                      </details>
+                    ))}
                   </div>
-                  {dossier.decisions!.map((d, i) => (
-                    <div key={i} style={{ margin: "6px 0 10px", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8 }}>
-                      <div>
-                        <span style={{ fontWeight: 700, color: d.verdict === "adopt" ? "#86efac" : d.verdict === "port" ? "#93c5fd" : d.verdict === "defer" ? "#fcd34d" : "#f87171" }}>{d.verdict}</span>
-                        {d.score != null && <span style={{ color: "#999" }}> · {d.score}/100</span>}
-                        {d.effort && <span style={{ color: "#999" }}> · {d.effort}</span>}
-                        {d.reason && <span style={{ color: "#999" }}> · {d.reason}</span>}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#888", margin: "2px 0" }}>triaged in {d.project} · {d.at}</div>
-                      {d.oneLine && <div style={{ color: "#ccc", marginTop: 4 }}>{d.oneLine}</div>}
-                      {!d.oneLine && !d.writeup && <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>bare verdict — the agent recorded no reasoning</div>}
-                      {d.writeup && (
-                        <details style={{ marginTop: 6 }}>
-                          <summary style={{ cursor: "pointer", color: "#5eb0ef", fontSize: 12 }}>show write-up</summary>
-                          <div style={{ whiteSpace: "pre-wrap", color: "#bbb", fontSize: 12, marginTop: 6, maxHeight: 320, overflowY: "auto" }}>{d.writeup}</div>
-                        </details>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {dossier.sections.map((s) => (
-                <div key={s.heading} style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.heading}</div>
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {s.items.map((it, i) => {
-                      const nav = s.links?.[i];
-                      return nav ? (
-                        <li key={i} style={{ margin: "3px 0" }}>
-                          <span onClick={() => navigateTo(nav)} title="Go to this node"
-                            style={{ color: "#7fb2e8", cursor: "pointer" }}
-                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{it}</span>
-                        </li>
-                      ) : <li key={i} style={{ margin: "3px 0", color: "#ccc" }}>{it}</li>;
-                    })}
-                  </ul>
-                </div>
-              ))}
+                );
+              })()}
+              {dossier.sections.map((s) => {
+                // Cap visible items to ~5 even when expanded; the rest hide behind
+                // a "show N more" toggle so a 30-item USES list can't flood the panel.
+                const CAP = 5;
+                const renderLi = (it: string, i: number) => {
+                  const nav = s.links?.[i];
+                  return nav ? (
+                    <li key={i} style={{ margin: "3px 0" }}>
+                      <span onClick={() => navigateTo(nav)} title="Go to this node"
+                        style={{ color: "#7fb2e8", cursor: "pointer" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{it}</span>
+                    </li>
+                  ) : <li key={i} style={{ margin: "3px 0", color: "#ccc" }}>{it}</li>;
+                };
+                const overflow = s.items.length - CAP;
+                return (
+                  <details key={s.heading} open style={{ marginTop: 12 }}>
+                    <summary style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, cursor: "pointer" }}>{s.heading}</summary>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {s.items.slice(0, CAP).map((it, i) => renderLi(it, i))}
+                    </ul>
+                    {overflow > 0 && (
+                      <details>
+                        <summary style={{ cursor: "pointer", color: "#7fb2e8", fontSize: 12, marginLeft: 16 }}>show {overflow} more</summary>
+                        <ul style={{ margin: "2px 0 0", paddingLeft: 16 }}>
+                          {s.items.slice(CAP).map((it, i) => renderLi(it, i + CAP))}
+                        </ul>
+                      </details>
+                    )}
+                  </details>
+                );
+              })}
               {/* ── actions: judgment flowing back into the engine ── */}
               {dossier.suggestion && (
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
