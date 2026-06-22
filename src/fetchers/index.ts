@@ -8,7 +8,7 @@ import { sql, eq, isNull, and, gte } from "drizzle-orm";
 import { hnFetcher } from "./hn";
 import { redditFetcher } from "./reddit";
 import { ghTrendingFetcher } from "./gh-trending";
-import { ossinsightTrendingFetcher } from "./ossinsight-trending";
+import { curatedFetcher } from "./curated";
 import { ghSearchFetcher } from "./gh-search";
 import { ghSearchRecentFetcher } from "./gh-search-recent";
 import { ghTargetedSearchFetcher } from "./gh-targeted-search";
@@ -16,7 +16,6 @@ import { stackWatchFetcher } from "./stack-watch";
 import { specWatchFetcher } from "./spec-watch";
 import { healthWatchFetcher } from "./health-watch";
 import { securityWatchFetcher } from "./security-watch";
-import { historicalSearchFetcher } from "./historical-search";
 import { threadsFetcher } from "./threads";
 import { tiktokFetcher } from "./tiktok";
 import type { Fetcher } from "./types";
@@ -48,15 +47,19 @@ function withFetcherTimeout<T>(p: Promise<T>, fallback: T, label: string): Promi
 // run before Stages 1+2 — gives new users their first inventory in
 // ~30-60s instead of after the per-project LLM work completes.
 const DISCOVERED_FETCHERS: Fetcher[] = [
+  curatedFetcher,        // curator-vetted repos (respected maintainers' recent stars) — the quality-curated source; beats trending on fit
   hnFetcher,
   redditFetcher,
   ghTrendingFetcher,
-  ossinsightTrendingFetcher,
   ghSearchFetcher,
   ghSearchRecentFetcher,
-  historicalSearchFetcher,
   threadsFetcher,
   tiktokFetcher,
+  // PRUNED (data-driven): the broad trending/historical firehoses produced 0 keepers
+  // across the triaged sample and the largest bank bloat — popularity, not fit. Modules
+  // retained (./ossinsight-trending, ./historical-search); re-add if a measurement shows value.
+  //   ossinsightTrendingFetcher  — 801 candidates, 0/10 triaged kept
+  //   historicalSearchFetcher    — 2079 candidates, 0/5 triaged kept (one-time backfill, done)
 ];
 
 // Scouted-pool fetchers: depend on per-project search vectors generated

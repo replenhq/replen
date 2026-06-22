@@ -1,0 +1,13 @@
+{
+  "_note": "Starter seed for the CURATED source — the candidate-supply quality lever. Raw 'trending' measures popularity, not fit (gh-trending ~7% keeper-rate in triage; broad historical/trending firehoses ~0%). A human curator filters for 'genuinely good/interesting', which is the axis trending misses. type=github-stars ingests a curator's RECENT PUBLIC stars (public data; 'what do respected engineers star' is a recognised discovery mechanism). This committed list is a small STARTER across ecosystems; the maintained curator network (newsletters, awesome-lists, more curators) is operational — extend it there. Each candidate carries source=curated:<handle> so its keeper-rate is measured and learned per curator.",
+  "curators": [
+    { "type": "github-stars", "handle": "sindresorhus", "note": "JS/Node; awesome-lists; prolific tool curator" },
+    { "type": "github-stars", "handle": "antfu", "note": "JS/Vue/Vite tooling" },
+    { "type": "github-stars", "handle": "yyx990803", "note": "Vue/Vite ecosystem" },
+    { "type": "github-stars", "handle": "charliermarsh", "note": "Python; Astral (ruff/uv)" },
+    { "type": "github-stars", "handle": "BurntSushi", "note": "Rust; ripgrep/systems" },
+    { "type": "github-stars", "handle": "mitchellh", "note": "Go/systems; HashiCorp, ghostty" },
+    { "type": "github-stars", "handle": "kelseyhightower", "note": "cloud/infra/k8s" },
+    { "type": "github-stars", "handle": "karpathy", "note": "ML/AI" }
+  ]
+}
