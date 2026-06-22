@@ -6,6 +6,7 @@ import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { domainPriorPenalty } from "@/lib/domain-prior";
+import { isSolid, coveredByDeps, normOwnedDep } from "@/lib/solid-match";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
 import { deriveProductKey } from "@/projects/product-key";
 import { isGenericProbeFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
@@ -1086,6 +1087,10 @@ export async function GET(req: Request) {
     // Risk + replacement (health/security stakes only): maintained catalogue
     // libraries similar to the flagged repo, with cross-user adoption counts.
     alternatives?: Alternative[];
+    // Honest-count: does this candidate clear the validated "solid" bar (domain-fit +
+    // posture + not-covered, or a dep-maintenance bypass)? Annotation only — the full
+    // list is still returned; the agent triages `solid` first, the rest are optional.
+    solid?: boolean;
   };
 
   // Rank per entry (cosine + learning boosts) — used by the merged sort only;
@@ -1561,9 +1566,44 @@ export async function GET(req: Request) {
   // full margin; a bare-semantic match at 2× (weakest fit). This stops a
   // commodity-but-high-cosine match (a job-queue lib you already cover) from
   // out-shouting a grounded domain match that sits a hair under the full bar.
-  const headlineTop = candidatesOut[0];
+  // ── Honest count (matching-precision, COUNT-ONLY — never filters the returned
+  // candidatesOut). solidCount = candidates clearing the validated two-tier domain-fit
+  // + posture + not-covered bar, OR a dep-maintenance/feed bypass. The shared isSolid()
+  // is gated by the offline replay (src/cli/exp-matching-replay.ts) on the 210 triages.
+  // REPLEN_HONEST_COUNT=0 restores the raw candidatesOut.length headline.
+  const HONEST_COUNT = (process.env.REPLEN_HONEST_COUNT ?? "1") !== "0";
+  const ownedForCover = new Set([...productDeps].map(normOwnedDep));
+  const solidOf = (e: OutEntry): boolean => {
+    const cv = vecByRepo.get(e.repo.toLowerCase());
+    const repoName = e.repo.includes("/") ? e.repo.slice(e.repo.indexOf("/") + 1) : e.repo;
+    return isSolid({
+      centroidCos: projectEmbedding && cv ? cosineSimilarity(projectEmbedding, cv) : null,
+      anchorCos: projectDomainAnchor && cv ? cosineSimilarity(projectDomainAnchor, cv) : null,
+      matchedFacet: e.matchedFacet,
+      repoShape: e.repoShape,
+      source: e.source,
+      depMatch: e.dependencyMatch,
+      covered: coveredEntries.has(e) || isCovered(e.matchedFacet),
+      coveredByDeps: coveredByDeps(repoName, ownedForCover),
+    });
+  };
+  const solidEntries = HONEST_COUNT && scopedProject ? candidatesOut.filter(solidOf) : candidatesOut;
+  if (HONEST_COUNT && scopedProject) { const solidSet = new Set(solidEntries); for (const e of candidatesOut) e.solid = solidSet.has(e); }
+  const solidCount = solidEntries.length;
+  const glanceTail = HONEST_COUNT && candidatesOut.length > solidCount ? ` (plus ${candidatesOut.length - solidCount} more worth a glance)` : "";
+  const countPhrase = HONEST_COUNT
+    ? `${solidCount} solid Replen match${solidCount === 1 ? "" : "es"}${glanceTail}`
+    : `${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"}`;
+  // Explore/novel lateral (fairness safeguard): when nothing is solid, the top
+  // legit-but-low-domain-fit facet match still keeps a path to the user — separation
+  // stays SOFT, a genuinely-novel cross-domain candidate is never 100%-excluded.
+  const exploreEntry = HONEST_COUNT && scopedProject && solidCount === 0
+    ? candidatesOut.find((e) => !solidOf(e) && e.matchedFacet != null && e.source !== "catalogue-adjacent" && !coveredEntries.has(e) && (e.repoShape == null || e.repoShape === "library"))
+    : undefined;
+
+  const headlineTop = (HONEST_COUNT && scopedProject ? solidEntries[0] : candidatesOut[0]) ?? candidatesOut[0];
   const facetHeadlineBar = projectFloor + (headlineTop?.matchedProvenance === "grounded" ? HEADLINE_MARGIN / 2 : HEADLINE_MARGIN);
-  const headlineWorthy = !!(headlineTop && scopedProject && (
+  const baseHeadlineWorthy = !!(headlineTop && scopedProject && (
     headlineTop.dependencyMatch === true ||
     headlineTop.source === "re-checked" ||
     (headlineTop.source !== "catalogue-adjacent" && (
@@ -1572,8 +1612,11 @@ export async function GET(req: Request) {
         : (headlineTop.cosine ?? 0) >= projectFloor + 2 * HEADLINE_MARGIN
     ))
   ));
+  // Honest count: a 0-solid project stays SILENT on the headline (the explore line
+  // below carries a lone lateral); otherwise headline the top SOLID candidate.
+  const headlineWorthy = HONEST_COUNT && scopedProject ? (solidCount >= 1 && baseHeadlineWorthy) : baseHeadlineWorthy;
   if (headlineWorthy) {
-    const top = candidatesOut[0];
+    const top = headlineTop;
     if (top.dependencyMatch) {
       // Pattern A/B lead: a vendor the project depends on shipped, or a
       // standard the project implements changed.
@@ -1589,7 +1632,7 @@ export async function GET(req: Request) {
       const altNote = top.alternatives?.length
         ? ` Maintained alternatives exist (${top.alternatives.slice(0, 2).map((a) => `\`${a.fullName}\``).join(", ")}).`
         : "";
-      displayText = `By the way — ${lead}.${altNote} ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+      displayText = `By the way — ${lead}.${altNote} ${countPhrase} queued for this repo — want me to triage them?`;
     } else if (top.source === "catalogue-adjacent") {
       // Exploratory adjacency: a capability the project doesn't have but is
       // near. Frame it as a suggestion, not a fit.
@@ -1605,12 +1648,17 @@ export async function GET(req: Request) {
       const topDesc = top.description ? ` — ${clipDesc(top.description, 70)}` : "";
       // Multi-repo: attribute to the sibling repo it's actually for.
       const forWhat = top.matchedRepo ? `your \`${top.matchedRepo}\` repo's ${top.matchedFacet}` : `your ${top.matchedFacet}`;
-      displayText = `By the way — \`${top.repo}\` could help with ${forWhat}${topDesc}. ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo — want me to triage them?`;
+      displayText = `By the way — \`${top.repo}\` could help with ${forWhat}${topDesc}. ${countPhrase} queued for this repo — want me to triage them?`;
     } else {
       const simStr = typeof top.cosine === "number" ? ` (~${Math.round(top.cosine * 100)}% match)` : "";
       const topDesc = top.description ? ` — ${clipDesc(top.description, 80)}` : "";
-      displayText = `By the way — ${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
+      displayText = `By the way — ${countPhrase} queued for this repo. Top: \`${top.repo}\`${simStr}${topDesc}. Want me to triage them?`;
     }
+  } else if (exploreEntry) {
+    // 0 solid, but a legitimate low-domain-fit lateral exists — keep its path rather
+    // than going fully silent (the fairness safeguard: separation soft, never 100% exclusion).
+    const d = exploreEntry.description ? ` — ${clipDesc(exploreEntry.description, 70)}` : "";
+    displayText = `By the way — \`${exploreEntry.repo}\` is a lateral worth a glance for your ${exploreEntry.matchedFacet}${d}. It's outside this project's usual domain, so likely a port or cherry-pick rather than a drop-in — want me to take a look?`;
   }
 
   // Feature log (#5): one row per surfaced candidate, capturing the features that
