@@ -9,6 +9,7 @@
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/dm/replen?style=flat-square&color=d97706" alt="npm downloads"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-FSL--1.1--MIT-blue?style=flat-square" alt="FSL-1.1-MIT License"></a>
     <a href="https://replen.dev"><img src="https://img.shields.io/badge/website-replen.dev-d97706?style=flat-square" alt="Website"></a>
+    <a href="security/skillspector/SUMMARY.md"><img src="https://img.shields.io/badge/NVIDIA%20SkillSpector-SAFE-22c55e?style=flat-square" alt="NVIDIA SkillSpector: SAFE"></a>
   </p>
 
   <p>
