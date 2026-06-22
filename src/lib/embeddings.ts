@@ -240,9 +240,9 @@ export function candidateEmbeddingText(input: {
   repoShape?: string | null;
   primaryLanguage?: string | null;
   readmeHead?: string | null;
-  // An LLM-distilled one-sentence capability descriptor (catalogue only, from
-  // classify.ts) — the candidate-side analog of a project's grounded descriptor.
-  // High signal, so it leads the text.
+  // An LLM-distilled one-sentence capability descriptor (from classify.ts — now both
+  // the catalogue AND the per-user fetcher pool) — the candidate-side analog of a
+  // project's grounded descriptor. High signal, so it leads the text.
   capabilitySummary?: string | null;
 }): string {
   const parts: string[] = [];

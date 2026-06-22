@@ -12,7 +12,8 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { candidateEmbeddingText, embedBatch, serialiseEmbedding } from "../lib/embeddings";
 import { fetchReadmeHead } from "../catalogue/builder";
-import { modalityFromTopics } from "../projects/modality";
+import { modalityFromTopics, type Modality } from "../projects/modality";
+import { classifyRepos, type RepoClassification, type RepoKind } from "../catalogue/classify";
 
 function argNum(name: string): number | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -40,13 +41,24 @@ async function main() {
       .limit(100);
     if (pending.length === 0) break;
     round++;
-    const enriched = await mapLimit(pending, 8, async (c) => {
-      const topics = parseArr(c.topics);
-      const modality = modalityFromTopics(topics);
+    const classifyInput = pending.map((c) => ({
+      fullName: c.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/)?.[1] ?? c.title ?? "?",
+      description: descOf(c.rawJson), topics: parseArr(c.topics), stars: null as number | null,
+    }));
+    const chunks: Array<typeof classifyInput> = [];
+    for (let j = 0; j < classifyInput.length; j += 25) chunks.push(classifyInput.slice(j, j + 25));
+    const cls: RepoClassification[] = (await Promise.all(chunks.map((ch) => classifyRepos(ch)))).flat();
+    const readmeHeads = await mapLimit(pending, 8, async (c) => {
       const fullName = c.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/)?.[1] ?? null;
-      const readmeHead = c.readmeHead ?? (fullName ? await fetchReadmeHead(fullName, token) : null);
-      const text = candidateEmbeddingText({ title: c.title, description: descOf(c.rawJson), topics, repoShape: c.repoShape, primaryLanguage: c.primaryLanguage, readmeHead });
-      return { modality, readmeHead, text };
+      return c.readmeHead ?? (fullName ? await fetchReadmeHead(fullName, token) : null);
+    });
+    const enriched = pending.map((c, i) => {
+      const topics = parseArr(c.topics);
+      const k: RepoClassification = cls[i] ?? { kind: "unknown" as RepoKind, modality: [] as Modality[], summary: "" };
+      const modality: Modality[] = [...new Set<Modality>([...modalityFromTopics(topics), ...k.modality])];
+      const summary = k.summary || c.capabilitySummary || null;
+      const text = candidateEmbeddingText({ title: c.title, description: descOf(c.rawJson), topics, repoShape: c.repoShape, primaryLanguage: c.primaryLanguage, readmeHead: readmeHeads[i], capabilitySummary: summary });
+      return { modality, readmeHead: readmeHeads[i], text, summary, kind: k.kind };
     });
     const vecs = await embedBatch(enriched.map((e) => e.text));
     let wrote = 0;
@@ -56,6 +68,8 @@ async function main() {
       await db.update(schema.candidates).set({
         embedding: serialiseEmbedding(r.vector), embeddingContentHash: r.contentHash, embeddingGeneratedAt: r.generatedAt,
         readmeHead: enriched[i].readmeHead ?? pending[i].readmeHead, modality: JSON.stringify(enriched[i].modality),
+        capabilitySummary: enriched[i].summary ?? pending[i].capabilitySummary,
+        classifierKind: enriched[i].kind !== "unknown" ? enriched[i].kind : pending[i].classifierKind,
       }).where(eq(schema.candidates.id, pending[i].id));
       wrote++;
       total++;

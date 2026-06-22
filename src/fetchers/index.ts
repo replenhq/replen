@@ -2,7 +2,8 @@ import { db, schema } from "../db/client";
 import { errorMsg } from "../lib/error-msg";
 import { candidateEmbeddingText, embedBatch, serialiseEmbedding } from "../lib/embeddings";
 import { fetchReadmeHead } from "../catalogue/builder";
-import { modalityFromTopics } from "../projects/modality";
+import { modalityFromTopics, type Modality } from "../projects/modality";
+import { classifyRepos, type RepoClassification, type RepoKind } from "../catalogue/classify";
 import { sql, eq, isNull, and, gte } from "drizzle-orm";
 import { hnFetcher } from "./hn";
 import { redditFetcher } from "./reddit";
@@ -236,20 +237,38 @@ async function backfillCandidateEmbeddings(userId: number, asOf: Date, githubTok
     // a README head (lifts retrieval above the ~50-word title+description ceiling).
     // README is fetched once per candidate (cached in readme_head) and only for
     // GitHub repos; cap concurrency to respect the rate limit.
-    const enriched = await mapLimit(pending, 8, async (c) => {
-      const topics = c.topics ? safeParseStringArray(c.topics) : null;
-      const modality = modalityFromTopics(topics ?? []);
+    // CLASSIFIER PARITY with the catalogue (the only sanctioned server LLM — batched,
+    // no per-candidate verdict): give each candidate a one-sentence capability descriptor
+    // that LEADS the embedding text, plus a reliable kind + modality — un-blinding the
+    // discovered pool from a title+description blur. Chunked to stay under the token budget.
+    const classifyInput = pending.map((c) => ({
+      fullName: c.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/)?.[1] ?? c.title ?? "?",
+      description: extractDescription(c.rawJson),
+      topics: (c.topics ? safeParseStringArray(c.topics) : []) ?? [],
+      stars: null as number | null,
+    }));
+    const chunks: Array<typeof classifyInput> = [];
+    for (let j = 0; j < classifyInput.length; j += 25) chunks.push(classifyInput.slice(j, j + 25));
+    const cls: RepoClassification[] = (await Promise.all(chunks.map((ch) => classifyRepos(ch)))).flat();
+    const readmeHeads = await mapLimit(pending, 8, async (c) => {
       const fullName = c.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/)?.[1] ?? null;
-      const readmeHead = c.readmeHead ?? (fullName ? await fetchReadmeHead(fullName, githubToken) : null);
+      return c.readmeHead ?? (fullName ? await fetchReadmeHead(fullName, githubToken) : null);
+    });
+    const enriched = pending.map((c, i) => {
+      const topics = c.topics ? safeParseStringArray(c.topics) : null;
+      const k: RepoClassification = cls[i] ?? { kind: "unknown" as RepoKind, modality: [] as Modality[], summary: "" };
+      const modality: Modality[] = [...new Set<Modality>([...modalityFromTopics(topics ?? []), ...k.modality])];
+      const summary = k.summary || c.capabilitySummary || null;
       const text = candidateEmbeddingText({
         title: c.title,
         description: extractDescription(c.rawJson),
         topics,
         repoShape: c.repoShape,
         primaryLanguage: c.primaryLanguage,
-        readmeHead,
+        readmeHead: readmeHeads[i],
+        capabilitySummary: summary,
       });
-      return { modality, readmeHead, text };
+      return { modality, readmeHead: readmeHeads[i], text, summary, kind: k.kind };
     });
     const results = await embedBatch(enriched.map((e) => e.text));
     let writes = 0;
@@ -264,6 +283,8 @@ async function backfillCandidateEmbeddings(userId: number, asOf: Date, githubTok
           embeddingGeneratedAt: r.generatedAt,
           readmeHead: enriched[i].readmeHead ?? pending[i].readmeHead,
           modality: JSON.stringify(enriched[i].modality),
+          capabilitySummary: enriched[i].summary ?? pending[i].capabilitySummary,
+          classifierKind: enriched[i].kind !== "unknown" ? enriched[i].kind : pending[i].classifierKind,
         })
         .where(eq(schema.candidates.id, pending[i].id));
       writes++;

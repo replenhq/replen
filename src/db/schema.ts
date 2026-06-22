@@ -216,6 +216,12 @@ export const candidates = sqliteTable(
     // src/fetchers/index.ts (population) + inventory route (gate).
     readmeHead: text("readme_head"),       // cleaned first ~1.5k chars of the repo README
     modality: text("modality"),            // JSON Modality[] from topics (modalityFromTopics)
+    // Candidate-side parity with the catalogue: the cheap classifier's one-sentence
+    // capability descriptor (leads the embedding text — un-blinds the discovered pool
+    // from a title+desc blur) and its kind (library/framework/app/experiment/content;
+    // more reliable than the heuristic repo_shape). NULL = not yet classified (abstain).
+    capabilitySummary: text("capability_summary"),
+    classifierKind: text("classifier_kind"),
   },
   (t) => ({
     uniqSourceItem: uniqueIndex("uniq_source_item_user").on(t.userId, t.source, t.sourceItemId),

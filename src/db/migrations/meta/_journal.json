@@ -505,6 +505,13 @@
 			"when": 1781740800000,
 			"tag": "0071_project_domain_anchor",
 			"breakpoints": true
+		},
+		{
+			"idx": 72,
+			"version": "6",
+			"when": 1781827200000,
+			"tag": "0072_candidate_classifier_summary",
+			"breakpoints": true
 		}
 	]
 }
