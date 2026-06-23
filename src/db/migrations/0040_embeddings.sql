@@ -8,10 +8,9 @@
 -- pipeline and src/app/api/inventory/today/route.ts for the query-
 -- time scoring path.
 
-ALTER TABLE candidates ADD COLUMN embedding TEXT;
-ALTER TABLE candidates ADD COLUMN embedding_content_hash TEXT;
-ALTER TABLE candidates ADD COLUMN embedding_generated_at INTEGER;
-
-ALTER TABLE project_profiles ADD COLUMN embedding TEXT;
-ALTER TABLE project_profiles ADD COLUMN embedding_content_hash TEXT;
+ALTER TABLE candidates ADD COLUMN embedding TEXT;--> statement-breakpoint
+ALTER TABLE candidates ADD COLUMN embedding_content_hash TEXT;--> statement-breakpoint
+ALTER TABLE candidates ADD COLUMN embedding_generated_at INTEGER;--> statement-breakpoint
+ALTER TABLE project_profiles ADD COLUMN embedding TEXT;--> statement-breakpoint
+ALTER TABLE project_profiles ADD COLUMN embedding_content_hash TEXT;--> statement-breakpoint
 ALTER TABLE project_profiles ADD COLUMN embedding_generated_at INTEGER;
