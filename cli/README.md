@@ -72,7 +72,7 @@ Every data command accepts `--json` for scripting.
 Three layers, defence-in-depth — at least one will fire:
 
 1. **SessionStart hook** runs `npx replen check-new --hook` at the start of every Claude Code session. If there's anything new, the JSON output appears in the agent's opening context.
-2. **MCP tool** `replen_check_new` is exposed to the agent at all times. The instructions in `CLAUDE.md` tell it to call this tool early in each session.
+2. **MCP tool** `replen_match` is exposed to the agent at all times. The instructions in `CLAUDE.md` tell it to call this once early in each session (it returns the footnote + the candidate inventory).
 3. **CLAUDE.md / AGENTS.md instruction** (idempotent, marker-versioned) is injected into every tracked repo on setup. This is the most reliable layer — survives Claude Code version churn.
 
 Calm-cadence by design: most days are silent. 1-3 actionable matches a month per project.

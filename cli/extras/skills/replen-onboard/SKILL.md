@@ -335,10 +335,11 @@ If several repos are one product (e.g. `acme-web`/`acme-api`/`acme-cv`), group
 them with `replen_set_product` so Replen unions the whole product's capabilities
 when the user is in any one of them.
 
-## Step 4 — Warm + close out
+## Step 4 — Close out
 
-1. Trigger an embedding/inventory pass so everything's ready: `replen_run` (it's
-   async; the per-project facets you set are already live regardless).
+1. Nothing to trigger — the per-project facets, capabilities, and versions you
+   set are live immediately, and the next scheduled run refreshes the candidate
+   inventory automatically.
 2. Summarise what you did, calmly:
 
 ```

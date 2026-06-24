@@ -359,7 +359,7 @@ export async function runCheckNew(argv: string[]): Promise<void> {
     if (m.oneLine) console.log(`    ${m.oneLine}`);
   }
   console.log("");
-  console.log("Call replen_today for the full writeups.");
+  console.log("Open /replen (replen_match) for the full writeups.");
 }
 
 // Watch for new matches in the background. Polls /api/mcp/today, diffs against

@@ -59,19 +59,21 @@ const GEMINI_CONFIG = join(homedir(), ".gemini", "settings.json");
 
 // Read/triage replen MCP tools that are safe to auto-allow so the proactive
 // footnote (replen_match) and in-session triage don't trigger a permission
-// prompt every session. Deliberately EXCLUDES replen_run / replen_handoff /
-// replen_feedback — those trigger pipeline runs / open PRs and should keep
-// prompting for explicit consent.
+// prompt every session. Deliberately EXCLUDES replen_handoff — it opens PRs and
+// should keep prompting for explicit consent.
 const REPLEN_AUTO_ALLOW = [
   "mcp__replen__replen_match",
-  "mcp__replen__replen_check_new",
-  "mcp__replen__replen_analyze",
-  "mcp__replen__replen_state",
   "mcp__replen__replen_record_triage",
-  "mcp__replen__replen_today",
-  "mcp__replen__replen_search",
-  "mcp__replen__replen_starred",
-  "mcp__replen__replen_status",
+  "mcp__replen__replen_state",
+  "mcp__replen__replen_capture_insight",
+  "mcp__replen__replen_recall",
+  "mcp__replen__replen_leaps",
+  "mcp__replen__replen_queue",
+  "mcp__replen__replen_onboard_state",
+  "mcp__replen__replen_set_tags",
+  "mcp__replen__replen_set_capabilities",
+  "mcp__replen__replen_set_versions",
+  "mcp__replen__replen_set_product",
   "mcp__replen__replen_help",
 ];
 
@@ -109,7 +111,7 @@ export async function setupMcp(token: string, base: string): Promise<void> {
 
   // CLAUDE.md / AGENTS.md / GEMINI.md inject is the proactive-surfacing
   // mechanism for each host. Without it, the agent doesn't know to
-  // call replen_check_new at session start. Idempotent + versioned.
+  // call replen_match at session start. Idempotent + versioned.
   console.log("");
   const { injectInstructions, summariseOutcome } = await import("./inject-instruction.js");
   const outcome = await injectInstructions();

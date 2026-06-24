@@ -1,8 +1,8 @@
 <div align="center">
   <img src="logo.svg" width="120" alt="Replen">
   <h1>Replen</h1>
-  <p><strong>Smarter AI Development workflows</strong></p>
-  <p>The AI that asks: <em>"can we do this better?"</em></p>
+  <p><strong>Smarter AI development workflows</strong></p>
+  <p>OSS discovery scored against what your repos actually do.</p>
 
   <p>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/v/replen?style=flat-square&color=d97706" alt="npm version"></a>
@@ -30,32 +30,30 @@
 
 ---
 
-**Replen brings the outside world into your AI coding tools.**
+Claude Code, Codex, and Cursor already understand your code. Replen maps each repo to what it actually does (computer vision, geospatial, market-making, or whatever you build) and watches the OSS ecosystem for things that fit. Every candidate is scored against your project's real capabilities, so what surfaces is relevant to the code in front of you rather than a trending list.
 
-Claude Code, Codex, and Cursor already understand your code. Replen maps each project to what it actually does (computer vision, geospatial, market-making, whatever you're building) and watches the wider ecosystem for work that fits. It scores every candidate against your project's real capabilities, so what surfaces is relevant to the code in front of you, not a trending list.
+What surfaces is rarely "just install this". More often it's something to adapt:
 
-What it surfaces is rarely "just install this". More often it's something to adapt:
+- **Use it as-is.** Now and then a project does exactly what you need, and you add it. Scrapling for a scraping job, for example.
+- **Port a piece of it.** A function or algorithm from a larger project, lifted into one file in your repo.
+- **Cherry-pick the idea.** A technique worth borrowing, without taking the code.
+- **Clean-room build it.** Rebuild an idea from scratch to stay licence-compliant, with your agent doing the work.
 
-- **Use it as-is.** Now and then a project does exactly what you need and you add it. Scrapling for a scraping job, for example.
-- **Port a piece of it.** A specific function or algorithm from a larger project, lifted into a specific file in your repo.
-- **Cherry pick the idea.** A technique or approach worth borrowing, without taking the code.
-- **Clean-room build it.** Rebuild an idea from scratch to stay license-compliant, with your agent doing the work.
+The judgment happens inside your session, against your real code. Your code never leaves your machine.
 
-The judgment call happens inside your session, against your real code. Your code never leaves your machine.
-
-Replen targets a few useful suggestions a month, by design. Most days, nothing. When something real lands, your AI tool mentions it next time you open the repo, as a short note at the end of its first reply:
+Replen aims for a few useful suggestions a month. Most days it says nothing. When something real lands, your AI tool mentions it the next time you open the repo, as a short note at the end of its first reply:
 
 > By the way, `D4Vinci/Scrapling` could help your scraper get past Cloudflare. Want the full review?
 
-## Three systems, one loop
+## Brainstem, Watchtower, Atlas
 
-Replen is **Brainstem · Watchtower · Atlas** — three systems that only work because they're one.
+Replen has three parts, and they mostly matter together.
 
-- **🧠 Brainstem** — the matching core, and the brainstem for your coding agent. It knows what every one of your repos actually *does* (per-capability embeddings, not keywords) and sources what fits: a library to use as-is, an algorithm to port, a technique to cherry-pick, an idea to clean-room build. It doesn't just fill gaps — it asks *can we do this better*, surfacing a stronger library, algorithm, or practice for something you already have. Every verdict your agent records tunes it — what you adopt pulls ranking toward your taste, what you skip pushes away.
-- **🔭 Watchtower** — the maintained ~1,250-source network watching everything your code and projects rely on: releases, advisories, pricing pages, licences, standards, end-of-life calendars. Gated by four questions — *will this break my app? security issue? bill increase? upgrade needed?* — so a quiet day is silent.
-- **🗺 Atlas** — the knowledge graph of your dev world: projects, capabilities, tools, decisions, goals — stitched from **Tiles** (linked markdown your agents read straight off disk). It's the memory Brainstem learns from and the map Watchtower's alerts land on.
+- **Brainstem** is the matching core. It knows what each of your repos does (per-capability embeddings, not keywords) and sources what fits: a library to use as-is, an algorithm to port, a technique to cherry-pick, an idea to clean-room build. It also flags when something does a job better than what you already have. Every verdict your agent records tunes the ranking, so what you adopt pulls it toward your taste and what you skip pushes it away.
+- **Watchtower** is a maintained network of about 1,250 sources covering what your code relies on: releases, advisories, pricing pages, licences, standards, and end-of-life dates. Four questions gate it (will this break my app, is there a security issue, will my bill rise, do I need to upgrade), so a quiet day stays silent.
+- **Atlas** is the knowledge graph of your dev world: projects, capabilities, tools, decisions, goals. It's built from Tiles, the linked markdown your agents read straight off disk. Brainstem learns from it; Watchtower's alerts land on it.
 
-The loop: Atlas tells Brainstem what you build → Brainstem matches what Watchtower sees → your agent triages in-session → the verdict lands back in Atlas, and everything gets sharper. None of them is a feature; together they're Replen.
+The loop: Atlas records what you build, Brainstem matches it against what Watchtower sees, your agent triages it in-session, and the verdict lands back in Atlas.
 
 ## Quickstart
 
@@ -67,17 +65,17 @@ That single command, in 60 seconds:
 
 1. Opens your browser to sign in (Google or GitHub via Firebase)
 2. Scans your local repos under `~/github/`, `~/code/`, `~/projects/` for git repos
-3. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.) — no GitHub PAT needed
+3. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.); no GitHub PAT needed
 4. Registers them with Replen as your projects
 5. Installs the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
 6. Installs the `/replen` + `/replen-onboard` skills in `~/.claude/skills/`
 7. Injects a small "Replen integration" section into each project's `CLAUDE.md` + `AGENTS.md`
 
 **What you do not provide:**
-- ❌ OpenAI / Anthropic / DeepSeek API key — your AI tool handles the reasoning
-- ❌ GitHub PAT — optional, only needed if you want server-side handoff PRs
-- ❌ Manual project setup — auto-discovered from your local filesystem
-- ❌ Per-project tag config — auto-extracted from manifests
+- ❌ OpenAI / Anthropic / DeepSeek API key: your AI tool handles the reasoning
+- ❌ GitHub PAT: optional, only needed if you want server-side handoff PRs
+- ❌ Manual project setup: auto-discovered from your local filesystem
+- ❌ Per-project tag config: auto-extracted from manifests
 
 Open Claude Code (or Codex) in any of your tracked repos and start working normally. Replen mentions matches in your AI's response when there are any. Silent on quiet days.
 
@@ -87,38 +85,38 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 
 ## What it does
 
-1. **Understands what your code does, then matches by capability.** Replen extracts each project's technical capabilities from its docs and dependencies — computer vision, geospatial, market-making, realtime streaming — and scores candidates against *those*, not a generic trending list. Candidates come from a shared, capability-indexed library catalogue plus targeted search; the matching is what makes a suggestion fit your repo. Mechanical and cheap — no per-candidate LLM.
+1. **Understands what your code does, then matches by capability.** Replen extracts each project's technical capabilities from its docs and dependencies (computer vision, geospatial, market-making, realtime streaming) and scores candidates against those rather than a generic trending list. Candidates come from a shared, capability-indexed library catalogue plus targeted search; the matching is what makes a suggestion fit your repo. It's mechanical and cheap, with no per-candidate LLM.
 
-2. **Tells your AI tool when something landed.** A small session-start check returns up to 5 candidates per project. When you next open Claude Code / Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message. Silent on the days nothing is queued.
+2. **Tells your AI tool when something landed.** A small session-start check returns up to 5 candidates per project. When you next open Claude Code or Codex in a tracked repo, your AI tool sees the candidate list in its opening context and mentions it after answering your first message. Silent on the days nothing is queued.
 
-3. **The agent triages in-session.** Your AI tool reads each candidate's README, greps your local source for related code, runs a four-pass funnel (*can we use this · do they do something we already do, but concretely better · is there an idea worth keeping · does this sharpen what we're not*), and forms a verdict — **adopt / port / cherry-pick / clean-room / upgrade / skip** — with a score and effort estimate, written up grounded in concrete file references in *your* repo. Even a direct-use skip can bank a transferable insight (a lesson or a boundary) for later. There's no API key to give us and nothing to bill, because Replen runs no LLM on the server side. It all happens inside the session you're already in.
+3. **The agent triages in-session.** Your AI tool reads each candidate's README, greps your local source for related code, runs a four-pass funnel (can we use this; do they do something we already do but concretely better; is there an idea worth keeping; does this sharpen what we're not), and forms a verdict: **adopt / port / cherry-pick / clean-room / upgrade / skip**, with a score and effort estimate, written up against concrete file references in your repo. Even a direct-use skip can bank a transferable insight (a lesson or a boundary) for later. There's no API key to give us and nothing to bill, because Replen runs no LLM on the server side. It all happens inside the session you're already in.
 
-4. **You act on the keepers.** Star / hide / handoff PR — captured server-side via `replen_state`; the agent never re-surfaces what you've actioned. The PR-creation step uses your existing `gh auth` (no Replen-stored credentials).
+4. **You act on the keepers.** Star, hide, or open a handoff PR. These are captured server-side via `replen_state`, and the agent never re-surfaces what you've actioned. The PR step uses your existing `gh auth`, so there are no Replen-stored credentials.
 
 ## Watchtower
 
-**Watchtower** is Replen's maintained source network — ~1,250 continuously-verified sources spanning vendor changelogs, security advisories, pricing pages, release feeds, standards trackers, and end-of-life calendars (self-hosted installs start from the committed seed catalogue and can point the same engine at their own lists). Six lenses run on it, each scored against your project's capabilities — not a keyword list — and everything surfaces the same calm way: quietly, in your AI tool's next reply, only when there's something real.
+**Watchtower** is Replen's maintained source network: ~1,250 continuously-verified sources spanning vendor changelogs, security advisories, pricing pages, release feeds, standards trackers, and end-of-life calendars (self-hosted installs start from the committed seed catalogue and can point the same engine at their own lists). Six lenses run on it, each scored against your project's capabilities rather than a keyword list, and everything surfaces the same calm way: quietly, in your AI tool's next reply, only when there's something real.
 
 - **🔭 Projects that fit a capability you have.** Scored against what your repo actually does. A CV library for your vision pipeline, a backtesting framework for your trading bot, an algorithm worth porting into a file you maintain. Drawn from a capability catalogue that sharpens with every project. *(See the example below.)*
 
-- **🔒 Security in your stack — known advisories.** A new CVE in a dependency you use, mapped from your manifest to the public advisory database, gated to what you'd actually act on.
+- **🔒 Security in your stack: known advisories.** A new CVE in a dependency you use, mapped from your manifest to the public advisory database, gated to what you'd actually act on.
   > *By the way — a security advisory affects a dependency you use: `drizzle-orm` (CVE-2026-39356, HIGH — SQL injection).*
 
-- **📦 Your stack — dependency releases.** When a vendor you actually depend on ships, you hear about it — `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
+- **📦 Your stack: dependency releases.** When a vendor you actually depend on ships, you hear about it — `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
   > *By the way — a dependency you use just shipped: OpenAI SDK v6.39.0.*
 
-- **📜 The standards you implement — spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends — matched to the standards your project actually touches.
+- **📜 The standards you implement: spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends — matched to the standards your project actually touches.
   > *By the way — a standard your code implements just changed: ERC-5516.*
 
-- **🩺 The health of what you build on — upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …). When something IS dying, the same breath names maintained alternatives from the catalogue.
+- **🩺 The health of what you build on: upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …). When something IS dying, the same breath names maintained alternatives from the catalogue.
   > *By the way — an upstream you depend on needs attention: `request` looks dead (no push in 654 days). Maintained alternatives exist (`sindresorhus/got`).*
 
-- **💷 The price of what you run on — pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations — EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
+- **💷 The price of what you run on: pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations — EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
   > *P.s. python 3.10 reaches end-of-life on 31 Oct — affects `acme` (3.10.12).*
 
-Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing — no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. And the inventory learns from how people triage: a candidate enough users judge rubbish stops being shown to *anyone*, while one that proves useful for a project like yours can surface to you too — repo identity and aggregate signal only, never your code or anyone else's.
+Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing, with no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. The inventory also learns from how people triage: a candidate enough users judge rubbish stops being shown to anyone, while one that proves useful for a project like yours can surface to you too. That uses repo identity and aggregate signal only, never your code or anyone else's.
 
-Manage which repos Replen watches — inclusion, tags, owner — at **[app.replen.dev/projects](https://app.replen.dev/projects)**.
+Manage which repos Replen watches (inclusion, tags, owner) at **[app.replen.dev/projects](https://app.replen.dev/projects)**.
 
 ## What a match looks like
 
@@ -138,17 +136,17 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 
 The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
 
-## Can we do this better?
+## Comparing against what you've already built
 
-Most discovery tools only fill gaps — they find a thing you *don't* have. Replen also looks at what you've **already** built and asks whether there's a better way to do it. That's the comparative layer.
+Most discovery tools only fill gaps: they find a thing you don't have. Replen also looks at what you've already built and checks whether there's a better way to do it.
 
 When a capability you already cover has a concretely better option in the ecosystem, Replen surfaces it even though the gap is "filled":
 
-- **A better library** — your scraper retries naively; theirs defeats Cloudflare via TLS-fingerprint rotation.
-- **A better algorithm** — you triangulate detection on a single video feed; they fuse video *and* audio.
-- **A better practice** — a structural move another project (yours or the ecosystem's) makes that yours doesn't.
+- **A better library.** Your scraper retries naively; another defeats Cloudflare via TLS-fingerprint rotation.
+- **A better algorithm.** You triangulate detection on a single video feed; another fuses video and audio.
+- **A better practice.** A structural move another project makes that yours doesn't.
 
-The bar is deliberately high: a *named, specific* superiority, never "this also looks good." A vague "you could improve here" stays silent. It rides the same calm cadence as everything else — surfaced quietly, in your AI tool's next reply, only when the win is real and concrete. This is the layer behind the tagline: *the AI that asks, "can we do this better?"*
+The bar is high: a named, specific improvement, not "this also looks good". A vague "you could improve here" stays silent. It rides the same cadence as everything else, surfaced quietly in your AI tool's next reply, only when the win is real and concrete.
 
 ## Atlas
 
@@ -164,13 +162,13 @@ As Replen grounds each repo it draws them all into one graph. Every project, the
 - **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.
 - **Themes and keystones.** Capabilities clustered into themes, with the load-bearing keystones that recur across projects flagged. A quiet read on what your work is made of, plus provenance on every capability (grounded / extracted / inferred) so matching trusts solid signal over soft guesses.
 
-See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas) — explore it in 3D, watch it cluster by domain, click any edge for why it's there, and open any node's **dossier**: the legible decision log for that capability or candidate. Or run `replen atlas` to write the whole map to `~/.replen/atlas/` as **Tiles** — linked markdown notes that stitch together (open the folder in Obsidian for the graph view).
+See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas): explore it in 3D, watch it cluster by domain, click any edge for why it's there, and open any node's **dossier** (the legible decision log for that capability or candidate). Or run `replen atlas` to write the whole map to `~/.replen/atlas/` as **Tiles**, linked markdown notes that stitch together (open the folder in Obsidian for the graph view).
 
-Atlas tiles double as a **memory layer for your coding agents**: plain markdown on disk, kept fresh in the background by the MCP server, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context — what you've built, what fills each capability, and every decision with the reason — without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
+Atlas tiles double as a **memory layer for your coding agents**: plain markdown on disk, kept fresh in the background by the MCP server, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context (what you've built, what fills each capability, and every decision with the reason) without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
 
 ### Bring your knowledge graph (Graphify · Obsidian · ADRs)
 
-Replen deliberately doesn't map your code's internals — it **ingests whatever already does**. If a repo carries a **Graphify** vault, an **Obsidian** vault, or `docs/adr/` decision records, the onboarding agent uses them as its grounding source: entity notes become grounded capabilities, note bodies become descriptors, and the files they link become evidence anchors — faster and richer than a cold code-read, and the deep graph stays where it lives. Your Graphify graph makes Replen's matching smarter; Replen makes your graph actionable. Privacy is unchanged: only capability specs, paths, and tags ever leave your machine — never vault content, never code.
+Replen deliberately doesn't map your code's internals; it **ingests whatever already does**. If a repo carries a **Graphify** vault, an **Obsidian** vault, or `docs/adr/` decision records, the onboarding agent uses them as its grounding source: entity notes become grounded capabilities, note bodies become descriptors, and the files they link become evidence anchors. That's faster and richer than a cold code-read, and the deep graph stays where it lives. Your Graphify graph makes Replen's matching smarter; Replen makes your graph actionable. Privacy is unchanged: only capability specs, paths, and tags ever leave your machine, never vault content or code.
 
 ## Numbers
 
@@ -178,7 +176,7 @@ Things we measure, not claims we promise.
 
 - **Free.** Replen runs no LLM on the server side, so there's nothing to bill. Everything runs inside the session you're already in.
 - **A few actionable matches a month, per project.** The target cadence, and what we see in testing. Open more sessions and you'll see more, but the bar stays the same. Only things worth acting on.
-- **~50 ms** for the session-start `replen_check_new` ping. Cursor-based, so it only sees what's new since the last call.
+- **~50 ms** for the session-start `replen check-new --hook` ping. Cursor-based, so it only sees what's new since the last call.
 - **~20-90 s** to triage one candidate in-session. The agent reads the README, greps your code, and writes the verdict.
 
 ## Workflow
@@ -220,9 +218,9 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
     └─ persist with discovery mode tag (scouted / discovered / re-checked)
                                         ↓
 ─── DELIVERY ─────────────────────────────────────────────────
-  → @replen/mcp (stdio, 23 tools)
-       ↑    replen_check_new → "N new" surfaced in session
-       │    replen_match     → curated inventory scoped to open repo
+  → @replen/mcp (stdio, 14 tools)
+       ↑    replen check-new (hook) → "N new" surfaced in session
+       │    replen_match            → curated inventory scoped to open repo
        │    replen_state     → star / hide / handoff captured
        │
   ┌────┴─────────────────────────────────────────────────────┐
@@ -262,14 +260,14 @@ Required `.env` keys for local:
 | `GITHUB_TOKEN` | only used by tests; user PATs (optional, for handoff PRs) drive real runs |
 | `SYNC_TOKEN` | random string, gates the laptop `/api/sync` CLI |
 
-No LLM provider keys are required — reasoning happens client-side in the user's AI tool session, not on the server. See `.env.example` for legacy / opt-in extras (e.g. webhooks).
+No LLM provider keys are required; reasoning happens client-side in the user's AI tool session, not on the server. See `.env.example` for legacy / opt-in extras (e.g. webhooks).
 
 ## Self-host
 
 Runs on any Linux server or your local machine: Node.js + sqlite. Two long-running processes:
 
 - `replen.service`: Next.js webapp (settings + history) on `127.0.0.1:3030`
-- `replen-cron.service`: node-cron scheduler that periodically fetches source feeds, applies the eligibility filter, and updates the candidate inventory. Mechanical work — no LLM calls.
+- `replen-cron.service`: node-cron scheduler that periodically fetches source feeds, applies the eligibility filter, and updates the candidate inventory. Mechanical work, no LLM calls.
 
 The included `scripts/deploy.sh` rsyncs the repo to a target host, installs systemd units, and reloads. It is one possible layout; you can swap in any process manager (PM2, supervisord, Docker, a launchd plist on macOS) and any reverse proxy (nginx, Caddy, Traefik) without touching the app. Front it with whatever TLS you already use.
 
@@ -300,7 +298,7 @@ tsx src/cli/import-announcement-sources.ts seeds/starter-announcement-sources.js
 tsx src/cli/import-pricing-tracker.ts seeds/starter-pricing.json
 ```
 
-Both importers accept any file in the same shape — point them at your own curated lists to extend coverage. See `seeds/README.md`.
+Both importers accept any file in the same shape; point them at your own curated lists to extend coverage. See `seeds/README.md`.
 
 ## Surfaces
 
@@ -316,34 +314,26 @@ The MCP gives the agent **tools** (data access); the skill gives it a **playbook
 
 ### MCP server (`mcp/`)
 
-Self-contained npm package (`@replen/mcp`) that exposes 23 tools to Claude Code / Codex / any MCP host. Grouped by role:
+Self-contained npm package (`@replen/mcp`) that exposes 14 tools to Claude Code / Codex / any MCP host. Grouped by role:
 
 | Role | Tool | Returns |
 |---|---|---|
-| **Triage flow** | `replen_check_new` | Have any new high/medium matches landed since last session? Cheap (~50ms). Bumps a cursor so the next call only sees what's new |
-| | `replen_match` | Today's curated inventory scoped to the open repo. Returns candidates + `whyShortlisted` line + any keystone upgrades and queued actions; the skill triages each against the local codebase |
+| **Triage flow** | `replen_match` | Today's curated inventory scoped to the open repo. Returns candidates + the footnote line + any keystone upgrades and queued actions; the skill triages each against the local codebase |
 | | `replen_state` | Capture user actions: star / unstar / hide / handoff |
 | | `replen_record_triage` | Persist the agent's verdict (adopt / port / cherry-pick / clean-room / upgrade / skip + score + effort) back to Replen |
 | **Atlas & memory** | `replen_leaps` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
 | | `replen_recall` | Recall. In-session memory over your past triage decisions and capabilities; answers what you have ported, weighed before, or already build elsewhere |
 | | `replen_capture_insight` | Bank a transferable insight from triage's generative-skip lane — a borrowed premise (a `lesson`) or a sharpened `boundary` — even when the candidate itself is a direct-use skip |
 | | `replen_queue` | The awareness→action queue: items parked from the weekly Brief / alerts ("queue for next session"). `replen_match` surfaces the oldest and offers to act on it |
-| **Inspection** | `replen_today` | Recent matches in JSON, filterable by days / relevance / project |
-| | `replen_search` | Full-text search across writeups, repo metadata, notes |
-| | `replen_starred` | Starred matches with handoff state |
-| | `replen_analyze` | Raw README + repo meta + your project profiles for a given owner/name. No LLM call; lets the *host* agent judge fit with your codebase in context |
 | **Configuration** | `replen_set_capabilities` | Set a project's grounded capabilities (tag + descriptor + data modality) and report, so matching fits the code from day one |
 | | `replen_set_tags` | Set a project's broad domain tags from the in-session agent |
 | | `replen_set_versions` | Report pinned dependency/runtime versions (names + versions only, never code), so EOL / CVE / brief alerts get specific — and alarms suppress for versions you're verifiably not on |
 | | `replen_set_product` | Group several repos as one product, so their capabilities are unioned when you work in any of them |
 | | `replen_onboard_state` | Per-repo onboarding state for the whole portfolio — the cheap pre-flight for `/replen-onboard`, so it does the minimum work per repo instead of re-reading every codebase |
 | **Actions** | `replen_handoff` | Opens a handoff PR for a starred match |
-| | `replen_feedback` | Records good / bad on a source (retrains source ranking) |
-| **Ingest control** | `replen_run` | Triggers a fresh server-side ingest run (source fetch + eligibility filter) without opening the dashboard |
-| | `replen_status` | Polls the current ingest run (in-flight or finished); reports candidate counts and any pause reason |
 | **Discovery** | `replen_help` | Tool-discovery list; useful when bootstrapping the connection |
 
-(`replen_connect` remains as a deprecated alias of `replen_leaps` — same endpoint, kept for older configs.)
+The dashboard owns the browse/search surface (recent matches, full-text search, starred, run status); the in-session agent uses `replen_match` for surfacing, so those aren't exposed as agent tools.
 
 **Install:** `npx replen` (OAuth flow + wires this into Claude Code in one command; see Quickstart above).
 
@@ -368,7 +358,7 @@ Token from `/settings` → "Connect Claude Code".
 
 ### Webapp (optional)
 
-Settings UI for the skill/MCP and a history viewer for past matches. Use it when you want to tweak per-project tags, browse what surfaced over the last month, or check on a handoff PR's status. Everything else surfaces in-session — you can ignore the webapp entirely if you live in Claude Code.
+Settings UI for the skill/MCP and a history viewer for past matches. Use it when you want to tweak per-project tags, browse what surfaced over the last month, or check on a handoff PR's status. Everything else surfaces in-session, so you can ignore the webapp entirely if you live in Claude Code.
 
 | Route | Purpose |
 |---|---|
@@ -392,11 +382,11 @@ The hosted instance runs the warm, cross-user catalogue and ranking. A self-host
 
 ## Server-side pipeline (per user, per run)
 
-The server runs a small periodic job (cron, configurable interval) that maintains the candidate inventory. Mechanical work — no LLM calls anywhere on the server side.
+The server runs a small periodic job (cron, configurable interval) that maintains the candidate inventory. Mechanical work, no LLM calls anywhere on the server side.
 
 1. **runFetchers**: pull candidates from every configured source, dedupe by `(source, source_item_id)`, persist with `userId`.
 2. **eligibility filter**: drop aggregators, archived deps, language mismatches, cross-source duplicates. Tags candidates at insert with language + topics + repo-shape.
-3. **rank**: per-capability cosine, calibrated and IDF-weighted, then sharpened by a learned outcome prior — what projects like yours actually kept vs skipped. Capabilities you already cover get down-ranked unless a keystone upgrade beats them.
+3. **rank**: per-capability cosine, calibrated and IDF-weighted, then sharpened by a learned outcome prior (what projects like yours actually kept vs skipped). Capabilities you already cover get down-ranked unless a keystone upgrade beats them.
 4. **diversity cap**: MMR diversity on a per-project visible cap (default 6 / project / window) so noisy weeks don't drown the signal.
 5. **sendHighRelevanceWebhook** (optional): POST to Slack/Discord/generic if any new `relevance=high` matches.
 
@@ -433,12 +423,12 @@ replen/
 
 ## License
 
-[FSL-1.1-MIT](LICENSE) — Functional Source License with a 2-year MIT future grant. In plain English:
+[FSL-1.1-MIT](LICENSE): Functional Source License with a 2-year MIT future grant. In plain English:
 
 - **You can self-host Replen for your own use** (internal, personal, your company's internal tooling). Free, no asterisks.
 - **You can read, modify, and redistribute the source code** for any non-competing purpose.
 - **You can't run Replen as a commercial service that competes with us** (e.g. offering "Hosted Replen" to other people) until the 2-year window expires for that version.
-- **After 2 years, each version auto-converts to MIT** — same permissive licence as before, just delayed.
+- **After 2 years, each version auto-converts to MIT**, the same permissive licence as before, just delayed.
 
 The FSL terms apply to all commits from `1361647` onward (2026-05-17). The public mirror at [replenhq/replen](https://github.com/replenhq/replen) is FSL-1.1-MIT from its first commit.
 
@@ -448,8 +438,8 @@ If you want to use Replen in a way that might cross the "competing use" line, ge
 
 Replen was built by [@nsokin](https://github.com/nsokin) and the community.
 
-- [replen.dev](https://replen.dev) — site
-- [docs.replen.dev](https://docs.replen.dev) — docs
-- [app.replen.dev](https://app.replen.dev) — hosted dashboard
-- [@replenhq](https://github.com/replenhq) — GitHub org
+- [replen.dev](https://replen.dev) · site
+- [docs.replen.dev](https://docs.replen.dev) · docs
+- [app.replen.dev](https://app.replen.dev) · hosted dashboard
+- [@replenhq](https://github.com/replenhq) · GitHub org
 

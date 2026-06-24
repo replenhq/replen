@@ -26,12 +26,11 @@ Total length target: 200-500 words, bullet points over paragraphs.
 
 Also append a short "## Replen integration" section with this exact guidance:
 
-  At the start of every session, if the \`replen_check_new\` tool is
-  available, call it once before asking the user what to work on.
-  If \`hasNew\` is true, summarise the count + repos in 1-2 lines and
-  ask if the user wants the full writeups (which they get via
-  \`replen_today\`). If \`hasNew\` is false, say nothing — silence is
-  the correct response, not "no new matches found".
+  At the start of every session, if the \`replen_match\` tool is
+  available, call it once (no repo arg — it defaults to the cwd repo)
+  before asking the user what to work on. Relay the USER-FACING MESSAGE
+  block it returns VERBATIM if it's non-empty; if it's empty, say
+  nothing — silence is the correct response, not "no new matches found".
 
 This instruction is a fallback for AI tools that don't run Claude Code's SessionStart hooks (e.g. Codex, Cursor, Aider). For Claude Code users the hook calls \`replen check-new\` automatically and Claude Code injects the result into the opening context — but the CLAUDE.md guidance is durable across tools and survives hook misconfiguration.`;
 

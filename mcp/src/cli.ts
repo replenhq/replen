@@ -71,7 +71,7 @@ Commands:
   );
 
   // Repo-scoping: detect the GitHub repo we were spawned in so tool calls
-  // (replen_starred, replen_today, replen_search) default to that scope.
+  // (replen_match, etc.) default to that scope.
   // Best-effort — silent fallback to user-scoped behaviour when no git origin
   // is reachable. An explicit `repo: ""` on any call overrides this default
   // and asks for everything across all the user's projects.

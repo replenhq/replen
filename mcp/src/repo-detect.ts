@@ -2,9 +2,9 @@
 //
 // Claude Code spawns the MCP with process.cwd() set to whatever directory the
 // user ran `claude` from — typically the root of a project repo. We use that
-// to default the `repo` filter on tools like replen_starred / replen_today, so
+// to default the `repo` filter on tools like replen_match, so
 // `/replen` inside british-housing shows british-housing matches rather than
-// every starred match across every project the user has.
+// every match across every project the user has.
 //
 // Failure modes are all silent: if we can't detect a repo (no git, no origin,
 // detached HEAD, etc.) we return null and the tools fall back to user-scoped
