@@ -15,6 +15,7 @@ export type EmailMessage = {
   subject: string;
   html: string;
   text: string;
+  headers?: Record<string, string>; // e.g. List-Unsubscribe / List-Unsubscribe-Post
 };
 
 export interface EmailProvider {
@@ -69,6 +70,7 @@ class ResendProvider implements EmailProvider {
           subject: msg.subject,
           html: msg.html,
           text: msg.text,
+          ...(msg.headers ? { headers: msg.headers } : {}),
         }),
       });
       if (!res.ok) {

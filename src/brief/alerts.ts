@@ -10,6 +10,8 @@
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { pickEmailProvider } from "../email/providers";
+import { brandedEmail, listUnsubHeaders, C } from "../email/layout";
+import { unsubscribeUrl, prefsUrl, dashboardUrl } from "../lib/unsub-sign";
 import { escapeHtml, escapeHref } from "../email/escape";
 import { userToolTokens } from "../lib/detect-tokens";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
@@ -45,6 +47,7 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
       email: schema.users.email,
       emailToAddress: schema.userSettings.emailToAddress,
       enabled: schema.userSettings.enabled,
+      securityAlertsEnabled: schema.userSettings.securityAlertsEnabled,
     })
     .from(schema.users)
     .innerJoin(schema.userSettings, eq(schema.userSettings.userId, schema.users.id));
@@ -59,8 +62,8 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
 
   let alerts = 0;
   for (const u of users) {
-    if (!u.enabled) continue;
-    const to = u.emailToAddress; // opt-in ONLY — never fall back to the Firebase login email (no unsolicited mail / unsubscribe-gap exposure)
+    if (!u.enabled || !u.securityAlertsEnabled) continue;
+    const to = u.email; // the account email — the address they signed up with
     if (!to) continue;
     const userTokens = await loadUserTokens(u.userId);
     if (userTokens.size === 0) continue;
@@ -90,23 +93,28 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
       if (slugs.length) affectedLine = `Affects: ${slugs.slice(0, 5).join(", ")}`;
       const subject = `Replen alert: ${label}${name ? ` — ${name}` : ""}`;
       const lineText = `${c.title}\n\n${c.summary ?? ""}\n${affectedLine ? `\n${affectedLine}\n` : ""}\n${c.url ?? ""}\n\nThis reached you because your stack uses an affected tool. Open your repo and run /replen for a grounded read.`;
-      const html = [
-        `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">`,
-        `<h2 style="font-weight:600">⚠ ${escapeHtml(label)}${name ? ` — ${escapeHtml(name)}` : ""}</h2>`,
-        `<p><strong>${escapeHtml(c.title)}</strong></p>`,
-        c.summary ? `<p style="color:#444">${escapeHtml(c.summary)}</p>` : "",
-        affectedLine ? `<p style="color:#b00"><strong>${escapeHtml(affectedLine)}</strong></p>` : "",
-        c.url ? `<p><a href="${escapeHref(c.url)}">Source</a></p>` : "",
+      const innerHtml = [
+        `<h2 class="r-red" style="font-weight:600;margin:0 0 8px;font-size:16px;color:${C.red}">${escapeHtml(label)}${name ? ` — ${escapeHtml(name)}` : ""}</h2>`,
+        `<p class="r-fg" style="margin:0 0 8px;color:${C.fg}"><strong>${escapeHtml(c.title)}</strong></p>`,
+        c.summary ? `<p class="r-dim" style="color:${C.dim};margin:0 0 8px">${escapeHtml(c.summary)}</p>` : "",
+        affectedLine ? `<p class="r-red" style="color:${C.red};margin:0 0 8px"><strong>${escapeHtml(affectedLine)}</strong></p>` : "",
+        c.url ? `<p style="margin:0 0 8px"><a href="${escapeHref(c.url)}" class="r-fg" style="color:${C.fg};text-decoration:underline">Source</a></p>` : "",
         (() => {
           try {
             const q = queueAddUrl(u.userId, "event", c.id, c.title.slice(0, 140));
-            return `<p><a href="${escapeHref(q)}" style="color:#6b7280">Queue for my next coding session →</a></p>`;
+            return `<p style="margin:0 0 8px"><a href="${escapeHref(q)}" class="r-dim" style="color:${C.dim}">Queue for my next coding session →</a></p>`;
           } catch { return ""; }
         })(),
-        `<p style="color:#999;font-size:12px;margin-top:24px">Sent because your stack uses an affected tool. One alert per event, ever.</p></div>`,
+        `<p class="r-faint" style="color:${C.faint};font-size:12px;margin-top:22px">Sent because your stack uses an affected tool. One alert per event, ever.</p>`,
       ].join("\n");
+      const unsubUrl = unsubscribeUrl(u.userId, "alerts");
+      const html = brandedEmail({
+        preheader: c.title,
+        bodyHtml: innerHtml,
+        footer: { dashboardUrl: dashboardUrl(), prefsUrl: prefsUrl(), unsubscribeUrl: unsubUrl },
+      });
 
-      const res = await provider.send({ from: `${fromName} <${fromAddr}>`, to, subject, html, text: lineText });
+      const res = await provider.send({ from: `${fromName} <${fromAddr}>`, to, subject, html, text: lineText, headers: listUnsubHeaders(unsubUrl) });
       if (res.ok) {
         alerts++;
         await db.insert(schema.alertLog).values({ userId: u.userId, eventId: c.id, channel: "email", sentAt: now }).onConflictDoNothing();

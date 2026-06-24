@@ -11,8 +11,9 @@ export const dynamic = "force-dynamic";
 // (non-routable). Re-introduce by routing the file back if we ever
 // flip a user to hosted-tier.
 
-export default async function Settings() {
+export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
   const user = await requireUser();
+  const sp = await searchParams;
 
   // Show when the user was created + last visited so they know what
   // we have on them. No-op for accounts with missing timestamps.
@@ -26,11 +27,31 @@ export default async function Settings() {
     .where(eq(schema.users.id, user.id))
     .get();
 
+  // Email preferences (powers the digest / weekly brief / security alerts).
+  const settings = await db
+    .select({
+      emailToAddress: schema.userSettings.emailToAddress,
+      enabled: schema.userSettings.enabled,
+      weeklyBriefEnabled: schema.userSettings.weeklyBriefEnabled,
+      briefFrequency: schema.userSettings.briefFrequency,
+      digestEnabled: schema.userSettings.digestEnabled,
+      securityAlertsEnabled: schema.userSettings.securityAlertsEnabled,
+    })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, user.id))
+    .get();
+  const briefSel = settings?.weeklyBriefEnabled === false ? "off" : (settings?.briefFrequency ?? "weekly");
+
   return (
     <div style={pageStyle}>
       <header style={headerStyle}>
         <h1 style={titleStyle}>Settings</h1>
       </header>
+
+      {sp.saved && <div style={flashOkStyle}>Preferences saved.</div>}
+      {sp.error === "email" && (
+        <div style={flashErrStyle}>That doesn&apos;t look like a valid email address — preferences not saved.</div>
+      )}
 
       <section style={cardStyle}>
         <Row label="Email">
@@ -50,6 +71,47 @@ export default async function Settings() {
             </span>
           </Row>
         )}
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={sectionTitleStyle}>Email preferences</h2>
+        <form action="/api/settings/email" method="post">
+          <Row label="Sends to">
+            <span style={valueStyle}>{account?.email ?? user.email}</span>
+          </Row>
+          <Row label="Brief">
+            <select name="briefFrequency" defaultValue={briefSel} style={inputStyle}>
+              <option value="weekly">Weekly</option>
+              <option value="twiceweekly">Twice a week</option>
+              <option value="biweekly">Every 2 weeks</option>
+              <option value="monthly">Monthly</option>
+              <option value="off">Off</option>
+            </select>
+          </Row>
+          <Row label="Matches digest">
+            <label style={checkLabelStyle}>
+              <input type="checkbox" name="digestEnabled" defaultChecked={settings?.digestEnabled ?? true} /> New tools
+              matched to your repos
+            </label>
+          </Row>
+          <Row label="Security alerts">
+            <label style={checkLabelStyle}>
+              <input type="checkbox" name="securityAlertsEnabled" defaultChecked={settings?.securityAlertsEnabled ?? true} />{" "}
+              Critical advisories that hit your stack
+            </label>
+          </Row>
+          <Row label="All email">
+            <label style={checkLabelStyle}>
+              <input type="checkbox" name="enabled" defaultChecked={settings?.enabled ?? true} /> Master switch — uncheck to
+              pause everything
+            </label>
+          </Row>
+          <div style={{ textAlign: "right", paddingTop: 14 }}>
+            <button type="submit" style={saveBtnStyle}>
+              Save preferences
+            </button>
+          </div>
+        </form>
       </section>
 
       <section style={cardStyle}>
@@ -179,4 +241,63 @@ const codeStyle: React.CSSProperties = {
   borderRadius: 3,
   fontFamily: "ui-monospace, monospace",
   fontSize: 12.5,
+};
+
+const sectionTitleStyle: React.CSSProperties = {
+  margin: "10px 0 2px",
+  fontSize: 13,
+  fontWeight: 500,
+  color: "var(--dim)",
+  textTransform: "uppercase",
+  letterSpacing: 1.1,
+};
+
+const inputStyle: React.CSSProperties = {
+  background: "var(--surface-2)",
+  border: "1px solid var(--surface-2)",
+  borderRadius: 6,
+  padding: "6px 10px",
+  color: "var(--fg)",
+  fontSize: 13,
+  minWidth: 200,
+};
+
+const checkLabelStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  color: "var(--fg)",
+  fontSize: 13,
+  cursor: "pointer",
+};
+
+const saveBtnStyle: React.CSSProperties = {
+  background: "var(--amber)",
+  color: "#1a1a1a",
+  border: "none",
+  padding: "8px 16px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 600,
+};
+
+const flashOkStyle: React.CSSProperties = {
+  margin: "0 0 18px",
+  padding: "10px 14px",
+  borderRadius: 8,
+  background: "rgba(31, 138, 76, 0.12)",
+  border: "1px solid rgba(31, 138, 76, 0.35)",
+  color: "#3ec77e",
+  fontSize: 13,
+};
+
+const flashErrStyle: React.CSSProperties = {
+  margin: "0 0 18px",
+  padding: "10px 14px",
+  borderRadius: 8,
+  background: "rgba(255, 99, 99, 0.08)",
+  border: "1px solid rgba(255, 99, 99, 0.3)",
+  color: "#ff8b7a",
+  fontSize: 13,
 };

@@ -2,6 +2,8 @@ import { db, schema } from "../db/client";
 import { desc, eq, inArray } from "drizzle-orm";
 import type { UserConfig } from "../scheduler/user-config";
 import { pickEmailProvider } from "./providers";
+import { brandedEmail, listUnsubHeaders, C } from "./layout";
+import { unsubscribeUrl, prefsUrl, dashboardUrl } from "../lib/unsub-sign";
 import { escapeAttr as escapeAttrShared, escapeHref as escapeHrefShared, escapeHtml as escapeHtmlShared } from "./escape";
 
 type Match = typeof schema.matches.$inferSelect;
@@ -17,9 +19,10 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
   // user's digest lands in the admin's inbox — content leak across tenants.
   // Require explicit per-user emailToAddress in multi-user mode.
   const isMultiUser = (process.env.AUTH_MODE ?? "firebase") !== "solo";
-  const to = isMultiUser
-    ? cfg.emailToAddress
-    : (cfg.emailToAddress ?? process.env.EMAIL_TO_ADDRESS);
+  // Send to the account email (the address they signed up with). A solo install
+  // with no account email may still fall back to EMAIL_TO_ADDRESS.
+  const account = await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.id, userId)).get();
+  const to = account?.email ?? (isMultiUser ? null : process.env.EMAIL_TO_ADDRESS);
 
   if (!fromAddr || !to) {
     console.warn(`[email] user=${userId} missing from-address or destination; skipping`);
@@ -28,6 +31,18 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
   const provider = pickEmailProvider();
   if (!provider) {
     console.warn(`[email] user=${userId} no usable email provider configured; skipping`);
+    return false;
+  }
+
+  // Per-channel preference: the digest can be turned off (account settings, or the
+  // signed unsubscribe link with scope=digest) without flipping the master switch.
+  const prefs = await db
+    .select({ digestEnabled: schema.userSettings.digestEnabled })
+    .from(schema.userSettings)
+    .where(eq(schema.userSettings.userId, userId))
+    .get();
+  if (prefs && !prefs.digestEnabled) {
+    console.log(`[email] user=${userId} digest disabled in preferences; skipping`);
     return false;
   }
 
@@ -87,7 +102,7 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
     for (const o of orig) bookmarkDateById.set(o.id, o.createdAt);
   }
 
-  const html = renderHtml(matchesForRun, repoMap, projectMap, bookmarkDateById);
+  const html = renderHtml(matchesForRun, repoMap, projectMap, bookmarkDateById, userId);
   const text = renderText(matchesForRun, repoMap, projectMap);
 
   // Value-led subject line. The user is going to make a single yes/no
@@ -106,6 +121,7 @@ export async function sendDigestEmail(runId: number, userId: number, cfg: UserCo
     subject,
     html,
     text,
+    headers: listUnsubHeaders(unsubscribeUrl(userId, "digest")),
   });
   if (!r.ok) {
     console.error(`[email] user=${userId} send failed via ${provider.name}: ${r.error}`);
@@ -154,17 +170,12 @@ function buildSubject(matches: Match[], repos: Map<number, Repo>, projects: Map<
   return `${repoLabel}${inProject}${moreSuffix}${tierSuffix}`;
 }
 
-function relevanceColor(rel: string): { bg: string; fg: string } {
-  switch (rel) {
-    case "high": return { bg: "#1f8a4c", fg: "#fff" };
-    case "medium": return { bg: "#e0a800", fg: "#1a1a1a" };
-    case "general-awareness": return { bg: "#6e8aa8", fg: "#fff" };
-    case "low": return { bg: "#999", fg: "#fff" };
-    default: return { bg: "#444", fg: "#fff" };
-  }
+function relevanceColor(_rel: string): { bg: string; fg: string } {
+  // Monochrome: one neutral chip for every tier (the "high 85" text carries the tier).
+  return { bg: C.raised, fg: C.dim };
 }
 
-function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>, bookmarkDateById: Map<number, Date>) {
+function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<number, Project>, bookmarkDateById: Map<number, Date>, userId: number) {
   const grouped = new Map<string, Match[]>();
   for (const m of matches) {
     const key = m.projectId ? projects.get(m.projectId)?.slug ?? "_unknown" : "_general";
@@ -187,70 +198,71 @@ function renderHtml(matches: Match[], repos: Map<number, Repo>, projects: Map<nu
   const highCount = matches.filter((m) => m.relevance === "high").length;
   const mediumCount = matches.filter((m) => m.relevance === "medium").length;
   const awarenessCount = matches.filter((m) => m.relevance === "general-awareness").length;
-  const dashboard = process.env.PUBLIC_BASE_URL ?? "http://localhost:3030";
+  const dashboard = dashboardUrl();
 
   // Quick-scan TOC at the top; anchors jump down to each project section.
   const toc = ordered.map(([slug, list]) => {
     const best = Math.max(...list.map((m) => m.relevanceScore ?? 0));
-    return `<li style="margin:2px 0"><a href="#${escapeAttr(slug)}" style="color:#1f3a8a;text-decoration:none">${escapeHtml(slug)}</a> <span style="color:#888;font-size:12px">· ${list.length} (best ${best})</span></li>`;
+    return `<li style="margin:2px 0"><a href="#${escapeAttr(slug)}" class="r-fg" style="color:${C.fg};text-decoration:underline">${escapeHtml(slug)}</a> <span class="r-dim" style="color:${C.dim};font-size:12px">· ${list.length} (best ${best})</span></li>`;
   }).join("");
 
   let body = "";
   for (const [slug, list] of ordered) {
-    const isGeneral = slug === "_general" || slug === "_unknown";
-    body += `<h2 id="${escapeAttr(slug)}" style="margin-top:36px;padding:6px 10px;background:${isGeneral ? "#f4f0e8" : "#eef2ff"};border-radius:6px;font-size:16px">${escapeHtml(slug)} <span style="color:#888;font-weight:400;font-size:13px">· ${list.length} ${list.length === 1 ? "match" : "matches"}</span></h2>`;
+    body += `<h2 id="${escapeAttr(slug)}" class="r-raised r-fg" style="margin-top:30px;padding:6px 10px;background:${C.raised};border-radius:6px;font-size:15px;color:${C.fg}">${escapeHtml(slug)} <span class="r-dim" style="color:${C.dim};font-weight:400;font-size:13px">· ${list.length} ${list.length === 1 ? "match" : "matches"}</span></h2>`;
     for (const m of list) {
       const r = repos.get(m.repoId);
       if (!r) continue;
       const c = relevanceColor(m.relevance);
       const writeupHtml = escapeHtml(writeupBody(m)).replace(/\n/g, "<br/>");
       const srcChip = m.sourceKind
-        ? `<span style="display:inline-block;background:#eef;color:#225;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">via ${escapeHtml(m.sourceKind)}</span>`
+        ? `<span class="r-raised r-dim" style="display:inline-block;background:${C.raised};color:${C.dim};border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">via ${escapeHtml(m.sourceKind)}</span>`
         : "";
       let modeChip = "";
       if (m.discoveryMode === "re-checked" && m.resurfacedFromMatchId) {
         const bd = bookmarkDateById.get(m.resurfacedFromMatchId);
         const dateStr = bd ? bd.toISOString().slice(0, 10) : "earlier";
-        modeChip = `<span style="display:inline-block;background:#eef6ff;color:#1d4ed8;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Re-checked from your bookmarks — saved ${escapeHtml(dateStr)}</span>`;
+        modeChip = `<span class="r-raised r-dim" style="display:inline-block;background:${C.raised};color:${C.dim};border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Re-checked from your bookmarks — saved ${escapeHtml(dateStr)}</span>`;
       } else if (m.discoveryMode === "discovered") {
-        modeChip = `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Discovered</span>`;
+        modeChip = `<span class="r-raised r-dim" style="display:inline-block;background:${C.raised};color:${C.dim};border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Discovered</span>`;
       } else if (m.discoveryMode === "scouted" && m.matchedOutcome) {
-        modeChip = `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Scouted</span>`;
+        modeChip = `<span class="r-raised r-dim" style="display:inline-block;background:${C.raised};color:${C.dim};border-radius:3px;padding:1px 6px;font-size:11px;margin-left:6px">Scouted</span>`;
       }
       body += `
-        <div style="margin:16px 0;padding:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">
+        <div class="r-raised" style="margin:14px 0;padding:14px;border:1px solid ${C.border};border-radius:8px;background:${C.raised}">
           <div style="display:block;margin-bottom:6px">
-            <a href="${escapeHref(r.url)}" style="font-size:15px;font-weight:600;color:#1f3a8a;text-decoration:none">${escapeHtml(r.owner)}/${escapeHtml(r.name)}</a>
-            <span style="display:inline-block;background:${c.bg};color:${c.fg};border-radius:3px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px">${escapeHtml(m.relevance)} ${m.relevanceScore ?? ""}</span>
+            <a href="${escapeHref(r.url)}" class="r-fg" style="font-size:15px;font-weight:600;color:${C.fg};text-decoration:underline">${escapeHtml(r.owner)}/${escapeHtml(r.name)}</a>
+            <span class="r-raised r-dim" style="display:inline-block;background:${c.bg};color:${c.fg};border:1px solid ${C.border};border-radius:3px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px">${escapeHtml(m.relevance)} ${m.relevanceScore ?? ""}</span>
             ${modeChip}
             ${srcChip}
           </div>
-          <div style="color:#888;font-size:12px;margin-bottom:8px">${r.stars ?? 0}★ · ${escapeHtml(r.primaryLanguage ?? "?")} · ${escapeHtml(r.license ?? "no license")}</div>
-          <div style="line-height:1.6;font-size:14px;color:#222">${writeupHtml}</div>
+          <div class="r-dim" style="color:${C.dim};font-size:12px;margin-bottom:8px">${r.stars ?? 0}★ · ${escapeHtml(r.primaryLanguage ?? "?")} · ${escapeHtml(r.license ?? "no license")}</div>
+          <div class="r-fg" style="line-height:1.6;font-size:14px;color:${C.fg}">${writeupHtml}</div>
         </div>`;
     }
   }
 
   const header = `
-    <div style="border-bottom:2px solid #1f3a8a;padding-bottom:12px;margin-bottom:18px">
-      <div style="font-size:13px;color:#888;letter-spacing:0.05em;text-transform:uppercase">Replen · ${escapeHtml(today)}</div>
-      <h1 style="margin:6px 0 4px;font-size:22px;color:#1a1a1a">${totalMatches} new ${totalMatches === 1 ? "match" : "matches"} today</h1>
-      <div style="color:#666;font-size:13px">
-        ${highCount > 0 ? `<span style="color:#1f8a4c;font-weight:600">${highCount} high</span>` : ""}${highCount > 0 && (mediumCount + awarenessCount) > 0 ? " · " : ""}
-        ${mediumCount > 0 ? `<span style="color:#a67c00;font-weight:600">${mediumCount} medium</span>` : ""}${mediumCount > 0 && awarenessCount > 0 ? " · " : ""}
-        ${awarenessCount > 0 ? `<span style="color:#6e8aa8;font-weight:600">${awarenessCount} awareness</span>` : ""}
+    <div style="border-bottom:1px solid ${C.border};padding-bottom:12px;margin-bottom:18px">
+      <div class="r-dim" style="font-size:13px;color:${C.dim};letter-spacing:0.05em;text-transform:uppercase">${escapeHtml(today)}</div>
+      <h1 class="r-fg" style="margin:6px 0 4px;font-size:22px;color:${C.fg}">${totalMatches} new ${totalMatches === 1 ? "match" : "matches"} today</h1>
+      <div class="r-dim" style="color:${C.dim};font-size:13px">
+        ${highCount > 0 ? `<span class="r-fg" style="color:${C.fg};font-weight:600">${highCount} high</span>` : ""}${highCount > 0 && (mediumCount + awarenessCount) > 0 ? " · " : ""}
+        ${mediumCount > 0 ? `<span class="r-fg" style="color:${C.fg};font-weight:600">${mediumCount} medium</span>` : ""}${mediumCount > 0 && awarenessCount > 0 ? " · " : ""}
+        ${awarenessCount > 0 ? `<span class="r-dim" style="color:${C.dim};font-weight:600">${awarenessCount} awareness</span>` : ""}
       </div>
     </div>
-    ${toc ? `<details open style="margin-bottom:18px"><summary style="cursor:pointer;font-size:13px;color:#444;font-weight:600">Jump to project</summary><ul style="margin:8px 0 0;padding-left:20px;font-size:13px">${toc}</ul></details>` : ""}
+    ${toc ? `<details open style="margin-bottom:18px"><summary class="r-dim" style="cursor:pointer;font-size:13px;color:${C.dim};font-weight:600">Jump to project</summary><ul style="margin:8px 0 0;padding-left:20px;font-size:13px">${toc}</ul></details>` : ""}
   `;
 
-  const footer = `
-    <div style="margin-top:36px;padding-top:18px;border-top:1px solid #e5e7eb;color:#888;font-size:12px;line-height:1.6">
-      Open the <a href="${escapeHref(dashboard)}" style="color:#1f3a8a">dashboard</a> to star, hide, or open a handoff PR. Reply to this email and nothing happens; we don't read replies.
-    </div>
-  `;
-
-  return `<html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;max-width:760px;margin:auto;color:#222;padding:24px;background:#fafafa">${header}${body}${footer}</body></html>`;
+  return brandedEmail({
+    preheader: `${highCount} high${mediumCount ? ` · ${mediumCount} medium` : ""}${awarenessCount ? ` · ${awarenessCount} awareness` : ""}`,
+    bodyHtml: `${header}${body}`,
+    footer: {
+      dashboardUrl: dashboard,
+      prefsUrl: prefsUrl(),
+      unsubscribeUrl: unsubscribeUrl(userId, "digest"),
+    },
+  });
 }
 
 const escapeAttr = escapeAttrShared;

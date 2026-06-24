@@ -19,9 +19,11 @@ const pricingSchedule = process.env.REPLEN_PRICING_CRON ?? "15 4 * * *";
 // Announcement poller: daily batch; per-source cadence is priority-staggered
 // inside the runner (P0/P1 daily, P2 every 2 days, P3 every 4).
 const announceSchedule = process.env.REPLEN_ANNOUNCE_CRON ?? "0 5 * * *";
-// Weekly four-questions brief: Monday 07:00 UTC, after the morning pipeline
-// data has landed. Quiet weeks send nothing.
-const briefSchedule = process.env.REPLEN_BRIEF_CRON ?? "0 7 * * 1";
+// Four-questions brief: fires Monday + Thursday 07:00 UTC, after the morning
+// pipeline data has landed. Per-user cadence (weekly/twiceweekly/biweekly/monthly)
+// is enforced in runWeeklyBriefs — the Thursday run only goes to twice-weekly
+// users; everyone else is gated out. Quiet weeks send nothing.
+const briefSchedule = process.env.REPLEN_BRIEF_CRON ?? "0 7 * * 1,4";
 
 console.log(`[cron] scheduled: pipeline=${schedule}  aging=${agingSchedule}  pricing=${pricingSchedule}  announce=${announceSchedule}  brief=${briefSchedule}`);
 

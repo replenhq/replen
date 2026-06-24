@@ -175,7 +175,10 @@ export async function middleware(request: NextRequest) {
     // /api/queue: token auth in the POST handler; /api/queue/add (email
     // links) authorises via its own HMAC signature — see queue-sign.ts.
     request.nextUrl.pathname === "/api/queue" ||
-    request.nextUrl.pathname.startsWith("/api/queue/")
+    request.nextUrl.pathname.startsWith("/api/queue/") ||
+    // /api/email/unsubscribe: one-click unsubscribe from email links; authorises
+    // via its own HMAC signature (unsub-sign.ts), no session — must be public.
+    request.nextUrl.pathname.startsWith("/api/email/unsubscribe")
   ) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }

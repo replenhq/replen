@@ -13,6 +13,8 @@
 import { and, eq, gte, like } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { pickEmailProvider } from "../email/providers";
+import { brandedEmail, listUnsubHeaders, C } from "../email/layout";
+import { unsubscribeUrl, prefsUrl, dashboardUrl } from "../lib/unsub-sign";
 import { escapeHtml, escapeHref } from "../email/escape";
 import { userToolTokens } from "../lib/detect-tokens";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
@@ -241,21 +243,20 @@ export function renderBriefText(brief: Brief, weekKey: string): string {
 
 export function renderBriefHtml(brief: Brief, weekKey: string): string {
   const parts = [
-    `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">`,
-    `<h2 style="font-weight:600">This week in your stack</h2>`,
-    `<p style="color:#666">${brief.total} item${brief.total === 1 ? "" : "s"} · ${escapeHtml(weekKey)} · only tools you use, only the four questions</p>`,
+    `<h2 class="r-fg" style="font-weight:600;margin:0 0 4px;font-size:17px;color:${C.fg}">This week in your stack</h2>`,
+    `<p class="r-dim" style="color:${C.dim};margin:0 0 18px;font-size:13px">${brief.total} item${brief.total === 1 ? "" : "s"} · ${escapeHtml(weekKey)} · only tools you use, only the four questions</p>`,
   ];
   for (const s of SECTIONS) {
     if (!brief[s.key].length) continue;
-    parts.push(`<h3 style="margin-bottom:4px">${escapeHtml(s.q)}</h3><ul style="margin-top:4px">`);
+    parts.push(`<h3 class="r-fg" style="margin:18px 0 6px;font-size:14px;color:${C.fg}">${escapeHtml(s.q)}</h3><ul style="margin:0;padding-left:18px">`);
     for (const it of brief[s.key]) {
       const body = escapeHtml(it.line);
-      const queue = it.queueUrl ? ` <a href="${escapeHref(it.queueUrl)}" style="color:#6b7280;font-size:12px">queue&nbsp;→</a>` : "";
-      parts.push(`<li style="margin:4px 0">${it.url ? `<a href="${escapeHref(it.url)}" style="color:#1a1a1a">${body}</a>` : body}${queue}</li>`);
+      const queue = it.queueUrl ? ` <a href="${escapeHref(it.queueUrl)}" class="r-dim" style="color:${C.dim};font-size:12px">queue&nbsp;→</a>` : "";
+      parts.push(`<li class="r-fg" style="margin:6px 0;color:${C.fg}">${it.url ? `<a href="${escapeHref(it.url)}" class="r-fg" style="color:${C.fg}">${body}</a>` : body}${queue}</li>`);
     }
     parts.push(`</ul>`);
   }
-  parts.push(`<p style="color:#999;font-size:12px;margin-top:24px">Replen sends this only when something qualified — a quiet week sends nothing.</p></div>`);
+  parts.push(`<p class="r-faint" style="color:${C.faint};font-size:12px;margin-top:22px">Replen sends this only when something qualified — a quiet week sends nothing.</p>`);
   return parts.join("\n");
 }
 
@@ -272,6 +273,7 @@ export async function runWeeklyBriefs(opts: { dry?: boolean; onlyUserId?: number
       email: schema.users.email,
       emailToAddress: schema.userSettings.emailToAddress,
       weeklyBriefEnabled: schema.userSettings.weeklyBriefEnabled,
+      briefFrequency: schema.userSettings.briefFrequency,
       enabled: schema.userSettings.enabled,
     })
     .from(schema.users)
@@ -283,12 +285,26 @@ export async function runWeeklyBriefs(opts: { dry?: boolean; onlyUserId?: number
   for (const u of rows) {
     if (opts.onlyUserId != null && u.userId !== opts.onlyUserId) continue;
     if (!u.enabled || !u.weeklyBriefEnabled) continue;
-    const to = u.emailToAddress; // opt-in ONLY — never fall back to the Firebase login email (no unsolicited mail / unsubscribe-gap exposure)
+    // Cadence: weekly (default) / twiceweekly / biweekly / monthly / off. The cron
+    // fires twice a week (Mon + Thu). The Thursday "second slot" only goes to
+    // twice-weekly users; the Monday slot honours weekly/biweekly/monthly.
+    const freq = u.briefFrequency ?? "weekly";
+    if (freq === "off") continue;
+    const isSecondSlot = now.getUTCDay() >= 4; // Thu run
+    const runKey = isSecondSlot ? `${weekKey}-2` : weekKey;
+    if (isSecondSlot) {
+      if (freq !== "twiceweekly") continue;
+    } else {
+      const wk = parseInt(weekKey.split("-W")[1] ?? "0", 10);
+      if (freq === "biweekly" && wk % 2 !== 0) continue;
+      if (freq === "monthly" && now.getUTCDate() > 7) continue;
+    }
+    const to = u.email; // the account email — the address they signed up with
     if (!to) continue;
     considered++;
 
     const already = await db.select({ id: schema.briefLog.id }).from(schema.briefLog)
-      .where(and(eq(schema.briefLog.userId, u.userId), eq(schema.briefLog.weekKey, weekKey))).get();
+      .where(and(eq(schema.briefLog.userId, u.userId), eq(schema.briefLog.weekKey, runKey))).get();
     if (already && !opts.dry) continue;
 
     const brief = await buildBrief(u.userId, now);
@@ -304,16 +320,22 @@ export async function runWeeklyBriefs(opts: { dry?: boolean; onlyUserId?: number
       console.warn("[brief] no email provider / EMAIL_FROM_ADDRESS configured; skipping sends");
       return { considered, sent, quiet };
     }
+    const unsubUrl = unsubscribeUrl(u.userId, "brief");
     const res = await provider.send({
       from: `${fromName} <${fromAddr}>`,
       to,
       subject,
-      html: renderBriefHtml(brief, weekKey),
+      html: brandedEmail({
+        preheader: subject,
+        bodyHtml: renderBriefHtml(brief, weekKey),
+        footer: { dashboardUrl: dashboardUrl(), prefsUrl: prefsUrl(), unsubscribeUrl: unsubUrl },
+      }),
       text: renderBriefText(brief, weekKey),
+      headers: listUnsubHeaders(unsubUrl),
     });
     if (res.ok) {
       sent++;
-      await db.insert(schema.briefLog).values({ userId: u.userId, weekKey, sentAt: now }).onConflictDoNothing();
+      await db.insert(schema.briefLog).values({ userId: u.userId, weekKey: runKey, sentAt: now }).onConflictDoNothing();
       console.log(`[brief] sent week ${weekKey} to user=${u.userId} (${brief.total} items)`);
     } else {
       console.warn(`[brief] user=${u.userId} send failed: ${res.error}`);

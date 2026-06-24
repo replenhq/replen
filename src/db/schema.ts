@@ -125,6 +125,16 @@ export const userSettings = sqliteTable(
     // security / bill / upgrades, for YOUR stack). Sent only when something
     // qualified — a quiet week sends nothing.
     weeklyBriefEnabled: integer("weekly_brief_enabled", { mode: "boolean" }).notNull().default(true),
+    // Granular email preferences (customisable in the account settings UI; the
+    // signed unsubscribe links flip the relevant one). `enabled` stays the master
+    // kill-switch; these scope individual channels.
+    //   digestEnabled        — the per-run "new matches" digest (high/medium only)
+    //   securityAlertsEnabled — out-of-band critical security alerts
+    //   briefFrequency        — cadence of the weekly four-questions brief:
+    //                           'weekly' | 'biweekly' | 'monthly' | 'off'
+    digestEnabled: integer("digest_enabled", { mode: "boolean" }).notNull().default(true),
+    securityAlertsEnabled: integer("security_alerts_enabled", { mode: "boolean" }).notNull().default(true),
+    briefFrequency: text("brief_frequency").notNull().default("weekly"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

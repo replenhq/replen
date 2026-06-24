@@ -512,6 +512,13 @@
 			"when": 1781827200000,
 			"tag": "0072_candidate_classifier_summary",
 			"breakpoints": true
+		},
+		{
+			"idx": 73,
+			"version": "6",
+			"when": 1781913600000,
+			"tag": "0073_email_preferences",
+			"breakpoints": true
 		}
 	]
 }

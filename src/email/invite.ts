@@ -1,4 +1,6 @@
 import { pickEmailProvider } from "./providers";
+import { brandedEmail, C } from "./layout";
+import { dashboardUrl } from "../lib/unsub-sign";
 import { escapeHtml, escapeHref } from "./escape";
 
 // Sends an invite email when an admin adds a new user. The user then visits
@@ -16,7 +18,7 @@ export async function sendInviteEmail(
 ): Promise<boolean> {
   const fromAddr = process.env.EMAIL_FROM_ADDRESS;
   const fromName = process.env.EMAIL_FROM_NAME ?? "Replen";
-  const appUrl = process.env.PUBLIC_BASE_URL ?? process.env.APP_PUBLIC_URL ?? "http://localhost:3030";
+  const appUrl = dashboardUrl(); // the webapp host (app.replen.dev), not the skill API
 
   if (!fromAddr) {
     console.warn("[invite] EMAIL_FROM_ADDRESS not set; skipping email send");
@@ -43,17 +45,19 @@ where you'd like the morning research email sent.
 
 - Replen`;
 
-  const html = `<!doctype html>
-<html><body style="font-family: ui-sans-serif, system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.55;">
-  <h1 style="font-size: 22px; letter-spacing: -0.02em; margin: 0 0 16px;">You're in.</h1>
-  <p><b>${escapeHtml(invitedByEmail)}</b> added you to Replen, the AI that asks "can we do this better?" on your codebase, every morning, against the live ecosystem.</p>
-  <p style="margin: 24px 0;">
-    <a href="${escapeHref(loginUrl)}" style="display: inline-block; padding: 10px 18px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a>
+  const html = brandedEmail({
+    preheader: `${invitedByEmail} added you to Replen.`,
+    bodyHtml: `
+  <h1 class="r-fg" style="font-size:22px;letter-spacing:-0.02em;margin:0 0 16px;color:${C.fg}">You're in.</h1>
+  <p class="r-fg" style="margin:0 0 16px;color:${C.fg}"><b>${escapeHtml(invitedByEmail)}</b> added you to Replen, the AI that asks "can we do this better?" on your codebase, against the live ecosystem.</p>
+  <p style="margin:24px 0;">
+    <a href="${escapeHref(loginUrl)}" class="r-btn" style="display:inline-block;padding:10px 18px;background:#1a1a1a;color:#ffffff;font-weight:600;text-decoration:none;border-radius:6px">Sign in</a>
   </p>
-  <p>Use this email address: <code>${escapeHtml(invitedEmail)}</code></p>
-  <p style="margin-top: 24px; font-size: 13px; color: #888;">After sign-in, visit <a href="${escapeHref(`${appUrl}/settings`)}">/settings</a> to add your GitHub token and configure where the morning research email should arrive. Manage your sources (curated + your own additions) on <a href="${escapeHref(`${appUrl}/sources`)}">/sources</a>.</p>
-  <p style="font-size: 12px; color: #888; margin-top: 32px;">If you didn't expect this email, just ignore it.</p>
-</body></html>`;
+  <p class="r-fg" style="margin:0 0 16px;color:${C.fg}">Use this email address: <code class="r-raised" style="background:${C.raised};padding:2px 6px;border-radius:4px">${escapeHtml(invitedEmail)}</code></p>
+  <p class="r-dim" style="margin-top:24px;font-size:13px;color:${C.dim}">After sign-in, visit <a href="${escapeHref(`${appUrl}/settings`)}" class="r-fg" style="color:${C.fg};text-decoration:underline">/settings</a> to add your GitHub token and choose which emails you'd like. Manage your sources (curated + your own additions) on <a href="${escapeHref(`${appUrl}/sources`)}" class="r-fg" style="color:${C.fg};text-decoration:underline">/sources</a>.</p>
+  <p class="r-faint" style="font-size:12px;color:${C.faint};margin-top:32px">If you didn't expect this email, just ignore it.</p>`,
+    footer: { dashboardUrl: appUrl, prefsUrl: `${appUrl}/settings` },
+  });
 
   const r = await provider.send({
     from: `"${fromName}" <${fromAddr}>`,
