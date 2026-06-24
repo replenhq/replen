@@ -58,7 +58,13 @@ export async function clientUpgradeNudge(clientHeader: string | null): Promise<s
   // MCP version pinning in `mcp setup`. So: no version → say nothing; only the
   // MCP tool path (which sends its version) can trigger a real, correct nudge.
   if (!cur) return "";
-  if (!semverLt(cur, latest)) return "";
+  // Patch-tolerant: only nudge on a MINOR or MAJOR gap. A patch-level gap (e.g.
+  // 1.0.35 -> 1.0.38) is auto-picked-up by the `@^1` npx spec and ships no new
+  // tools, so nudging on it is pure noise — the "it nags on every message even when
+  // I'm current" complaint. Real new features (Leaps, Recall) land in minor bumps.
+  const cv = cur.split(".").map((n) => parseInt(n, 10) || 0);
+  const lv = latest.split(".").map((n) => parseInt(n, 10) || 0);
+  if (cv[0] > lv[0] || (cv[0] === lv[0] && (cv[1] ?? 0) >= (lv[1] ?? 0))) return ""; // same-or-newer minor → silent
   return "_Heads up, a newer Replen is available (this is how you get new features like Leaps and Recall). Run `npx -y @replen/mcp@latest` and restart your session to update — it clears the stale npx cache._";
 }
 

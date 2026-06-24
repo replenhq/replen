@@ -24,6 +24,13 @@ const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_ANNOUNCE_SUR
 // title text instead, with a higher bar: High/Critical only, token length ≥4,
 // and a blocklist of tokens that double as common headline English.
 const AGGREGATOR_CATEGORY = /aggregator|security news|security research|exploit intelligence|breach/i;
+// Multi-topic news DIGESTS (weekly recaps, roundups, newsletters) are never a single
+// actionable item — they list a dozen unrelated stories, so a loose title-token match
+// is spurious. Never surface them as a stack alert (the "⚡ Weekly Recap…" false alarm).
+const ROUNDUP_TITLE = /weekly recap|week in review|this week in|round-?up|newsletter|in brief|top \d+|digest|recap:|bulletin|wrap-?up|what'?s new this week/i;
+// Strip emojis / pictographs from a source headline so the footnote doesn't echo
+// clickbait (e.g. a leading "⚡"). Covers the common emoji + symbol blocks.
+const stripEmoji = (s: string) => s.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}\u{20E3}]/gu, "");
 const TITLE_MATCH_BLOCKLIST = new Set([
   "next", "make", "with", "this", "that", "from", "your", "into", "over", "after",
   "data", "cloud", "security", "critical", "update", "release", "major", "flaw",
@@ -70,6 +77,7 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
   const eligible = events
     .filter((e) => !seen.has(e.id))
     .filter((e) => e.willBreakApp || e.securityIssue || e.billIncrease || e.upgradeNeeded) // the four-questions gate
+    .filter((e) => !ROUNDUP_TITLE.test(e.title)) // multi-topic digests are never a single actionable alert
     .filter((e) => {
       if (AGGREGATOR_CATEGORY.test(e.category ?? "")) {
         if (SEVERITY_ORDER[e.severity as Severity] < SEVERITY_ORDER.High) return false;
@@ -89,7 +97,7 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
   const severity = (e.severity as Severity) ?? "Medium";
   const critical = severity === "Critical";
   const label = EVENT_LABELS[e.eventType] ?? "announcement";
-  const title = e.title.replace(/\s+/g, " ").trim().slice(0, 120);
+  const title = stripEmoji(e.title).replace(/\s+/g, " ").trim().slice(0, 120);
   // Version reports give name-level attribution: which repos use the tool.
   let inRepos = "";
   try {
@@ -100,10 +108,15 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
   } catch { /* attribution is best-effort */ }
   let line: string;
   if (AGGREGATOR_CATEGORY.test(e.category ?? "")) {
-    // The headline names the affected vendor; the aggregator's name is noise.
-    line = critical
-      ? `Heads up — ${label}: "${title}". This touches your stack${inRepos} — worth checking now.`
-      : `${label} in the news: "${title}" — touches your stack${inRepos}, worth a look.`;
+    // The headline names the affected vendor; the aggregator's name is noise. Only
+    // claim it "touches your stack" when a version-confirmed dependency is actually
+    // named (inRepos). A bare title-token match (a common word in a security headline)
+    // is too weak to alarm — soften to a low-key "in security news" mention.
+    line = inRepos
+      ? (critical
+          ? `Heads up — ${label}: "${title}". This touches your stack${inRepos} — worth checking now.`
+          : `${label} in the news: "${title}" — touches your stack${inRepos}, worth a look.`)
+      : `${label} in security news: "${title}" — might be worth a glance.`;
   } else {
     const name = e.product.toLowerCase().includes(e.vendor.toLowerCase().split(" ")[0]) || e.product === e.vendor
       ? e.product

@@ -581,7 +581,7 @@ const TOOLS: Tool[] = [
     name: "replen_check_new",
     description:
       "Check if any new, actionable (high or medium relevance) replen matches landed since the user last engaged with replen — across the dashboard, the email digest, or a prior MCP session. " +
-      "Call this ONCE at the start of every session, before asking the user what they want to work on. " +
+      "SKILL-TIER NOTE: for the in-session footnote use replen_match (per the skill), NOT this tool. replen_check_new is the cursor-based primitive for a SessionStart SHELL hook and returns nothing without prior cursor state / hosted delivery — calling it as the session opener looks empty/broken. " +
       "Scoped by default to the repo this MCP was spawned in (the repo's full_name matched against the user's project profiles). Pass repo='' to check the user's entire feed. " +
       "If hasNew is true: mention the count + repos in 1-2 lines to the user, then ask if they want details (which they get via replen_today). " +
       "If hasNew is false: say NOTHING — do not tell the user 'no new replen matches', that is noise. Silence is the correct response. " +
@@ -601,7 +601,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "replen_today",
-    description: "List matches from replen, the AI that asks 'can we do this better?' on your codebase. Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. By default, scopes to matches whose handoff target is the repo this MCP was spawned in — pass repo='' to see everything.",
+    description: "List matches from replen, the AI that asks 'can we do this better?' on your codebase. (Skill tier: prefer replen_match for the in-session footnote + triage; replen_today lists the persisted hosted feed and is empty until a pipeline run has surfaced matches.) Returns repos surfaced in the last N days, scored against your project profiles with an adopt/port/skip verdict. By default, scopes to matches whose handoff target is the repo this MCP was spawned in — pass repo='' to see everything.",
     inputSchema: {
       type: "object",
       properties: {

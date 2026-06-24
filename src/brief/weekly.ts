@@ -283,7 +283,7 @@ export async function runWeeklyBriefs(opts: { dry?: boolean; onlyUserId?: number
   for (const u of rows) {
     if (opts.onlyUserId != null && u.userId !== opts.onlyUserId) continue;
     if (!u.enabled || !u.weeklyBriefEnabled) continue;
-    const to = u.emailToAddress ?? u.email;
+    const to = u.emailToAddress; // opt-in ONLY — never fall back to the Firebase login email (no unsolicited mail / unsubscribe-gap exposure)
     if (!to) continue;
     considered++;
 

@@ -60,7 +60,7 @@ export async function processCriticalAlerts(): Promise<{ alerts: number }> {
   let alerts = 0;
   for (const u of users) {
     if (!u.enabled) continue;
-    const to = u.emailToAddress ?? u.email;
+    const to = u.emailToAddress; // opt-in ONLY — never fall back to the Firebase login email (no unsolicited mail / unsubscribe-gap exposure)
     if (!to) continue;
     const userTokens = await loadUserTokens(u.userId);
     if (userTokens.size === 0) continue;

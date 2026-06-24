@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:check": "rm -f /tmp/replen-migrate-check.sqlite && DIGEST_DB_PATH=/tmp/replen-migrate-check.sqlite tsx src/db/migrate-check.ts && rm -f /tmp/replen-migrate-check.sqlite",
     "pipeline:run": "tsx src/scheduler/run-once.ts",
     "pipeline:start": "tsx src/scheduler/cron.ts",
     "sync": "tsx src/cli/digest-sync.ts"
