@@ -81,7 +81,11 @@ const REPLEN_AUTO_ALLOW = [
 // Public entry point
 // ============================================================================
 
-export async function setupMcp(token: string, base: string): Promise<void> {
+export async function setupMcp(
+  token: string,
+  base: string,
+  opts: { onlyRepos?: string[] } = {},
+): Promise<void> {
   console.log(`  Wiring replen MCP into agent configs…`);
 
   // Pin the exact latest MCP version (deterministic; avoids npx serving a stale
@@ -114,7 +118,7 @@ export async function setupMcp(token: string, base: string): Promise<void> {
   // call replen_match at session start. Idempotent + versioned.
   console.log("");
   const { injectInstructions, summariseOutcome } = await import("./inject-instruction.js");
-  const outcome = await injectInstructions();
+  const outcome = await injectInstructions({ onlyRepos: opts.onlyRepos });
   const summary = summariseOutcome(outcome);
   if (summary) console.log(summary);
 

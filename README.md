@@ -64,12 +64,36 @@ npx replen
 That single command, in 60 seconds:
 
 1. Opens your browser to sign in (Google or GitHub via Firebase)
-2. Scans your local repos under `~/github/`, `~/code/`, `~/projects/` for git repos
-3. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.); no GitHub PAT needed
-4. Registers them with Replen as your projects
-5. Installs the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
-6. Installs the `/replen` + `/replen-onboard` skills in `~/.claude/skills/`
-7. Injects a small "Replen integration" section into each project's `CLAUDE.md` + `AGENTS.md`
+2. Scans your local filesystem for git repos (see [How repo discovery works](#how-repo-discovery-works) below)
+3. Asks which repos to include — **all** (default), a subset, or none for now
+4. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.); no GitHub PAT needed
+5. Registers your chosen repos with Replen as projects
+6. Installs the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
+7. Installs the `/replen` + `/replen-onboard` skills in `~/.claude/skills/`
+8. Injects a small "Replen integration" section into each included project's `CLAUDE.md` + `AGENTS.md`
+
+### How repo discovery works
+
+Replen finds your projects by locating **git repos** (directories containing a `.git/`) with a **GitHub `origin` remote**. It looks for them in this order, stopping at the first that turns up repos:
+
+1. A `--root <path>` flag you pass explicitly
+2. The `REPLEN_PROJECT_ROOTS` env var (colon-separated dirs)
+3. **Walk-up from the current directory** — if you run `npx replen` from inside a repo (or one of its subfolders), Replen finds that repo and scans its parent folder for siblings
+4. Repos you've opened in Claude Code (`~/.claude.json`)
+5. Conventional folders: `~/github`, `~/code`, `~/projects`, `~/dev`, `~/src`, `~/work`
+6. An interactive prompt asking where your code lives
+
+**If your code lives in a non-conventional folder** (e.g. `~/js stuff`, `~/work-2024`), the conventional-folder scan won't find it. Two easy fixes:
+
+```bash
+# Option A — run it from inside one of your repos, so the walk-up finds the folder:
+cd ~/js\ stuff/my-project && npx replen
+
+# Option B — point it at your folder explicitly (quote any spaces):
+npx replen --root "~/js stuff"
+```
+
+Both work for the initial setup and for `npx replen sync-projects` later.
 
 **What you do not provide:**
 - ❌ OpenAI / Anthropic / DeepSeek API key: your AI tool handles the reasoning
@@ -81,7 +105,9 @@ Open Claude Code (or Codex) in any of your tracked repos and start working norma
 
 For self-host: `REPLEN_BASE=https://replen.your-domain.dev npx replen`.
 
-Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen mcp setup` · `replen logout` · `replen --help`.
+Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen mcp setup` · `replen logout` · `replen uninstall` · `replen --help`.
+
+**Backing out:** `npx replen uninstall` reverses every local change — the MCP wiring (Claude / Codex / Gemini), the installed skills, the per-repo `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` integration blocks, and `~/.replen`. It asks before each category (nothing is removed without a yes; `--dry-run` previews). It only touches this machine — your server-side profile is deleted separately from the dashboard.
 
 ## What it does
 

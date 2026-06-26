@@ -157,7 +157,15 @@ export async function runInit(): Promise<void> {
   });
   console.log(`  ✓ Saved auth to ${configPath()}`);
 
-  await setupMcp(exchange.token, exchange.base);
+  // Let the user choose, up front, which repos Replen works on. Default is
+  // ALL; a subset (or none) gates BOTH the doc-injection inside setupMcp
+  // AND the project registration below, so we never touch a repo they
+  // opted out of. Non-interactive / single-repo / no-repo cases keep the
+  // default automatically.
+  const { chooseRepoScope } = await import("./select-repos.js");
+  const { onlyRepos } = await chooseRepoScope();
+
+  await setupMcp(exchange.token, exchange.base, { onlyRepos });
 
   // Phase A: auto-discover the user's local projects, extract tags
   // from manifests, and register them in one shot. Replaces the
@@ -166,7 +174,7 @@ export async function runInit(): Promise<void> {
   console.log("");
   console.log("  Scanning your local repos for projects…");
   const { syncDiscoveredProjects } = await import("./sync-projects.js");
-  await syncDiscoveredProjects({ token: exchange.token, base: exchange.base });
+  await syncDiscoveredProjects({ token: exchange.token, base: exchange.base, onlyRepos });
 
   // Phase B: trigger the first ingest and stream progress until the
   // discovered pool is ready (~30-60s). Without this, a new user

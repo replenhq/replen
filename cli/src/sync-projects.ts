@@ -33,18 +33,33 @@ type SyncOptions = {
   base: string;
   /** Explicit --root flag values, takes top priority */
   explicitRoots?: string[];
+  /**
+   * Onboarding scope choice: absolute localPaths the user opted to
+   * include. `undefined` = no choice made → register all discovered
+   * repos (default). A provided list (including empty) restricts
+   * registration to exactly those repos.
+   */
+  onlyRepos?: string[];
 };
 
 export async function syncDiscoveredProjects({
   token,
   base,
   explicitRoots = [],
+  onlyRepos,
 }: SyncOptions): Promise<{
   discovered: number;
   created: number;
   updated: number;
 }> {
   const { result, source, prompted } = await resolveAndWalk(explicitRoots);
+
+  // Apply the onboarding scope choice before reporting / registering, so
+  // a user who picked a subset never has the opted-out repos registered.
+  if (onlyRepos !== undefined) {
+    const allow = new Set(onlyRepos);
+    result.projects = result.projects.filter((p) => allow.has(p.localPath));
+  }
 
   // Tell the user what we did, regardless of outcome.
   reportDiscovery(result, source);

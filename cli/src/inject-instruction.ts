@@ -121,12 +121,21 @@ export type InjectOutcome = {
 // only repos that Replen can't match against anyway — the injected
 // instruction tells the agent to call `replen_match`, which is a no-op
 // without a registered project.
-async function discoverRepos(explicitRoots: string[]): Promise<string[]> {
+async function discoverRepos(explicitRoots: string[], onlyRepos?: string[]): Promise<string[]> {
   // Reuse sync-projects' resolveAndWalk via the previewDiscovery helper
   // so inject and sync-projects find the exact same set of repos.
   const { previewDiscovery } = await import("./sync-projects.js");
   const result = await previewDiscovery(explicitRoots);
-  return result.projects.map((p) => p.localPath);
+  let paths = result.projects.map((p) => p.localPath);
+  // Honour an explicit onboarding scope choice: when the user picked a
+  // subset of repos (or "none"), restrict doc-injection to exactly that
+  // set so we never edit a CLAUDE.md in a repo they opted out of.
+  // `undefined` means "no scope choice made" → inject into all (default).
+  if (onlyRepos !== undefined) {
+    const allow = new Set(onlyRepos);
+    paths = paths.filter((p) => allow.has(p));
+  }
+  return paths;
 }
 
 type FileAction = "created" | "appended" | "alreadyCurrent" | "versionUpdated";
@@ -267,8 +276,8 @@ async function promptYes(question: string): Promise<boolean> {
   });
 }
 
-export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: string[] } = {}): Promise<InjectOutcome> {
-  const repos = await discoverRepos(opts.explicitRoots ?? []);
+export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: string[]; onlyRepos?: string[] } = {}): Promise<InjectOutcome> {
+  const repos = await discoverRepos(opts.explicitRoots ?? [], opts.onlyRepos);
   const outcome: InjectOutcome = {
     scanned: repos.length,
     created: 0,

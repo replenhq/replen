@@ -27,6 +27,12 @@ Usage:
                              ~/.replen/atlas/ (projects, capabilities,
                              decisions, themes, all cross-linked)
   npx replen logout          Forget saved auth
+  npx replen uninstall       Remove Replen's local footprint (MCP wiring,
+       [--dry-run] [-y]      skills, per-repo doc blocks, ~/.replen). Asks
+       [--root PATH ...]     before each category; nothing goes without a yes.
+                             Server-side profile is untouched (delete that at
+                             app.replen.dev). --dry-run previews, -y skips
+                             prompts.
   npx replen --help          This help
 
 Use replen from a plain shell (no Claude Code / Codex needed):
@@ -100,6 +106,12 @@ async function main() {
     }
     await setupMcp(cfg.token, cfg.base);
     console.log(`\nRestart Claude Code to pick up the change.`);
+    return;
+  }
+
+  if (cmd === "uninstall") {
+    const { runUninstall } = await import("./uninstall.js");
+    await runUninstall(argv.slice(1));
     return;
   }
 
