@@ -15,6 +15,20 @@ export type Config = {
    * inference dance. Empty / absent = use auto-detect each time.
    */
   projectRoots?: string[];
+  /**
+   * Knowledge-graph vaults the user pointed Replen at via `--vault`. The
+   * onboarding agent consults these (in addition to in-repo `graph/`,
+   * `vault/`, `.graphify/`, `docs/adr/` locations) as grounding sources —
+   * the way to feed a CENTRAL Obsidian/Graphify vault that lives outside
+   * any single repo.
+   *   - `global`: vault paths that may cover multiple/all repos (e.g. one
+   *     Obsidian vault for everything). Tried for every repo.
+   *   - `byRepo`: a vault scoped to one repo, keyed by GitHub "owner/name".
+   */
+  vaults?: {
+    global?: string[];
+    byRepo?: Record<string, string>;
+  };
 };
 
 export async function readConfig(): Promise<Config | null> {

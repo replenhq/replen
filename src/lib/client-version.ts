@@ -42,6 +42,33 @@ export function semverLt(a: string, b: string): boolean {
   return false;
 }
 
+// What each @replen/mcp MINOR release actually added, keyed by "<major>.<minor>".
+// The nudge composes its "what's new" line from this — so it names the REAL
+// highlights of the versions the user is missing, never a hardcoded/stale list.
+//
+// Source of truth is mcp-highlights.json, written by scripts/release-mcp.mjs at
+// release time (highlight capture is a required step of bumping a minor). If an
+// entry is missing the nudge degrades gracefully to naming just the version
+// (honest, never wrong). Patch releases get no entry (they never trigger a nudge).
+import mcpHighlightsRaw from "./mcp-highlights.json";
+
+const MCP_MINOR_HIGHLIGHTS: Record<string, string> = mcpHighlightsRaw as Record<string, string>;
+
+/** Highlights for every minor strictly newer than `cur` up to and including `latest`. */
+function missingHighlights(cv: number[], lv: number[]): string[] {
+  const out: string[] = [];
+  if (cv[0] !== lv[0]) {
+    // Cross-major gap: don't try to enumerate every minor; just take the latest's note.
+    const top = MCP_MINOR_HIGHLIGHTS[`${lv[0]}.${lv[1]}`];
+    return top ? [top] : [];
+  }
+  for (let minor = (cv[1] ?? 0) + 1; minor <= (lv[1] ?? 0); minor++) {
+    const note = MCP_MINOR_HIGHLIGHTS[`${lv[0]}.${minor}`];
+    if (note) out.push(note);
+  }
+  return out;
+}
+
 /**
  * One-line markdown nudge when the calling client is stale, else "".
  * @param clientHeader value of `x-replen-client` (e.g. "mcp@1.0.11"), or null.
@@ -53,19 +80,33 @@ export async function clientUpgradeNudge(clientHeader: string | null): Promise<s
   // Only nudge when we can SEE the client is genuinely behind. A MISSING version
   // header is no longer treated as stale: the in-session /replen skill fetches the
   // inventory via raw `curl` (x-digest-token only, no x-replen-client), which
-  // falsely tripped this on every up-to-date session. The stale-npx-cache case
-  // that "no header → nudge" was meant to catch is now handled properly by exact
-  // MCP version pinning in `mcp setup`. So: no version → say nothing; only the
-  // MCP tool path (which sends its version) can trigger a real, correct nudge.
+  // falsely tripped this on every up-to-date session. So: no version → say nothing;
+  // only the MCP tool path (which sends its version) can trigger a real nudge.
   if (!cur) return "";
   // Patch-tolerant: only nudge on a MINOR or MAJOR gap. A patch-level gap (e.g.
-  // 1.0.35 -> 1.0.38) is auto-picked-up by the `@^1` npx spec and ships no new
-  // tools, so nudging on it is pure noise — the "it nags on every message even when
-  // I'm current" complaint. Real new features (Leaps, Recall) land in minor bumps.
+  // 1.0.35 -> 1.0.38) is auto-picked-up by npx and ships no new tools, so nudging
+  // on it is pure noise. Real new features land in minor bumps.
   const cv = cur.split(".").map((n) => parseInt(n, 10) || 0);
   const lv = latest.split(".").map((n) => parseInt(n, 10) || 0);
   if (cv[0] > lv[0] || (cv[0] === lv[0] && (cv[1] ?? 0) >= (lv[1] ?? 0))) return ""; // same-or-newer minor → silent
-  return "_Heads up, a newer Replen is available (this is how you get new features like Leaps and Recall). Run `npx -y @replen/mcp@latest` and restart your session to update — it clears the stale npx cache._";
+
+  // Build the "what's new" clause from the versions the user is actually missing.
+  const notes = missingHighlights(cv, lv);
+  const whatsNew = notes.length ? ` — it brings ${joinList(notes)}` : "";
+  // IMPORTANT: the MCP launches from an EXACT version pinned in the host config
+  // (mcp-setup pins it). `npx @replen/mcp@latest` alone does NOT change that pin,
+  // so the session keeps spawning the old build and the nudge never clears — the
+  // "I keep seeing this even after updating" bug. `npx replen` re-runs setup,
+  // which re-pins the MCP to the latest build AND refreshes the skill. That's the
+  // instruction that actually resolves it.
+  return `_A newer Replen is available (v${lv[0]}.${lv[1]})${whatsNew}. Run \`npx replen\` to update — it re-pins the MCP to the latest build and refreshes the skill — then restart your session._`;
+}
+
+/** "a", "a and b", "a, b and c" */
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 /** Append a nudge to a footnote, or surface it alone when there's no footnote. */

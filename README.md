@@ -198,6 +198,16 @@ Atlas tiles double as a **memory layer for your coding agents**: plain markdown 
 
 Replen deliberately doesn't map your code's internals; it **ingests whatever already does**. If a repo carries a **Graphify** vault, an **Obsidian** vault, or `docs/adr/` decision records, the onboarding agent uses them as its grounding source: entity notes become grounded capabilities, note bodies become descriptors, and the files they link become evidence anchors. That's faster and richer than a cold code-read, and the deep graph stays where it lives. Your Graphify graph makes Replen's matching smarter; Replen makes your graph actionable. Privacy is unchanged: only capability specs, paths, and tags ever leave your machine, never vault content or code.
 
+Vaults are auto-detected inside the repo (`graph/`, `vault/`, `.graphify/`, `docs/adr/`). If yours lives **elsewhere** — a central Obsidian vault for everything, or a Graphify graph kept outside the repo — point Replen at it:
+
+```bash
+npx replen vault ~/ObsidianVault          # a vault that covers all your repos
+npx replen vault me/drone=~/graphs/drone   # a vault scoped to one repo
+npx replen vault --list                    # show what's configured
+```
+
+Then re-run `/replen-onboard` and the agent grounds from it. (`--vault PATH` also works inline on `npx replen` and `npx replen sync-projects`.)
+
 ## Numbers
 
 Things we measure, not claims we promise.

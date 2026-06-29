@@ -22,6 +22,15 @@ Usage:
        [--root PATH ...]     and register them with Replen. Run after
                              cloning a new repo, or pass --root to point
                              at a non-conventional layout.
+  npx replen vault <spec>... Point Replen at a knowledge-graph vault
+                             (Obsidian / Graphify / ADRs) that lives OUTSIDE
+                             a repo, so onboarding grounds from it. Repeatable.
+                             A bare path is a global vault (covers all repos);
+                             owner/name=path scopes one to a repo. e.g.
+                               npx replen vault ~/ObsidianVault
+                               npx replen vault me/drone=~/graphs/drone
+                             \`npx replen vault --list\` shows configured vaults.
+                             (--vault PATH also works on \`npx replen\` + sync.)
   npx replen atlas           Write your knowledge graph as an owned,
                              Obsidian-compatible markdown vault to
                              ~/.replen/atlas/ (projects, capabilities,
@@ -141,6 +150,41 @@ async function main() {
     return;
   }
 
+  if (cmd === "vault") {
+    const cfg = await readConfig();
+    if (!cfg) {
+      console.error("Not signed in. Run `npx replen` first.");
+      process.exit(1);
+    }
+    const { collectVaultFlags, persistVaults, summariseVaults, hasVaultFlags } = await import("./vaults.js");
+    if (argv.includes("--list")) {
+      const v = cfg.vaults;
+      const empty = !v || ((v.global?.length ?? 0) === 0 && Object.keys(v.byRepo ?? {}).length === 0);
+      console.log(
+        empty
+          ? "No vaults configured.\n  Add one:  npx replen vault ~/ObsidianVault\n            npx replen vault owner/name=~/graphs/thing"
+          : "Configured knowledge-graph vaults:\n" + summariseVaults(v!),
+      );
+      return;
+    }
+    const specs = argv.slice(1).filter((a) => !a.startsWith("-"));
+    if (specs.length === 0) {
+      console.error("Usage: npx replen vault <path | owner/name=path> ...   (or --list)");
+      process.exit(1);
+    }
+    const parsed = collectVaultFlags(specs.flatMap((s) => ["--vault", s]));
+    if (!hasVaultFlags(parsed)) {
+      console.error("No valid vault paths given (each must be an existing directory).");
+      process.exit(1);
+    }
+    const vaults = await persistVaults(parsed);
+    if (vaults) {
+      console.log(summariseVaults(vaults));
+      console.log("\n  Re-run /replen-onboard in Claude Code so the agent re-grounds from the vault.");
+    }
+    return;
+  }
+
   if (cmd === "sync-projects" || cmd === "sync") {
     const cfg = await readConfig();
     if (!cfg) {
@@ -148,6 +192,9 @@ async function main() {
       process.exit(1);
     }
     const explicitRoots = collectRootFlags(argv);
+    const { collectVaultFlags, persistVaults, summariseVaults } = await import("./vaults.js");
+    const savedVaults = await persistVaults(collectVaultFlags(argv));
+    if (savedVaults) console.log(summariseVaults(savedVaults));
     const { syncDiscoveredProjects } = await import("./sync-projects.js");
     await syncDiscoveredProjects({ token: cfg.token, base: cfg.base, explicitRoots });
     return;
@@ -166,13 +213,21 @@ async function main() {
   if (cmd === undefined) {
     // Default: if already signed in, just rerun mcp setup. Otherwise, full flow.
     const cfg = await readConfig();
+    const { collectVaultFlags, persistVaults, summariseVaults } = await import("./vaults.js");
+    const parsedVaults = collectVaultFlags(argv);
     if (cfg) {
       console.log(`Already signed in to ${cfg.base}. Re-wiring MCP config…`);
       await setupMcp(cfg.token, cfg.base);
+      const v = await persistVaults(parsedVaults);
+      if (v) console.log(summariseVaults(v));
       console.log(`\nDone. Run \`npx replen status\` to inspect.`);
       return;
     }
     await runInit();
+    // Config now exists — persist any --vault passed to first-run setup so the
+    // onboarding agent (run next in Claude Code) grounds from it.
+    const v = await persistVaults(parsedVaults);
+    if (v) console.log(summariseVaults(v));
     return;
   }
 

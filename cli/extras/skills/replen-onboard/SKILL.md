@@ -155,6 +155,19 @@ grounding source (faster AND richer than a cold code-read):
 - **ADRs** (`docs/adr/*.md`, `doc/decisions/`) — architecture decisions are
   high-grade descriptor material and often name the load-bearing files.
 
+**Also check vaults the user pointed us at OUT of the repo.** Read
+`~/.replen/config.json`; if it has a `vaults` block, consult those paths too —
+`vaults.byRepo["<owner/name>"]` for this repo specifically, and every
+`vaults.global[]` path (a central Obsidian vault that covers many repos). These
+are first-class grounding sources, same treatment as an in-repo vault. This is
+how a user feeds a central vault that auto-detection can't see.
+
+If you find NO knowledge graph — not in the repo and none configured — and the
+session is interactive, ask once: "Do you keep design notes or an Obsidian /
+Graphify vault for this project? If so, point me at it with
+`npx replen vault <path>` (or `npx replen vault <owner/name>=<path>`) and re-run
+/replen-onboard — I'll ground from it." Then fall back to the code-read.
+
 If you ground from one of these, START the report (2c) with one line:
 `Grounding source: Graphify vault at <path>` (or `Obsidian vault…` / `ADRs…`)
 — it renders into the user's Atlas tiles, linking the two tools. Then skim the
