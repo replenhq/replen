@@ -34,6 +34,7 @@ import { louvain } from "./community";
 import { type Modality, type Provenance } from "../projects/modality";
 import { isCodeFacet } from "../projects/immersion";
 import { isNoiseFacetLabel, isGenericProbeFacetLabel } from "../projects/doc-sections";
+import { type NodeKind, type EdgeKind, validateNode, validateEdge } from "./ontology";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -63,8 +64,11 @@ function looksLikeCodeUnit(s: string): boolean {
   return /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|c|cc|cpp|cxx|h|hpp|cs|php|kt|kts|swift|scala|sql|sh|vue|svelte|json|ya?ml|toml)$/i.test(t);
 }
 
-type NodeDraft = { kind: string; nodeKey: string; label: string; data: Record<string, unknown> };
-type EdgeDraft = { kind: string; srcKey: string; dstKey: string; weight: number | null; data: Record<string, unknown> };
+// Kinds are the frozen ontology unions (src/graph/ontology.ts) so a misspelled
+// kind at any emission site is a COMPILE error. Values are byte-identical to the
+// previous string literals; this is purely additive typing, no output change.
+type NodeDraft = { kind: NodeKind; nodeKey: string; label: string; data: Record<string, unknown> };
+type EdgeDraft = { kind: EdgeKind; srcKey: string; dstKey: string; weight: number | null; data: Record<string, unknown> };
 const nk = (kind: string, key: string) => `${kind} ${key}`;
 
 export type GraphBuildResult = { built: boolean; nodeCount: number; edgeCount: number; hash: string; reason: string };
@@ -743,6 +747,23 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
   const meta = await db.select().from(schema.userGraphMeta).where(eq(schema.userGraphMeta.userId, userId)).get();
   if (!opts.force && meta?.contentHash === hash) {
     return { built: false, nodeCount: meta.nodeCount, edgeCount: meta.edgeCount, hash, reason: "unchanged" };
+  }
+
+  // Optional dev-time ontology conformance pass (REPLEN_GRAPH_VALIDATE=1). Warn-
+  // only, never throws; gated so production output + timing stay identical. Edge
+  // src/dst kinds resolve from the nodes Map (edges key by the same nk() strings),
+  // so no per-edge bookkeeping is needed.
+  if (process.env.REPLEN_GRAPH_VALIDATE) {
+    const warnings: string[] = [];
+    for (const n of nodes.values()) warnings.push(...validateNode(n));
+    for (const e of edges) {
+      warnings.push(...validateEdge({ kind: e.kind, srcKind: nodes.get(e.srcKey)?.kind, dstKind: nodes.get(e.dstKey)?.kind, weight: e.weight }));
+    }
+    if (warnings.length) {
+      console.warn(`[graph] ontology validation: ${warnings.length} warning(s) user=${userId}:\n  ${warnings.slice(0, 50).join("\n  ")}${warnings.length > 50 ? `\n  …+${warnings.length - 50} more` : ""}`);
+    } else {
+      console.log(`[graph] ontology validation: clean (${nodes.size} nodes, ${edges.length} edges) user=${userId}`);
+    }
   }
 
   // ── persist atomically: wipe + reinsert ──

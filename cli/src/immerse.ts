@@ -71,6 +71,9 @@ async function send(cfg: Config): Promise<void> {
   }
 
   let grounded = 0, totalFiles = 0, totalChunks = 0, unchanged = 0;
+  // Signals for the "nothing happened, here's why" nudge below.
+  let reachable = 0;   // repos Replen tracks (manifest returned, not a 404)
+  let withPaths = 0;   // tracked repos that have grounded paths to send
   for (const repo of repos) {
     let manifest: Manifest;
     try {
@@ -78,7 +81,9 @@ async function send(cfg: Config): Promise<void> {
     } catch {
       continue; // not tracked on this account (404) / transient — skip quietly
     }
+    reachable++;
     if (manifest.tier === "off" || !Array.isArray(manifest.paths) || manifest.paths.length === 0) continue;
+    withPaths++;
 
     // Read exactly the grounded files the server asked for (size-capped).
     const files: Array<{ rel: string; content: string }> = [];
@@ -109,8 +114,26 @@ async function send(cfg: Config): Promise<void> {
     console.log(`  ✓ ${repo.githubFullName}: ${res.chunksEmbedded ?? 0} chunk(s) from ${res.filesEmbedded ?? 0} file(s)`);
   }
 
-  const parts: string[] = [];
-  if (grounded > 0) parts.push(`grounded ${grounded} repo(s) — ${totalChunks} chunk(s) from ${totalFiles} file(s)`);
-  if (unchanged > 0) parts.push(`${unchanged} unchanged`);
-  console.log(`\nImmersion: ${parts.length ? parts.join(", ") : "nothing to update"}.`);
+  if (grounded > 0 || unchanged > 0) {
+    const parts: string[] = [];
+    if (grounded > 0) parts.push(`grounded ${grounded} repo(s) — ${totalChunks} chunk(s) from ${totalFiles} file(s)`);
+    if (unchanged > 0) parts.push(`${unchanged} unchanged`);
+    console.log(`\nImmersion: ${parts.join(", ")}.`);
+    return;
+  }
+
+  // Nothing was grounded — say WHY rather than a silent no-op, and point the
+  // user at the step they're missing.
+  if (reachable === 0) {
+    // Local repos exist, but none are registered with Replen.
+    console.log("\nImmersion: none of your local repos are registered with Replen yet — nothing to ground.");
+    console.log("Register them with `npx replen` (or `npx replen sync-projects`), then run `/replen-onboard` in Claude Code to ground them. After that, `npx replen immerse` will have something to send.");
+  } else if (withPaths === 0) {
+    // Tracked, but not onboarded — no grounded capabilities (no file paths) yet.
+    console.log("\nImmersion is on, but none of your repos are onboarded yet, so there's nothing to send.");
+    console.log("Run `/replen-onboard` in Claude Code first (it's also offered automatically at the start of a session) — it reads each repo and records which files implement each capability. Then re-run `npx replen immerse`.");
+  } else {
+    // Onboarded with paths, but the files weren't readable / produced nothing.
+    console.log("\nImmersion: nothing to update (no readable grounded files changed).");
+  }
 }
