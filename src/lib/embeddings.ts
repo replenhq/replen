@@ -190,6 +190,17 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot;
 }
 
+// Mean of the top-k values. A smoother, less outlier-prone facet aggregator than
+// a bare max: a candidate that fits SEVERAL of a project's capabilities ranks
+// above one with a single lucky high-cosine facet. Shared by the matcher, the
+// catalogue reader, and the offline eval harness so they aggregate identically.
+// Returns -Infinity for an empty input (so it can't beat any real signal).
+export function topKmean(xs: number[], k: number): number {
+  if (!xs.length) return -Infinity;
+  const top = [...xs].sort((a, b) => b - a).slice(0, Math.max(1, k));
+  return top.reduce((a, b) => a + b, 0) / top.length;
+}
+
 // L2-normalize a vector to unit length. Use this on any vector you BUILD by
 // summing/averaging stored embeddings before passing it to cosineSimilarity:
 // cosineSimilarity is a bare dot product (correct only because individual

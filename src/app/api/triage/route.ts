@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../mcp/_auth";
 import { recomputeRepoQuality } from "@/lib/repo-quality";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 
 // Append-only triage-decision log. The /replen-match skill posts here
 // after each per-candidate verdict so the Activity feed on / can show
@@ -67,6 +68,11 @@ export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  }
+  // Generous per-account write budget: these routes mint rows in the global
+  // repos table, so cap a runaway loop without ever touching real use.
+  if (!allowAction(`writes:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
   }
 
   let body: TriageBody;

@@ -7,7 +7,7 @@
 
 import { db, schema } from "../db/client";
 import { desc, isNotNull } from "drizzle-orm";
-import { cosineSimilarity, parseStoredEmbedding, type FacetEmbedding } from "../lib/embeddings";
+import { cosineSimilarity, topKmean, parseStoredEmbedding, type FacetEmbedding } from "../lib/embeddings";
 import { KEEP_KINDS, RISING_KINDS, type RepoKind } from "./classify";
 import { modalitiesDisjoint, coerceModalities, type Modality, type Provenance } from "../projects/modality";
 
@@ -35,6 +35,7 @@ export type CatalogueMatch = {
   topics: string[];
   repoShape: string | null;
   cosine: number;
+  rankCosine?: number; // the rank BASE (= cosine unless top-k-mean aggregation is on); never displayed
   matchedFacet: string | null;
   matchedProvenance: Provenance | null; // how grounded the matched capability is
   matchedRepo: string | null; // sibling repo this is for, when cross-repo (multi-repo products)
@@ -104,6 +105,13 @@ const isInfraFacet = (label: string | null) => !!label && INFRA_FACET.test(label
 // candidates, so a single capability can't flood the slate with near-identical
 // alternatives (four Postgres migration tools). Quality over a menu.
 const MAX_PER_FACET = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_MAX_PER_FACET ?? "2", 10) || 2);
+// A2 lever 1, shared with the inventory route: facet aggregation for the rank
+// BASE only. Default 'max' = today. With 'topk-mean' the sort uses the mean of
+// the top-K admissible facet cosines; the floor gate + stored cosine stay MAX,
+// so the kept set is unchanged. MUST share the flag with route.ts or the two
+// candidate paths would rank by different functions.
+const FACET_AGG = process.env.REPLEN_FACET_AGG ?? "max";
+const FACET_AGG_K = Math.max(1, parseInt(process.env.REPLEN_FACET_AGG_K ?? "3", 10) || 3);
 
 // Returns Infinity (exclude) for hard-incompatible, else a cosine penalty.
 function languagePenalty(projectLangs: Set<string>, repoLang: string | null): number {
@@ -193,12 +201,18 @@ export async function catalogueMatches(opts: {
     let bestFacetRepo: string | undefined;
     let bestFacetModality: Modality[] | undefined;
     let bestFacetProvenance: Provenance | undefined;
+    const catFacetCos: number[] = []; // admissible facet cosines, for the top-k-mean rank base
     for (const f of projectFacets) {
       const s = cosineSimilarity(f.vec, emb);
+      if (Number.isFinite(s)) catFacetCos.push(s);
       if (Number.isFinite(s) && s > bestFacet) { bestFacet = s; bestFacetLabel = f.label; bestFacetRepo = f.repo; bestFacetModality = f.modality; bestFacetProvenance = f.provenance; }
     }
 
     const cosine = Math.max(cVal, bestFacet);
+    // Rank base: top-k-mean over the same facets when the flag is on, else MAX.
+    // Used only by score() below; the floor gate + displayed cosine stay on MAX.
+    const aggBestFacet = FACET_AGG === "topk-mean" && catFacetCos.length ? topKmean(catFacetCos, FACET_AGG_K) : bestFacet;
+    const rankCosine = Math.max(cVal, aggBestFacet);
     const langPen = languagePenalty(projectLanguages, r.primaryLanguage);
     if (langPen === Infinity) continue; // runtime-incompatible — can't use it
 
@@ -277,7 +291,7 @@ export async function catalogueMatches(opts: {
     out.push({
       fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
-      topics, repoShape: r.repoShape, cosine, matchedFacet, matchedProvenance, matchedRepo,
+      topics, repoShape: r.repoShape, cosine, rankCosine, matchedFacet, matchedProvenance, matchedRepo,
       ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
       tasteAdj, vec: emb,
     });
@@ -289,7 +303,7 @@ export async function catalogueMatches(opts: {
   // infra. Stars are NOT a penalty — a great high-star niche tool the agent
   // ignores is exactly what we want to surface.
   const score = (m: CatalogueMatch) =>
-    m.cosine
+    (m.rankCosine ?? m.cosine)
     + (m.tasteAdj ?? 0)
     + (m.rising ? recencyBoost(m.ageDays) : 0)
     - languagePenalty(projectLanguages, m.language)

@@ -43,24 +43,36 @@ async function apply(userId: number, scope: Scope): Promise<void> {
   await db.update(schema.userSettings).set({ ...patch, updatedAt: new Date() }).where(eq(schema.userSettings.userId, userId));
 }
 
+// POST = apply. Used by both the RFC 8058 List-Unsubscribe-Post one-click (which
+// Gmail/Apple Mail fire automatically) and the confirm button on the GET page.
 export async function POST(req: Request) {
   const { userId, scope, sig } = parse(req);
   if (!valid(userId, scope, sig)) return new NextResponse("invalid", { status: 400 });
   await apply(userId, scope as Scope);
-  return new NextResponse("unsubscribed", { status: 200 });
+  return new NextResponse(
+    page("Unsubscribed", `You're off ${LABEL[scope as Scope]}. Change your mind anytime in your <a href="/settings" style="color:#1f3a8a">email preferences</a>.`),
+    { headers: { "content-type": "text/html; charset=utf-8" } },
+  );
 }
 
+// GET = a confirmation page only. It deliberately does NOT mutate: mail-client
+// link scanners (Outlook SafeLinks, Proofpoint) and unfurlers auto-fetch URLs in
+// email, which would otherwise silently unsubscribe the recipient. The change is
+// applied only by the explicit POST below.
 export async function GET(req: Request) {
   const { userId, scope, sig } = parse(req);
   if (!valid(userId, scope, sig)) {
     return new NextResponse(
-      page("That link didn't verify.", "It may have been truncated by your mail client — you can manage email in your account settings."),
+      page("That link didn't verify.", "It may have been truncated by your mail client. You can manage email in your account settings."),
       { status: 400, headers: { "content-type": "text/html; charset=utf-8" } },
     );
   }
-  await apply(userId, scope as Scope);
+  const form =
+    `<form method="post" style="margin-top:8px">` +
+    `<button type="submit" style="font:inherit;font-weight:600;background:#1f3a8a;color:#fff;border:0;border-radius:8px;padding:11px 20px;cursor:pointer">Unsubscribe from ${LABEL[scope as Scope]}</button>` +
+    `</form><p style="color:#888;font-size:13px;margin-top:14px">Or manage everything in your <a href="/settings" style="color:#1f3a8a">email preferences</a>.</p>`;
   return new NextResponse(
-    page("Unsubscribed", `You're off ${LABEL[scope as Scope]}. Change your mind anytime in your <a href="/settings" style="color:#1f3a8a">email preferences</a>.`),
+    page("Confirm unsubscribe", `Click below to stop receiving ${LABEL[scope as Scope]}.${form}`),
     { headers: { "content-type": "text/html; charset=utf-8" } },
   );
 }

@@ -3,6 +3,7 @@ import { db, schema } from "@/db/client";
 import { and, eq, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../mcp/_auth";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 
 // Skill-mode state endpoint. The skill posts user-action state here
 // when the user stars / hides / opens a handoff PR. This is the ONLY
@@ -40,6 +41,9 @@ export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  }
+  if (!allowAction(`writes:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
   }
 
   let body: StateBody;

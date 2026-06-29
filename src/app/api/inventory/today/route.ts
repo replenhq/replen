@@ -4,8 +4,9 @@ import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
-import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
+import { cosineSimilarity, topKmean, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
 import { parentCapabilityLabel } from "@/projects/immersion";
+import { sanitizeForMarkdown } from "@/lib/handoff-template";
 import { domainPriorPenalty } from "@/lib/domain-prior";
 import { isSolid, coveredByDeps, normOwnedDep } from "@/lib/solid-match";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
@@ -63,7 +64,12 @@ import { modalitiesDisjoint, coerceModalities } from "@/projects/modality";
 // segmentation wi." — chopped mid-word with the template's period stuck on.
 // Trailing punctuation is stripped; the caller's template supplies the period.
 function clipDesc(desc: string, max: number): string {
-  const d = desc.trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+  // The description is attacker-controllable (any repo's own description) and is
+  // relayed verbatim into the user's chat as Replen's voice. Sanitize FIRST:
+  // strip HTML/control/zero-width chars and defang javascript:/data:/file:
+  // schemes, so an embedded directive or link can't ride the footnote. The
+  // verbatim-relay behaviour is unchanged; only the content it carries is clean.
+  const d = sanitizeForMarkdown(desc).trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
   if (d.length <= max) return d;
   const cut = d.slice(0, max);
   const lastSpace = cut.lastIndexOf(" ");
@@ -727,6 +733,22 @@ export async function GET(req: Request) {
   // arXiv:2408.04887.) Computed once from the pool — microseconds.
   const FACET_CAL_PCTL = Math.min(0.99, Math.max(0.5, parseFloat(process.env.REPLEN_FACET_CAL_PCTL ?? "0.85")));
   const FACET_CAL_MARGIN = Math.max(0, parseFloat(process.env.REPLEN_FACET_CAL_MARGIN ?? "0.04"));
+  // A2/ontology lever 1 — facet aggregation for the RANK BASE only. Default 'max'
+  // = today's behaviour. With 'topk-mean', ordering uses the mean of the top-K
+  // admissible facet cosines (smoother, rewards multi-capability fit; Phase B
+  // measured +0.042 AUC). ORDERING-ONLY: the displayed cosine, the eligibility
+  // floor, facet calibration, the modality gate and competitor suppression all
+  // stay on the MAX, so the kept SET is byte-identical — only rank shifts.
+  const FACET_AGG = process.env.REPLEN_FACET_AGG ?? "max";
+  const FACET_AGG_K = Math.max(1, parseInt(process.env.REPLEN_FACET_AGG_K ?? "3", 10) || 3);
+  // A2/ontology lever 3 — provenance trust bonus on RANK (additive, ordering-only).
+  // Today provenance only sets a FLOOR premium on inferred/ambiguous; a code-
+  // grounded (Immersion) or doc-grounded facet match gets no ranking credit. This
+  // rewards trustworthy matches (grounded>extracted), positive-only so it never
+  // double-penalizes inferred/ambiguous (their floor premium already handles them)
+  // and can't override the gate/floor or surface a dropped candidate. Default 0 = off.
+  const PROVENANCE_RANK_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_PROVENANCE_RANK_WEIGHT ?? "0"));
+  const provTrustUnit = (p: Provenance | null): number => (p === "grounded" ? 1 : p === "extracted" ? 0.5 : 0);
   const FACET_IDF_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_FACET_IDF_WEIGHT ?? "0.06"));
   const FACET_CAL_MIN_POOL = Math.max(20, parseInt(process.env.REPLEN_FACET_CAL_MIN_POOL ?? "40", 10) || 40);
   // Candidate embedding by "owner/name" — collected as we score, reused for MMR
@@ -829,6 +851,7 @@ export async function GET(req: Request) {
     // surfaced `cosine` is the max — so a library that nails one capability
     // ranks on that strength even when its centroid match is near zero.
     let cosine: number | null = null;
+    let rankCosine: number | null = null; // the rank BASE; = cosine unless top-k-mean aggregation is on
     let centroidCos: number | null = null;
     let domainAnchorCos: number | null = null; // candidate ↔ project subject-area terms (soft prior)
     let matchedFacet: string | null = null;
@@ -853,6 +876,7 @@ export async function GET(req: Request) {
         let bestFacetCos = -Infinity;
         let bestFacetLabel: string | null = null;
         let bestFacetProv: Provenance | null = null;
+        const facetCosines: number[] = []; // admissible facet cosines, for the top-k-mean rank base
         for (const f of probeFacets) {
           // Contextual modality suppression: agents recorded this repo as a
           // modality collision for facets of this modality — don't probe with them.
@@ -862,18 +886,27 @@ export async function GET(req: Request) {
           // capability). Unknown on either side → no gate. Mirrors catalogue/reader.
           if (modalitiesDisjoint(f.modality, candModality)) continue;
           const fSim = cosineSimilarity(f.vec, candEmbedding);
+          if (Number.isFinite(fSim)) facetCosines.push(fSim);
           if (Number.isFinite(fSim) && fSim > bestFacetCos) {
             bestFacetCos = fSim;
             bestFacetLabel = f.label;
             bestFacetProv = f.provenance ?? null;
           }
         }
+        // Rank-base aggregate: top-k-mean over the SAME admissible facets when the
+        // flag is on, else the MAX. Everything below (floor, calibration, gate,
+        // competitor suppression, displayed cosine) stays on bestFacetCos/best.
+        const aggFacetCos = FACET_AGG === "topk-mean" && facetCosines.length ? topKmean(facetCosines, FACET_AGG_K) : bestFacetCos;
 
         const cVal = centroidCos ?? -Infinity;
         const best = Math.max(cVal, bestFacetCos);
         facetLeadsCentroid = Number.isFinite(bestFacetCos) && bestFacetCos >= cVal + FACET_LEAD;
         if (Number.isFinite(best)) {
           cosine = best;
+          // Rank base: the top-k-mean aggregate when the flag is on (held to the
+          // same centroid floor), else exactly `best` (the MAX). Displayed cosine
+          // above stays `best` regardless.
+          rankCosine = (FACET_AGG === "topk-mean" && Number.isFinite(aggFacetCos)) ? Math.max(cVal, aggFacetCos) : best;
           // Facet-led when a specific capability beats the centroid: that's the
           // "fills a part of my project" signal we want to surface and label.
           if (bestFacetLabel !== null && bestFacetCos >= cVal) {
@@ -957,8 +990,9 @@ export async function GET(req: Request) {
 
     // Rank = cosine + the learning boosts. Displayed cosine stays raw; the
     // boosts only reorder (taste, source/facet hit-rate priors, waypoint and
-    // blind-spot graph hints). All zero with no history.
-    let rank = cosine ?? -1;
+    // blind-spot graph hints). All zero with no history. The base is the
+    // top-k-mean aggregate when REPLEN_FACET_AGG=topk-mean (= cosine otherwise).
+    let rank = (rankCosine ?? cosine) ?? -1;
     rank += tasteBoost(candVec, taste);
     rank += priorBoost(outcomePriors.source, sourcePrefix(c.source));
     if (isCovered(matchedFacet)) rank -= COVERED_PENALTY; // already filled by a dep
@@ -980,6 +1014,10 @@ export async function GET(req: Request) {
       // which catches more off-topic collisions at zero keeper cost than the centroid.
       // Fires only once the anchor is backfilled for this project (null ⇒ no-op).
       if (domainAnchorCos !== null) rank -= domainPriorPenalty(domainAnchorCos, DOMAIN_PRIOR_WEIGHT, DOMAIN_PRIOR_FLOOR);
+      // Provenance trust bonus (A2 lever 3): reward a match led by a code-grounded
+      // / grounded capability over an inferred one. Positive-only, additive, off by
+      // default. Displayed cosine + the keep-set are untouched.
+      if (PROVENANCE_RANK_WEIGHT > 0) rank += PROVENANCE_RANK_WEIGHT * provTrustUnit(matchedProvenance);
     }
 
     filtered.push({

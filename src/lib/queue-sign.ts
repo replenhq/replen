@@ -5,13 +5,8 @@
 // nothing else. Key: ENCRYPTION_KEY (already required in prod for at-rest
 // secrets).
 
-import { createHmac, timingSafeEqual } from "node:crypto";
-
-function key(): string {
-  const k = process.env.ENCRYPTION_KEY;
-  if (!k) throw new Error("ENCRYPTION_KEY required for queue link signing");
-  return k;
-}
+import { createHmac, timingSafeEqual, type BinaryLike } from "node:crypto";
+import { linkSigningKey, legacyLinkSigningKey } from "./crypto";
 
 // Length-prefixed field encoding so no attacker-controlled value (kind/title)
 // can shift a delimiter to forge a different (user, kind, ref, title) tuple
@@ -21,19 +16,22 @@ function signingBasis(userId: number, kind: string, refId: number | null, title:
   return parts.map((p) => `${p.length}:${p}`).join("");
 }
 
+const hmac = (k: BinaryLike, basis: string): string => createHmac("sha256", k).update(basis).digest("hex");
+const ctEq = (sig: string, expected: string): boolean => {
+  if (typeof sig !== "string" || sig.length !== expected.length) return false;
+  try { return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex")); } catch { return false; }
+};
+
 export function signQueueParams(userId: number, kind: string, refId: number | null, title: string): string {
-  return createHmac("sha256", key()).update(signingBasis(userId, kind, refId, title)).digest("hex");
+  return hmac(linkSigningKey(), signingBasis(userId, kind, refId, title));
 }
 
 // Constant-time verification — never compare signatures with === (timing oracle).
+// Accepts the new domain-separated key OR the legacy raw-master key, so links
+// already sent in emails keep verifying through the transition.
 export function verifyQueueParams(userId: number, kind: string, refId: number | null, title: string, sig: string): boolean {
-  const expected = signQueueParams(userId, kind, refId, title);
-  if (typeof sig !== "string" || sig.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch {
-    return false;
-  }
+  const basis = signingBasis(userId, kind, refId, title);
+  return ctEq(sig, hmac(linkSigningKey(), basis)) || ctEq(sig, hmac(legacyLinkSigningKey(), basis));
 }
 
 export function queueAddUrl(userId: number, kind: string, refId: number | null, title: string): string {

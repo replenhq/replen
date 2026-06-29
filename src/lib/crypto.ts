@@ -18,7 +18,7 @@
 // Boot behaviour: assertEncryptionKeyForBoot() throws in production if the
 // master key is missing. There is no silent-plaintext fallback.
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, hkdfSync } from "node:crypto";
 
 const PREFIX_V1 = "enc:v1:";
 const PREFIX_V2 = "enc:v2:";
@@ -251,6 +251,24 @@ export function decryptWithDek(stored: string, dek: Buffer): string {
       throw eAad;
     }
   }
+}
+
+// Domain separation: email-link HMAC signing must NOT use the same key bytes as
+// the at-rest encryption KEK. linkSigningKey() derives a dedicated 32-byte HMAC
+// key from the master key via HKDF (info-tagged), so the encryption and signing
+// purposes never share material. The KEK itself is unchanged, so NO encrypted
+// data is migrated — only new links sign with the derived key.
+export function linkSigningKey(): Buffer {
+  return Buffer.from(hkdfSync("sha256", getMasterKey(), Buffer.alloc(0), Buffer.from("replen-link-sign-v1"), 32));
+}
+
+// The pre-domain-separation signing key (the raw master key string). Verifiers
+// accept it so email links signed before the switch keep working until those
+// emails age out. Safe: it is the same secret master, just the un-derived form.
+export function legacyLinkSigningKey(): string {
+  const k = process.env.ENCRYPTION_KEY;
+  if (!k) throw new Error("ENCRYPTION_KEY required for link signing");
+  return k;
 }
 
 // One-way hash for ingest tokens. The token itself has ~192 bits of entropy

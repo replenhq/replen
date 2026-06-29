@@ -4,16 +4,11 @@
 // nothing else — a forwarded link can't unsubscribe a different user or a
 // different channel. Key: ENCRYPTION_KEY (already required in prod).
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, type BinaryLike } from "node:crypto";
+import { linkSigningKey, legacyLinkSigningKey } from "./crypto";
 
 export type UnsubScope = "all" | "brief" | "alerts" | "digest";
 const SCOPES: readonly string[] = ["all", "brief", "alerts", "digest"];
-
-function key(): string {
-  const k = process.env.ENCRYPTION_KEY;
-  if (!k) throw new Error("ENCRYPTION_KEY required for unsubscribe link signing");
-  return k;
-}
 
 // Length-prefixed encoding so no field can shift a delimiter to forge a different
 // (user, scope) tuple that signs identically. Full 64-hex digest.
@@ -21,20 +16,23 @@ function basis(userId: number, scope: string): string {
   return [String(userId), scope].map((p) => `${p.length}:${p}`).join("");
 }
 
+const hmac = (k: BinaryLike, b: string): string => createHmac("sha256", k).update(b).digest("hex");
+const ctEq = (sig: string, expected: string): boolean => {
+  if (typeof sig !== "string" || sig.length !== expected.length) return false;
+  try { return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex")); } catch { return false; }
+};
+
 export function signUnsub(userId: number, scope: UnsubScope): string {
-  return createHmac("sha256", key()).update(basis(userId, scope)).digest("hex");
+  return hmac(linkSigningKey(), basis(userId, scope));
 }
 
 // Constant-time verification — never compare signatures with === (timing oracle).
+// Accepts the new domain-separated key OR the legacy raw-master key so links in
+// already-sent emails keep working through the transition.
 export function verifyUnsub(userId: number, scope: string, sig: string): boolean {
   if (!SCOPES.includes(scope)) return false;
-  const expected = signUnsub(userId, scope as UnsubScope);
-  if (typeof sig !== "string" || sig.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch {
-    return false;
-  }
+  const b = basis(userId, scope as UnsubScope);
+  return ctEq(sig, hmac(linkSigningKey(), b)) || ctEq(sig, hmac(legacyLinkSigningKey(), b));
 }
 
 function baseUrl(): string {

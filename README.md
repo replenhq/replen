@@ -55,6 +55,13 @@ Replen has three parts, and they mostly matter together.
 
 The loop: Atlas records what you build, Brainstem matches it against what Watchtower sees, your agent triages it in-session, and the verdict lands back in Atlas.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/replen-system-dark.svg">
+    <img src="assets/replen-system.svg" width="900" alt="How Replen works. On your machine, your repos become per-capability facets. Server-side, Watchtower's ~1,250 sources feed Brainstem, which scores, filters and ranks candidates mechanically, with no LLM and no code. In your AI session, each candidate is triaged against your local code into a verdict: adopt, port, cherry-pick, clean-room or skip. Verdicts land in Atlas, which grounds the next run. Inset: the scoring math, from per-facet cosine through the modality gate, calibration floor and top-K-mean rank.">
+  </picture>
+</p>
+
 ## Quickstart
 
 Three steps: **install → onboard → use.**
@@ -186,6 +193,13 @@ Discovery brings the outside world in. Atlas is the other half, a living map of 
 </p>
 
 As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/atlas-full-dark.svg">
+    <img src="assets/atlas-full.svg" width="960" alt="Atlas, the per-user knowledge graph: 11 node types (project, product, capability, tool, candidate, suggestion, goal, domain, lesson, boundary, concept) and 16 edge types. Onboarding, triage verdicts and your vaults feed it; projects connect to their capabilities, tools, domains, goals and triaged candidates; vault concepts ground capabilities; triage lessons and boundaries link back to the candidates that prompted them; derived edges relate similar capabilities, projects and domains. The graph powers Leaps, Recall, Tiles plus the Atlas webapp, and grounds Brainstem's matching.">
+  </picture>
+</p>
 
 - **Leaps** (`replen_leaps`). Connections across your own work that you would never go looking for. A thing you solved cleanly in one repo is the open gap in another. A capability in one project answers a problem in a project you have not opened in months. Each leap is scored on relevance and surprise, and comes with the path that explains it. Your own portfolio becomes a source, not just the ecosystem.
 - **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.

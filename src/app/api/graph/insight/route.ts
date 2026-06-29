@@ -3,6 +3,7 @@ import { db, schema } from "@/db/client";
 import { and, eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 
 // Atlas — capture a Pass 3/4 portfolio insight from the multi-vector triage:
 // a 'lesson' (a transferable idea / premise / way-of-working) or a 'boundary'
@@ -20,6 +21,9 @@ const MAX_TEXT = 2000;
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  if (!allowAction(`writes:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
+  }
 
   let body: { kind?: string; text?: string; viaCandidate?: string; project?: string };
   try {

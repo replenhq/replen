@@ -1,0 +1,103 @@
+<svg viewBox="0 0 1120 580" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c9971f"/>
+    </marker>
+  </defs>
+  <style>
+    .box  { fill:#ffffff; stroke:#2a2a2a; stroke-width:1.4; }
+    .zone { fill:#f6f5f2; stroke:#bdb9b0; stroke-width:1.1; stroke-dasharray:5 4; }
+    .lab  { font-size:14px; fill:#1a1a1a; }
+    .labb { font-size:14px; font-weight:600; fill:#1a1a1a; }
+    .dim  { font-size:11px; fill:#857f74; }
+    .zlab { font-size:10.5px; fill:#a39d92; letter-spacing:.6px; }
+    .alab { font-size:11px; fill:#9a7a17; }
+    .ar   { stroke:#555; stroke-width:1.4; fill:none; marker-end:url(#arr); }
+    .arA  { stroke:#c9971f; stroke-width:1.5; fill:none; marker-end:url(#arrA); }
+    .zoom { stroke:#cdc8bf; stroke-width:1; stroke-dasharray:3 3; fill:none; }
+    .htitle { font-family:'STIX Two Math','Latin Modern Math',Cambria,Georgia,'Times New Roman',serif; font-style:italic; font-weight:600; font-size:16px; fill:#1a1a1a; }
+    .m    { font-family:'STIX Two Math','Latin Modern Math',Cambria,Georgia,'Times New Roman',serif; font-style:italic; font-size:15px; fill:#1a1a1a; }
+    .mdim { font-family:'STIX Two Math','Latin Modern Math',Cambria,Georgia,'Times New Roman',serif; font-style:italic; font-size:12px; fill:#9a948a; }
+    .rm   { font-style:normal; }
+    .an   { font-style:normal; fill:#9a948a; }
+    .gl   { font-style:normal; fill:#857f74; }
+    .sub  { baseline-shift:sub; font-size:10px; }
+    .sup  { baseline-shift:super; font-size:10px; }
+  </style>
+
+  <rect x="3" y="3" width="1114" height="574" rx="14" fill="#fbfbfa" stroke="#e7e5e0"/>
+
+  <!-- ======== LEFT: the loop ======== -->
+  <!-- zone: your machine -->
+  <rect class="zone" x="28" y="52" width="566" height="92" rx="10"/>
+  <text class="zlab" x="42" y="71">YOUR MACHINE  ·  your code never leaves it</text>
+  <rect class="box" x="50" y="86" width="120" height="44" rx="8"/>
+  <text class="lab" x="110" y="113" text-anchor="middle">Your repos</text>
+  <path class="ar" d="M170,108 L246,108"/>
+  <rect class="box" x="250" y="86" width="216" height="44" rx="8"/>
+  <text class="lab" x="358" y="113" text-anchor="middle">capabilities + facets</text>
+
+  <!-- watchtower + brainstem (server) -->
+  <rect class="box" x="44" y="190" width="140" height="58" rx="8"/>
+  <text class="labb" x="114" y="214" text-anchor="middle">Watchtower</text>
+  <text class="dim"  x="114" y="231" text-anchor="middle">1,250+ sources</text>
+
+  <rect x="250" y="186" width="316" height="66" rx="8" fill="#fff6df" stroke="#e0a92e" stroke-width="1.8"/>
+  <text class="labb" x="408" y="211" text-anchor="middle">Brainstem  ·  score · filter · rank</text>
+  <text class="dim"  x="408" y="231" text-anchor="middle">server side · mechanical · no LLM · no code</text>
+
+  <text class="dim" x="215" y="208" text-anchor="middle">candidates</text>
+  <path class="ar" d="M184,221 L246,221"/>
+  <path class="ar" d="M358,130 L358,184"/>
+  <text class="dim" x="388" y="160" text-anchor="middle">grounds</text>
+
+  <!-- zone: your ai session (narrowed: leaves a clear channel on the right for the loop) -->
+  <rect class="zone" x="40" y="296" width="430" height="88" rx="10"/>
+  <text class="zlab" x="54" y="315">YOUR AI SESSION  ·  runs on your subscription</text>
+  <rect class="box" x="52" y="322" width="406" height="50" rx="8"/>
+  <text class="lab" x="255" y="341" text-anchor="middle">triage each candidate against your local code</text>
+  <text class="alab" x="255" y="360" text-anchor="middle">→ verdict:  adopt · port · cherry-pick · clean-room · skip</text>
+
+  <text class="dim" x="340" y="286" text-anchor="middle">candidate inventory</text>
+  <path class="ar" d="M340,252 L340,320"/>
+
+  <!-- atlas + loop -->
+  <rect class="box" x="147" y="420" width="216" height="50" rx="8"/>
+  <text class="labb" x="255" y="442" text-anchor="middle">Atlas  ·  knowledge graph</text>
+  <text class="dim"  x="255" y="459" text-anchor="middle">decision units, never code</text>
+
+  <path class="ar" d="M255,372 L255,418"/>
+  <text class="dim" x="283" y="398" text-anchor="middle">verdict</text>
+
+  <!-- learning loop: atlas up the right channel back to brainstem (clear of the zone) -->
+  <path class="ar" d="M363,448 C 470,453 502,448 502,396 C 502,330 501,290 500,256"/>
+  <text class="dim" x="486" y="352" text-anchor="middle" transform="rotate(-90 486 352)">learns + grounds  ↺</text>
+
+  <!-- ======== RIGHT: scoring zoom-in ======== -->
+  <path class="zoom" d="M566,194 L648,118"/>
+  <path class="zoom" d="M566,246 L648,470"/>
+  <rect x="648" y="110" width="444" height="360" rx="10" fill="#ffffff" stroke="#d9d5cc"/>
+  <text class="htitle" x="668" y="139">score(&#8201;<tspan class="an">candidate</tspan> c&#8201;)</text>
+  <line x1="668" y1="150" x2="1072" y2="150" stroke="#ece9e3" stroke-width="1"/>
+
+  <text class="m" x="668" y="176">c <tspan class="gl">against each capability facet</tspan>   f<tspan class="sub">i</tspan> &#8712; <tspan class="rm">&#8477;</tspan><tspan class="sup">1536</tspan></text>
+  <text class="m" x="702" y="197">s<tspan class="sub">i</tspan> = <tspan class="rm">cos</tspan>(&#8201;f<tspan class="sub">i</tspan> , c&#8201;)</text>
+
+  <text class="m"    x="668" y="231"><tspan class="gl">modality gate</tspan>   drop f<tspan class="sub">i</tspan> if <tspan class="rm">mod</tspan>(f<tspan class="sub">i</tspan>) &#8745; <tspan class="rm">mod</tspan>(c) = &#8709;</text>
+  <text class="mdim" x="702" y="249">an image lib never leads a timeseries need</text>
+
+  <text class="m"    x="668" y="283"><tspan class="gl">calibration</tspan>   keep s<tspan class="sub">i</tspan> only if  s<tspan class="sub">i</tspan> &#8805; floor<tspan class="sub">i</tspan> + margin</text>
+  <text class="mdim" x="702" y="301">floor<tspan class="sub">i</tspan> = that facet's own pool-noise percentile</text>
+
+  <text class="m" x="668" y="335">rank = <tspan class="rm">mean</tspan><tspan class="sub">top-K</tspan>(&#8201;s<tspan class="sub">i</tspan>&#8201;)<tspan class="an" x="980">match strength</tspan></text>
+  <text class="m" x="722" y="356">+ taste + source / facet priors</text>
+  <text class="m" x="722" y="376">+ waypoint / blind-spot<tspan class="an" x="980">Atlas graph hints</tspan></text>
+  <text class="m" x="722" y="396">&#8722; idf &#183; baseline<tspan class="sub">i</tspan> &#8722; domain prior</text>
+
+  <line x1="668" y1="418" x2="1072" y2="418" stroke="#ece9e3" stroke-width="1"/>
+  <text class="m"    x="668" y="442">displayed cosine = <tspan class="rm">max</tspan>(&#8201;s<tspan class="sub">i</tspan>&#8201;)</text>
+  <text class="mdim" x="702" y="460">raw &#8212; never the blended rank</text>
+</svg>
