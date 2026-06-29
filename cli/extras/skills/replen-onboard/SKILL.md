@@ -1,6 +1,6 @@
 ---
 name: replen-onboard
-description: One-time background setup for Replen. Works through the user's active repos — reading each one's code, tidying thin/missing docs (never touching good ones), and building a tailored, grounded profile (a project report + capabilities) so Replen surfaces genuinely useful tools instead of generic ones. Runs autonomously in the background. Invoke with `/replen-onboard`, or when the user first sets up Replen and wants it configured properly across their projects.
+description: One-time Replen setup — profiles your active repos so matches are relevant, not generic. Runs autonomously in the background. Invoke with `/replen-onboard`.
 ---
 
 # Replen onboarding — autonomous, background, multi-repo setup

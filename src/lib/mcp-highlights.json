@@ -1,4 +1,5 @@
 {
   "_doc": "Per-minor @replen/mcp release highlights, keyed 'major.minor'. The in-product upgrade nudge (src/lib/client-version.ts) composes its 'what's new' line from this — naming what a stale client is missing. Managed by scripts/release-mcp.mjs, which requires a highlight on every minor/major bump; patch releases get no entry. Don't hand-edit except to fix wording. The '1.0' baseline (Leaps/Recall/Atlas) has no entry on purpose — there's no 'update to 1.0' to advertise.",
-  "1.1": "a tighter, clearer toolset (the 23 MCP tools consolidated down to 14)"
+  "1.1": "a tighter, clearer toolset (the 23 MCP tools consolidated down to 14)",
+  "1.2": "vault-aware leaps — it now reads your Obsidian/Graphify wikilinks to connect work across your repos"
 }

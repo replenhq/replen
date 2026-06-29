@@ -1,6 +1,6 @@
 ---
 name: replen
-description: Review Replen's suggestions for the current repo against your code. Replen surfaces libraries, dependency releases, and security advisories relevant to what you're building; this reads the codebase, gives each one a clear verdict and effort estimate with the specific files it affects, and records what you decide. Invoke with `/replen` or by saying "what's new from Replen?".
+description: Triage today's Replen matches for this repo — a verdict and effort estimate per candidate, grounded in your code. Invoke with `/replen` or "what's new from Replen?".
 ---
 
 # Replen Match — in-session candidate triage

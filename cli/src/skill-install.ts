@@ -23,6 +23,7 @@ const BUNDLED_SKILLS_ROOT = join(SELF_DIR, "..", "extras", "skills");
 // follow the MCP tool's description instead. The CLAUDE.md instruction
 // shipped by `replen project-init` is the cross-host fallback.
 const CLAUDE_SKILLS_ROOT = join(homedir(), ".claude", "skills");
+const CLAUDE_COMMANDS_ROOT = join(homedir(), ".claude", "commands");
 
 type SkillSpec = {
   name: string;
@@ -64,6 +65,17 @@ export function installSkills(): void {
       try { rmSync(join(CLAUDE_SKILLS_ROOT, old), { recursive: true, force: true }); } catch { /* best effort */ }
     }
   }
+  // Migrate: an early Replen shipped a `/replen` slash COMMAND (~/.claude/commands/
+  // replen.md) that invokes the now-removed `replen-match` skill. Left in place it
+  // renders a DUPLICATE `/replen` next to the skill. Remove only OUR stale command —
+  // gated on it referencing `replen-match`, so a user's own `/replen` command (or any
+  // other) is never touched.
+  try {
+    const legacyCmd = join(CLAUDE_COMMANDS_ROOT, "replen.md");
+    if (existsSync(legacyCmd) && readFileSync(legacyCmd, "utf8").includes("replen-match")) {
+      rmSync(legacyCmd, { force: true });
+    }
+  } catch { /* best effort */ }
   let installed = 0;
   for (const skill of SKILLS) {
     for (const rel of skill.files) {

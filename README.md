@@ -57,20 +57,23 @@ The loop: Atlas records what you build, Brainstem matches it against what Watcht
 
 ## Quickstart
 
+Three steps: **install → onboard → use.**
+
+### 1. Install — `npx replen`
+
 ```bash
 npx replen
 ```
 
-That single command, in 60 seconds:
+One command, ~60 seconds: signs you in (Google / GitHub / email link), asks **which repos to include** (all — the default — a subset, or none for now), and wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server plus the `/replen` + `/replen-onboard` skills into Claude Code / Codex / Gemini. It also auto-extracts tags from each repo's manifests and drops a small "Replen integration" section into each included project's `CLAUDE.md` / `AGENTS.md`. No API key, no GitHub PAT, no manual project setup. (Repo discovery details and non-conventional-folder handling are in [How repo discovery works](#how-repo-discovery-works) below.)
 
-1. Opens your browser to sign in (Google or GitHub via Firebase)
-2. Scans your local filesystem for git repos (see [How repo discovery works](#how-repo-discovery-works) below)
-3. Asks which repos to include — **all** (default), a subset, or none for now
-4. Auto-extracts tags from each (`package.json` deps, `pyproject.toml`, etc.); no GitHub PAT needed
-5. Registers your chosen repos with Replen as projects
-6. Installs the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server into your Claude Code / Codex config
-7. Installs the `/replen` + `/replen-onboard` skills in `~/.claude/skills/`
-8. Injects a small "Replen integration" section into each included project's `CLAUDE.md` + `AGENTS.md`
+### 2. Onboard — `/replen-onboard` (one-time)
+
+Open Claude Code in your work and run `/replen-onboard` — the agent also **offers it automatically on your first session**, so you don't have to remember it. It reads each repo and builds a **grounded profile** (capabilities + a project report) so matches are relevant to what you actually build, not a generic trending list. Runs autonomously in the background; once per project.
+
+### 3. Use — just work
+
+Carry on coding. `/replen` triages today's matches for the current repo — a verdict and effort estimate per candidate, against your code — and otherwise Replen drops a calm one-line note in your AI tool's reply when something genuinely fits. Silent on quiet days.
 
 ### How repo discovery works
 
@@ -100,8 +103,6 @@ Both work for the initial setup and for `npx replen sync-projects` later.
 - ❌ GitHub PAT: optional, only needed if you want server-side handoff PRs
 - ❌ Manual project setup: auto-discovered from your local filesystem
 - ❌ Per-project tag config: auto-extracted from manifests
-
-Open Claude Code (or Codex) in any of your tracked repos and start working normally. Replen mentions matches in your AI's response when there are any. Silent on quiet days.
 
 For self-host: `REPLEN_BASE=https://replen.your-domain.dev npx replen`.
 
