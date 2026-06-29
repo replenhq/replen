@@ -176,6 +176,9 @@ async function postProjectsBulk(
           name: p.name,
           tags: p.tags,
           primaryLanguage: p.primaryLanguage ?? undefined,
+          // Absolute local checkout path — see sync-projects.ts. Inert unless
+          // the server is a self-host install with Immersion enabled.
+          localPath: p.localPath,
         })),
       }),
       signal: ctrl.signal,

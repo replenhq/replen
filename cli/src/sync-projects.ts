@@ -85,6 +85,11 @@ export async function syncDiscoveredProjects({
       name: p.name,
       tags: p.tags,
       primaryLanguage: p.primaryLanguage ?? undefined,
+      // Absolute local checkout path. Used by Immersion on a self-host install
+      // (server == this machine) to ground on the actual source; inert on the
+      // hosted server, which can't read it. Always sent — it's identity, not
+      // code; nothing is read unless the operator enables Immersion.
+      localPath: p.localPath,
     })),
   };
 
@@ -130,7 +135,7 @@ export async function syncDiscoveredProjects({
  * Returns the walked result, the strategy that supplied the roots,
  * and a flag indicating whether the interactive prompt was used.
  */
-async function resolveAndWalk(explicitRoots: string[]): Promise<{
+export async function resolveAndWalk(explicitRoots: string[]): Promise<{
   result: DiscoveryResult;
   source: RootSource;
   prompted: boolean;

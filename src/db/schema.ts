@@ -121,6 +121,11 @@ export const userSettings = sqliteTable(
     // hosted pipeline with BYO API keys, for non-CLI users). Determines
     // which code path the pipeline runs for a given user.
     subscriptionTier: text("subscription_tier").notNull().default("skill"),
+    // Immersion: how deeply Replen grounds on a project's actual code, as an
+    // account default ('off' | 'embeddings' | 'full-code'). Per-repo override on
+    // project_profiles.immersion_tier. Self-host defaults ON via the
+    // REPLEN_SELF_HOST env flag (not this column) — see src/lib/immersion-tier.ts.
+    immersionTier: text("immersion_tier").notNull().default("off"),
     // Always-on layer: the weekly "four questions" brief (what'll break /
     // security / bill / upgrades, for YOUR stack). Sent only when something
     // qualified — a quiet week sends nothing.
@@ -287,6 +292,14 @@ export const projectProfiles = sqliteTable(
     userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
     path: text("path").notNull(),
+    // Real on-disk directory of the local checkout (nullable). `path` above is
+    // the synthetic identity ("github:owner/name"); local_path is where the
+    // files actually live, used ONLY by self-host Immersion to read code off
+    // disk. Carried up from the CLI's discovery at register time.
+    localPath: text("local_path"),
+    // Per-repo Immersion override ('off' | 'embeddings' | 'full-code'); null =
+    // inherit the account default (user_settings.immersion_tier).
+    immersionTier: text("immersion_tier"),
     name: text("name").notNull(),
     // GitHub/manifest-detected primary language (e.g. "typescript", "python").
     // Sent at registration; fed into the project centroid as a soft language

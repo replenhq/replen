@@ -12,13 +12,17 @@ import {
   projectEmbeddingText,
   serialiseEmbedding,
   serialiseFacetEmbeddings,
+  parseFacetCodeHash,
 } from "../lib/embeddings";
 import { facetInputsFor, embedFacets } from "../projects/facets";
+import { embedCodeFacets, mergeCodeFacets, blobHasCodeFacets } from "../projects/immersion";
+import { isSelfHost, resolveImmersionTier } from "../lib/immersion-tier";
 import { projectQualityIssues, qualityGateSummary } from "../projects/quality";
 import { buildUserGraph } from "../graph/build";
 import { refreshCatalogue, promoteCandidatesToCatalogue } from "../catalogue/builder";
 import { SEED_CAPABILITIES, isSeedCapability } from "../catalogue/seed-capabilities";
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -213,6 +217,20 @@ async function executePipeline(
     await refreshStaleProjectEmbeddings(runId, userId).catch((e) =>
       console.warn(`[pipeline] user=${userId} project embeddings failed:`, e),
     );
+
+    // Immersion (M1, self-host only) — code-content facets. Reads the local
+    // checkout of each project, embeds the ACTUAL source of grounded
+    // capabilities, and merges those vectors into facet_embeddings so matching
+    // grounds on what the code does, not just the agent's descriptor. Gated
+    // hard on isSelfHost(): a hosted server has no local disk to read, so this
+    // is a no-op there (M2 will carry the hosted, opt-in transmit path). Runs
+    // AFTER refreshStaleProjectEmbeddings so the descriptor facets exist first
+    // and we only append/refresh the code layer. Non-fatal.
+    if (isSelfHost()) {
+      await refreshStaleProjectCodeFacets(runId, userId, settings).catch((e) =>
+        console.warn(`[pipeline] user=${userId} immersion code facets failed:`, e),
+      );
+    }
 
     // Field-quality gate. Audits each project's grounding fields (domain, summary,
     // descriptors, versions, docs) and emits one concise run event flagging what's
@@ -758,6 +776,87 @@ async function refreshStaleProjectEmbeddings(runId: number, userId: number): Pro
   }
   if (skippedNoSummary > 0) {
     void recordEvent(runId, userId, "scan", `Project embeddings skipped for ${skippedNoSummary} project(s) (no summary or tags yet)`);
+  }
+}
+
+// Immersion (M1, self-host only). For each active+included project whose
+// effective Immersion tier is not 'off' and that has a readable LOCAL checkout,
+// read the source of its grounded capabilities, embed the actual code, and
+// merge those code-content facets into facet_embeddings (replacing any stale
+// code layer in place — descriptor facets are left untouched). Gated by the
+// caller on isSelfHost(); guarded again per-row so a misconfigured row never
+// reads disk it shouldn't. The source-set hash (codeHash) skips the embedding
+// call when nothing changed — the cheap file reads still run to compute it.
+async function refreshStaleProjectCodeFacets(
+  runId: number,
+  userId: number,
+  settings: typeof schema.userSettings.$inferSelect | undefined,
+): Promise<void> {
+  const accountTier = settings?.immersionTier ?? null;
+  const projects = await db
+    .select()
+    .from(schema.projectProfiles)
+    .where(and(
+      eq(schema.projectProfiles.userId, userId),
+      eq(schema.projectProfiles.active, true),
+      eq(schema.projectProfiles.included, true),
+    ));
+  if (projects.length === 0) return;
+
+  let grounded = 0;
+  let filesTotal = 0;
+  let chunksTotal = 0;
+  for (const p of projects) {
+    const tier = resolveImmersionTier({ accountTier, repoTier: p.immersionTier });
+    if (tier === "off") continue;
+
+    // Need a REAL local checkout — never the synthetic "github:owner/name"
+    // identity path. statSync confirms it's a readable directory.
+    const localPath = p.localPath;
+    if (!localPath || localPath.startsWith("github:")) continue;
+    try {
+      const st = statSync(localPath);
+      if (!st.isDirectory()) continue;
+    } catch {
+      continue; // gone / unreadable — skip silently
+    }
+
+    // Grounded capabilities carrying `paths` are the only candidates for code
+    // facets; if none, there's nothing to read.
+    let summary: ProjectSummary | null = null;
+    if (p.summaryJson) {
+      try { summary = JSON.parse(p.summaryJson) as ProjectSummary; } catch { /* skip */ }
+    }
+    const specs = (summary?.capabilities ?? []).filter((c) => c?.paths?.length);
+    if (specs.length === 0) continue;
+
+    const priorHash = parseFacetCodeHash(p.facetEmbeddings);
+    const result = await embedCodeFacets(specs, localPath, { priorHash });
+    if (result.unchanged) continue; // source set identical to last run
+
+    // No code facets read AND none were there before → nothing to write (also
+    // avoids churning updatedAt). If the source went empty but code facets
+    // existed, fall through so they get stripped.
+    if (result.facets.length === 0 && !blobHasCodeFacets(p.facetEmbeddings)) continue;
+
+    // Never auto-pin immersion_tier on the row: it stays null (= inherit the
+    // self-host default) unless a user/operator explicitly opted this repo in or
+    // out. Writing the effective tier here would turn the implicit default into
+    // an explicit per-repo override and defeat the global REPLEN_SELF_HOST
+    // off-switch (repo override wins). Observability comes from the run event.
+    await db
+      .update(schema.projectProfiles)
+      .set({
+        facetEmbeddings: mergeCodeFacets(p.facetEmbeddings, result.facets, result.hash),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.projectProfiles.id, p.id));
+    grounded++;
+    filesTotal += result.filesRead;
+    chunksTotal += result.chunksEmbedded;
+  }
+  if (grounded > 0) {
+    void recordEvent(runId, userId, "scan", `Immersion: code-grounded ${grounded} project(s) — ${chunksTotal} chunk(s) from ${filesTotal} file(s)`);
   }
 }
 

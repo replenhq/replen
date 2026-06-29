@@ -519,6 +519,13 @@
 			"when": 1781913600000,
 			"tag": "0073_email_preferences",
 			"breakpoints": true
+		},
+		{
+			"idx": 74,
+			"version": "6",
+			"when": 1782000000000,
+			"tag": "0074_immersion",
+			"breakpoints": true
 		}
 	]
 }

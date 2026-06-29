@@ -5,6 +5,7 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
 import { cosineSimilarity, parseStoredEmbedding, parseStoredFacetEmbeddings, type FacetEmbedding } from "@/lib/embeddings";
+import { parentCapabilityLabel } from "@/projects/immersion";
 import { domainPriorPenalty } from "@/lib/domain-prior";
 import { isSolid, coveredByDeps, normOwnedDep } from "@/lib/solid-match";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
@@ -876,9 +877,13 @@ export async function GET(req: Request) {
           // Facet-led when a specific capability beats the centroid: that's the
           // "fills a part of my project" signal we want to surface and label.
           if (bestFacetLabel !== null && bestFacetCos >= cVal) {
-            matchedFacet = bestFacetLabel;
+            // A code-content facet (Immersion) wins on its embedded source but is
+            // attributed to its parent capability for display + diversity dedup —
+            // a file path never surfaces in the reason.
+            const displayLabel = parentCapabilityLabel(bestFacetLabel);
+            matchedFacet = displayLabel;
             matchedProvenance = bestFacetProv;
-            reasons.push(`fits your ${bestFacetLabel} capability: ${(bestFacetCos * 100).toFixed(0)}%`);
+            reasons.push(`fits your ${displayLabel} capability: ${(bestFacetCos * 100).toFixed(0)}%`);
           } else {
             reasons.push(`semantic similarity: ${(best * 100).toFixed(0)}%`);
           }

@@ -8,6 +8,7 @@
 import { eq, and } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { embed, parseStoredEmbedding, parseStoredFacetEmbeddings, cosineSimilarity } from "../lib/embeddings";
+import { isCodeFacet } from "../projects/immersion";
 
 const norm = (s: string) => s.toLowerCase();
 const STOP = new Set(["the", "a", "an", "for", "to", "of", "in", "on", "we", "have", "has", "what", "did", "do", "does", "our", "my", "is", "are", "with", "and", "or", "about", "any", "use", "used", "using"]);
@@ -52,6 +53,8 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   const capAgg = new Map<string, { projects: Set<string>; best: number; provenance: string; paths: string[] }>();
   for (const p of projects) {
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
+      if (isCodeFacet(f)) continue; // code-content facets are matching-only; the
+      // descriptor facet for the same capability already carries its paths.
       const kw = keywordHits(f.label, toks);
       const sem = qvec ? cosineSimilarity(qvec, f.vec) : 0;
       const score = kw * 0.5 + (Number.isFinite(sem) ? Math.max(0, sem) : 0);

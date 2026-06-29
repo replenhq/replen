@@ -305,6 +305,28 @@ Continuing with unfiltered for now."
 - The session-start hook already surfaced matches in the opening
   context and the user hasn't asked for more. Don't double-deliver.
 
+## Immersion — grounding on the user's actual code
+
+By default Replen matches against each repo's *description* (docs, tags,
+extracted capabilities). **Immersion** is an opt-in mode that also grounds
+matching on the *actual source* behind each capability — embedded into vectors;
+the raw code is discarded after embedding, never retained. Self-host installs
+have it on by default; hosted is opt-in (`off` until the user enables it).
+
+When to act on it (don't volunteer otherwise):
+
+- The user asks to "use my actual code", "ground on the real implementation",
+  match more precisely, or asks why a match felt shallow → tell them Immersion
+  exists and, if they want it, run `npx replen immerse on` (opts in + sends).
+- Immersion is already on and the user has made material code changes this
+  session and wants the next matches to reflect them → run `npx replen immerse`
+  to refresh (cheap + a no-op when nothing changed — a content hash gates it).
+
+Keep it honest about the trust step: on hosted, enabling Immersion sends the
+grounded files to Replen to be embedded — same posture as the AI agent they're
+already using (transits, embedded, not kept), and strictly less exposure (only
+a vector persists). Never run `immerse on` for them without an explicit yes.
+
 ## Voice guide
 
 - **Concrete.** "Replaces `lib/foo.ts:42-180`" beats "could simplify

@@ -32,6 +32,7 @@ import { parseStoredFacetEmbeddings, parseStoredEmbedding, cosineSimilarity, nor
 import { deriveProductKey } from "../projects/product-key";
 import { louvain } from "./community";
 import { type Modality, type Provenance } from "../projects/modality";
+import { isCodeFacet } from "../projects/immersion";
 import { isNoiseFacetLabel, isGenericProbeFacetLabel } from "../projects/doc-sections";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
 
@@ -150,6 +151,11 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     }
 
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
+      // Immersion code-content facets (`tag :: path/to/file#N`) are matching
+      // signal only — never decision-unit nodes. The Atlas graph models
+      // capabilities/tools/candidates, NOT code units; a file path appears only
+      // as an evidence anchor ON a capability, never as a node of its own.
+      if (isCodeFacet(f)) continue;
       let label = f.label;
       let provenance = (f.provenance ?? "inferred") as Provenance;
       // Apply curation rules (regeneration-proof): delete drops the facet,

@@ -17,7 +17,8 @@ import { authenticate, corsHeaders } from "../../mcp/_auth";
 //         "githubFullName": "owner/name",   // required; from git remote
 //         "name": "Tech News Site",          // optional; defaults to slug
 //         "tags": ["typescript", "next.js"], // optional; deduped server-side
-//         "primaryLanguage": "TypeScript"    // optional
+//         "primaryLanguage": "TypeScript",   // optional
+//         "localPath": "/Users/me/code/foo"  // optional; absolute local path
 //       }
 //     ]
 //   }
@@ -42,6 +43,12 @@ type BulkProjectInput = {
   name?: string;
   tags?: string[];
   primaryLanguage?: string;
+  // Absolute path to the repo's LOCAL checkout on the machine running the CLI.
+  // Stored as metadata; only ever READ by the pipeline when this is a self-host
+  // install (server == user's machine) and Immersion is enabled. On hosted it
+  // is unreadable by the server and is retained purely as a display/identity
+  // hint. The synthetic "github:owner/name" path is never a localPath.
+  localPath?: string;
 };
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
@@ -93,6 +100,7 @@ export async function POST(req: Request) {
     name: string;
     tags: string[] | null;
     primaryLanguage: string | null;
+    localPath: string | null;
   };
   const cleaned: CleanInput[] = [];
   for (const p of body.projects) {
@@ -110,6 +118,13 @@ export async function POST(req: Request) {
     const lang = typeof p.primaryLanguage === "string" && p.primaryLanguage.trim().length > 0
       ? p.primaryLanguage.trim().slice(0, 40)
       : null;
+    // Local checkout path: accept only an absolute path; never the synthetic
+    // "github:" identity. Anything else is treated as absent (no row write).
+    const lp = typeof p.localPath === "string" ? p.localPath.trim() : "";
+    const localPath = lp.length > 0 && lp.length <= 512 && !lp.startsWith("github:")
+      && (lp.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(lp))
+      ? lp
+      : null;
     cleaned.push({
       slug,
       githubFullName: gfn,
@@ -122,6 +137,7 @@ export async function POST(req: Request) {
       })(),
       tags,
       primaryLanguage: lang,
+      localPath,
     });
   }
 
@@ -185,6 +201,7 @@ export async function POST(req: Request) {
           path,
           ...(tagsJson ? { tags: tagsJson } : {}),
           ...(c.primaryLanguage ? { primaryLanguage: c.primaryLanguage } : {}),
+          ...(c.localPath ? { localPath: c.localPath } : {}),
           updatedAt: now,
         })
         .where(eq(schema.projectProfiles.id, target.id));
@@ -210,6 +227,7 @@ export async function POST(req: Request) {
         llmProvider: "auto",
         ...(tagsJson ? { tags: tagsJson } : {}),
         ...(c.primaryLanguage ? { primaryLanguage: c.primaryLanguage } : {}),
+        ...(c.localPath ? { localPath: c.localPath } : {}),
         updatedAt: now,
       }).returning({ id: schema.projectProfiles.id });
       const newId = inserted[0]?.id ?? -1;

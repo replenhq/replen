@@ -17,7 +17,8 @@
 
 import { eq, gte, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
-import { cosineSimilarity, parseStoredEmbedding } from "../lib/embeddings";
+import { cosineSimilarity, parseStoredEmbedding, type FacetEmbedding } from "../lib/embeddings";
+import { isCodeFacet } from "../projects/immersion";
 import { KEEP_KINDS, type RepoKind } from "../catalogue/classify";
 import { isGloballyDemoted } from "../lib/repo-quality";
 
@@ -393,7 +394,16 @@ async function allProjectFacetVecs(userId: number): Promise<Map<string, number[]
   const m = new Map<string, number[][]>();
   for (const p of rows) {
     if (!p.facetEmbeddings) continue;
-    try { const o = JSON.parse(p.facetEmbeddings) as { facets?: Array<{ vec: number[] }> }; m.set(p.slug, (o.facets ?? []).map((f) => f.vec).filter(Array.isArray)); } catch { /* */ }
+    try {
+      const o = JSON.parse(p.facetEmbeddings) as { facets?: Array<{ vec: number[]; label?: string; paths?: string[] }> };
+      // Exclude Immersion code-content facets: Leaps bridges capabilities, not
+      // raw code chunks. Descriptor facets (their parent capability) stay in.
+      const vecs = (o.facets ?? [])
+        .filter((f) => !isCodeFacet(f as unknown as FacetEmbedding))
+        .map((f) => f.vec)
+        .filter(Array.isArray);
+      m.set(p.slug, vecs);
+    } catch { /* */ }
   }
   return m;
 }

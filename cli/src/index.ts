@@ -31,6 +31,11 @@ Usage:
                                npx replen vault me/drone=~/graphs/drone
                              \`npx replen vault --list\` shows configured vaults.
                              (--vault PATH also works on \`npx replen\` + sync.)
+  npx replen immerse [on|off] Ground matching on your ACTUAL code, not just
+       [status]              its description (hosted opt-in; self-host has it
+                             on by default). \`on\` opts in and sends; bare
+                             sends for an opted-in account. Vectors-only: your
+                             code is embedded server-side, then discarded.
   npx replen atlas           Write your knowledge graph as an owned,
                              Obsidian-compatible markdown vault to
                              ~/.replen/atlas/ (projects, capabilities,
@@ -198,6 +203,11 @@ async function main() {
     const { syncDiscoveredProjects } = await import("./sync-projects.js");
     await syncDiscoveredProjects({ token: cfg.token, base: cfg.base, explicitRoots });
     return;
+  }
+
+  if (cmd === "immerse") {
+    const { runImmerse } = await import("./immerse.js");
+    return runImmerse(argv.slice(1));
   }
 
   if (cmd === "run") return runRun(argv);

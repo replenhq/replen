@@ -320,7 +320,11 @@ export function projectEmbeddingText(input: {
 // multi-repo product (for attribution — "this match is for your acme-cv").
 // Undefined for the scoped repo's own facets.
 export type FacetEmbedding = { label: string; vec: number[]; repo?: string; modality?: import("../projects/modality").Modality[]; provenance?: import("../projects/modality").Provenance; paths?: string[] };
-export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[] };
+// `hash` covers the descriptor-facet inputs; `codeHash` (optional) is the
+// Immersion code-content-facet source hash — present only when self-host
+// Immersion has appended code facets, and gates re-embedding (unchanged source
+// ⇒ same codeHash ⇒ skip). serialise/parse round-trip it via JSON.
+export type StoredFacetEmbeddings = { hash: string; facets: FacetEmbedding[]; codeHash?: string };
 
 // Capability labels too generic to be useful probes — they'd match almost any
 // repo and reintroduce the firehose. Dropped before embedding. Kept minimal:
@@ -441,6 +445,17 @@ export function projectDomainContext(input: {
 
 export function serialiseFacetEmbeddings(v: StoredFacetEmbeddings): string {
   return JSON.stringify(v);
+}
+
+/** The stored Immersion code-facet source hash, or null. Used to gate re-embed. */
+export function parseFacetCodeHash(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as Partial<StoredFacetEmbeddings>;
+    return typeof o?.codeHash === "string" ? o.codeHash : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Parse the stored facet-embeddings blob. Returns [] on missing/malformed. */

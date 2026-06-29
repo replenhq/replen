@@ -9,6 +9,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { parseStoredEmbedding, parseStoredFacetEmbeddings } from "../lib/embeddings";
+import { isCodeFacet } from "../projects/immersion";
 
 export type MapPoint = { nodeKey: string; kind: string; x: number; y: number; z: number };
 
@@ -52,6 +53,7 @@ export async function computeSemanticMap(userId: number): Promise<MapPoint[]> {
     const centroid = parseStoredEmbedding(p.embedding ?? null);
     if (centroid) entries.push({ nodeKey: p.slug, kind: "project", vec: centroid });
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
+      if (isCodeFacet(f)) continue; // matching-only; not a point on the capability map
       const key = f.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       if (!key) continue;
       const acc = capSums.get(key) ?? { sum: new Array(f.vec.length).fill(0), n: 0, label: f.label };

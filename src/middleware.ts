@@ -172,6 +172,13 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname === "/api/triage" ||
     request.nextUrl.pathname.startsWith("/api/projects/") ||
     request.nextUrl.pathname.startsWith("/api/graph/") ||
+    // /api/immersion/*: hosted Immersion manifest + ingest, called by the
+    // local CLI / skill. Token auth (authenticate()) in each route's handler.
+    request.nextUrl.pathname.startsWith("/api/immersion/") ||
+    // /api/settings/immersion: token-authed Immersion opt-in for the CLI
+    // (the /settings web form uses the session-based settings routes). Scoped
+    // to this exact path so the session-auth settings routes stay protected.
+    request.nextUrl.pathname === "/api/settings/immersion" ||
     // /api/queue: token auth in the POST handler; /api/queue/add (email
     // links) authorises via its own HMAC signature — see queue-sign.ts.
     request.nextUrl.pathname === "/api/queue" ||
