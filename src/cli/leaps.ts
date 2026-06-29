@@ -15,7 +15,7 @@ async function main() {
   const limit = parseInt(arg("limit", "12") ?? "12", 10);
   const leaps = await computeLeaps(userId, { scopeProject, limit });
   console.log(`\nLeaps for user ${userId}${scopeProject ? ` · ${scopeProject}` : ""} (${leaps.length})\n${"=".repeat(60)}`);
-  const icon = { "cross-project": "↔", "adjacency": "→", "cross-user": "✦" } as const;
+  const icon = { "cross-project": "↔", "adjacency": "→", "cross-user": "✦", "vault": "🔖" } as const;
   for (const l of leaps) {
     console.log(`\n${icon[l.kind]} [${l.kind}] for ${l.forProject}  (score ${l.score.toFixed(2)})`);
     if (l.candidate) console.log(`  ${l.candidate}${l.stars ? ` · ${l.stars}★` : ""}`);

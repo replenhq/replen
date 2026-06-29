@@ -5,12 +5,14 @@
 // hash lets the pipeline skip rebuilds when nothing changed.
 //
 // Nodes:  project · product · capability · tool · candidate · suggestion ·
-//         goal · domain · lesson · boundary
+//         goal · domain · lesson · boundary · concept (vault decision-units)
 // Edges (within-user, all built here):
 //   MEMBER_OF      project   → product
 //   USES           project   → tool          {version}
 //   HAS_CAPABILITY project   → capability   {provenance, modality, paths}
 //   ADJACENT_TO    capability→ capability   {cosine}      (band: related-but-distinct)
+//   GROUNDS        concept   → capability   (a vault concept the cap grounds in)
+//   VAULT_LINK     concept   → concept       {rel}        (the user's own wikilinks)
 //   RELATES_TO     project   → project      {cosine, sharedCaps}
 //   EVALUATED      project   → candidate    {verdict, reasonCode, score, effort, oneLine, at}
 //   FILLS          candidate → capability   (from the matched facet at triage time)
@@ -44,6 +46,21 @@ const ADJ_HI = Math.min(1, parseFloat(process.env.REPLEN_GRAPH_ADJ_HI ?? "0.88")
 const ADJ_MAX_NEIGHBOURS = Math.max(1, parseInt(process.env.REPLEN_GRAPH_ADJ_MAX ?? "6", 10) || 6);
 // Project↔project relatedness threshold (centroid cosine).
 const RELATES_MIN = Math.max(0, parseFloat(process.env.REPLEN_GRAPH_RELATES_MIN ?? "0.55"));
+// A vault `same-as` link can fuse two capabilities ONLY if they're already this
+// close in embedding space — floored well below MERGE_MIN (0.92) but above
+// noise, so the vault can confirm a near-merge the cosine bar just missed, never
+// fabricate a merge of unrelated facets.
+const VAULT_MERGE_MIN = Math.min(1, Math.max(0.6, parseFloat(process.env.REPLEN_GRAPH_VAULT_MERGE_MIN ?? "0.80")));
+
+// Build-time defence-in-depth: a vault concept must be a decision unit, never a
+// code unit. The capabilities route already rejects these at the transport
+// layer; re-checking here means a misbehaving path can't seed an Atlas node.
+function looksLikeCodeUnit(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  if (t.includes("/") || t.includes("\\") || t.includes("::") || t.includes("#")) return true;
+  return /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|c|cc|cpp|cxx|h|hpp|cs|php|kt|kts|swift|scala|sql|sh|vue|svelte|json|ya?ml|toml)$/i.test(t);
+}
 
 type NodeDraft = { kind: string; nodeKey: string; label: string; data: Record<string, unknown> };
 type EdgeDraft = { kind: string; srcKey: string; dstKey: string; weight: number | null; data: Record<string, unknown> };
@@ -163,6 +180,55 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     for (const slug of members) edges.push({ kind: "MEMBER_OF", srcKey: nk("project", slug), dstKey: nk("product", productKey), weight: null, data: {} });
   }
 
+  // ── vault concepts: decision-unit structure from the user's Graphify /
+  //    Obsidian / ADR vault (summary_json.vaultConcepts), collected across
+  //    projects keyed by normalized title. Concept NODES are emitted after the
+  //    merge (below) so grounds resolve through capCanon; here we just collect
+  //    and derive the same-as merge hints (which the merge consumes). ──
+  type VaultConceptAgg = { title: string; groundsTags: Set<string>; links: Map<string, string | undefined>; projects: Set<string> };
+  const vaultConcepts = new Map<string, VaultConceptAgg>();
+  const vaultMergeHint = new Set<string>(); // "rawKeyA|rawKeyB" (sorted) — same-as only
+  for (const p of projects) {
+    if (!p.summaryJson) continue;
+    let vc: unknown;
+    try { vc = (JSON.parse(p.summaryJson) as { vaultConcepts?: unknown }).vaultConcepts; } catch { continue; }
+    if (!Array.isArray(vc)) continue;
+    for (const c of vc) {
+      if (!c || typeof c !== "object") continue;
+      const cc = c as { title?: unknown; grounds?: unknown; links?: unknown };
+      if (typeof cc.title !== "string") continue;
+      const title = cc.title.trim();
+      const tkey = norm(title);
+      if (!tkey || looksLikeCodeUnit(title)) continue;
+      const agg = vaultConcepts.get(tkey) ?? { title, groundsTags: new Set<string>(), links: new Map<string, string | undefined>(), projects: new Set<string>() };
+      agg.projects.add(p.slug);
+      if (Array.isArray(cc.grounds)) for (const g of cc.grounds) { if (typeof g === "string" && norm(g)) agg.groundsTags.add(norm(g)); }
+      if (Array.isArray(cc.links)) for (const l of cc.links) {
+        if (!l || typeof l !== "object") continue;
+        const ll = l as { to?: unknown; rel?: unknown };
+        if (typeof ll.to !== "string" || looksLikeCodeUnit(ll.to)) continue;
+        const toKey = norm(ll.to);
+        if (!toKey) continue;
+        if (!agg.links.has(toKey)) agg.links.set(toKey, typeof ll.rel === "string" ? ll.rel : undefined);
+      }
+      vaultConcepts.set(tkey, agg);
+    }
+  }
+  // same-as links hint that the capability TAGS the two concepts ground are the
+  // same capability. Hint is in raw facet-key space (norm(tag)) because capCanon
+  // isn't populated until the merge below; the merge ANDs a cosine floor onto it.
+  for (const agg of vaultConcepts.values()) {
+    for (const [toKey, rel] of agg.links) {
+      if (rel !== "same-as") continue;
+      const other = vaultConcepts.get(toKey);
+      if (!other) continue;
+      for (const a of agg.groundsTags) for (const b of other.groundsTags) {
+        if (a === b) continue;
+        vaultMergeHint.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+      }
+    }
+  }
+
   // ── capability merging: near-duplicate labels collapse into ONE node ──
   // Different projects phrase the same capability differently ("Firebase
   // Auth" / "Firebase Authentication"). Above MERGE_MIN cosine they ARE the
@@ -205,7 +271,10 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       for (let j = i + 1; j < keys.length; j++) {
         const cos = cosineSimilarity(centroid.get(keys[i])!, centroid.get(keys[j])!);
         if (!Number.isFinite(cos)) continue;
-        const isDup = cos >= MERGE_MIN || (cos >= MERGE_LEX_MIN && labelsSimilar(keys[i], keys[j]));
+        const vaultPair = keys[i] < keys[j] ? `${keys[i]}|${keys[j]}` : `${keys[j]}|${keys[i]}`;
+        const isDup = cos >= MERGE_MIN
+          || (cos >= MERGE_LEX_MIN && labelsSimilar(keys[i], keys[j]))
+          || (cos >= VAULT_MERGE_MIN && vaultMergeHint.has(vaultPair));
         if (isDup) {
           const ri = find(keys[i]); const rj = find(keys[j]);
           if (ri !== rj) parent.set(rj, ri);
@@ -267,6 +336,42 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
   for (const [key, aliases] of capAliases) {
     const n = nodes.get(nk("capability", key));
     if (n) n.data.aliases = aliases;
+  }
+
+  // ── vault concept layer: `concept` nodes + GROUNDS + VAULT_LINK ──
+  // A concept becomes a node ONLY if it grounds ≥1 tag that resolves (via
+  // capCanon) to an EMITTED capability node — that keeps the layer to real
+  // decision units and means a misbehaving agent can't inject a file/symbol.
+  // VAULT_LINK is emitted only between two emitted concept nodes (dangling
+  // links also auto-skip at insert time). Leaps hops these for goal (b).
+  {
+    const conceptGroundCaps = new Map<string, Set<string>>(); // norm(title) → canonical cap keys
+    for (const [tkey, agg] of vaultConcepts) {
+      const caps = new Set<string>();
+      for (const t of agg.groundsTags) {
+        const canon = capCanon.get(t) ?? t;
+        if (nodes.has(nk("capability", canon))) caps.add(canon);
+      }
+      if (caps.size === 0) continue; // grounds nothing real → not a decision unit we keep
+      addNode({ kind: "concept", nodeKey: tkey, label: agg.title, data: { title: agg.title, projects: [...agg.projects] } });
+      conceptGroundCaps.set(tkey, caps);
+    }
+    for (const [tkey, caps] of conceptGroundCaps) {
+      for (const canon of caps) {
+        edges.push({ kind: "GROUNDS", srcKey: nk("concept", tkey), dstKey: nk("capability", canon), weight: null, data: {} });
+      }
+    }
+    const seenLink = new Set<string>();
+    for (const [tkey, agg] of vaultConcepts) {
+      if (!conceptGroundCaps.has(tkey)) continue;
+      for (const [toKey, rel] of agg.links) {
+        if (toKey === tkey || !conceptGroundCaps.has(toKey)) continue;
+        const pair = tkey < toKey ? `${tkey}|${toKey}` : `${toKey}|${tkey}`;
+        if (seenLink.has(pair)) continue;
+        seenLink.add(pair);
+        edges.push({ kind: "VAULT_LINK", srcKey: nk("concept", tkey), dstKey: nk("concept", toKey), weight: null, data: rel ? { rel } : {} });
+      }
+    }
   }
 
   // ── ADJACENT_TO (capability ↔ capability, banded, top-K) ──
@@ -619,6 +724,13 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     // another user re-tagging can't churn this graph.
     d: [...domainProjects].filter(([, s]) => s.size >= 2).map(([tag, s]) => [tag, s.size]).sort(),
     i: insights.map((x) => [x.id, x.kind, x.appliesToProjectId, x.viaCandidateRepoId]).sort(),
+    // Stable vault-concept fingerprint — a sorted projection of titles, grounded
+    // tags, and links ONLY (not the whole summary_json, which churns on every
+    // write). Rebuilds fire when the vault changes (also serves open task #4)
+    // and stay quiet on unrelated summary edits.
+    vc: [...vaultConcepts.values()]
+      .map((a) => [norm(a.title), [...a.groundsTags].sort().join(","), [...a.links.entries()].map(([to, rel]) => `${to}:${rel ?? ""}`).sort().join(";")])
+      .sort(),
   });
   const hash = sha256(hashInput);
 

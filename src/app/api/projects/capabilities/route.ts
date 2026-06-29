@@ -6,8 +6,23 @@ import { capabilitiesFromDeps, mergeCapabilityTags } from "@/projects/capabiliti
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
 import { serialiseFacetEmbeddings } from "@/lib/embeddings";
-import { PROMPT_VERSION, reconcileCapabilities, type ProjectSummary } from "@/projects/summarize";
+import { PROMPT_VERSION, reconcileCapabilities, type ProjectSummary, type VaultConcept } from "@/projects/summarize";
 import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
+
+// A vault "concept" must be a decision-unit (capability/concept), NEVER a code
+// unit. This is the transport-layer guard (the third of three) — even if the
+// agent misbehaves, a file/symbol/function title can't become an Atlas node.
+const CODE_FILE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|c|cc|cpp|cxx|h|hpp|cs|php|kt|kts|swift|scala|sql|sh|vue|svelte|json|ya?ml|toml)$/i;
+function looksLikeCodeUnit(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  if (t.includes("/") || t.includes("\\")) return true; // path-like
+  if (t.includes("::") || t.includes("#")) return true;  // symbol / member / anchor
+  if (CODE_FILE_EXT.test(t)) return true;                // a filename
+  return false;
+}
+const VAULT_REL = new Set(["relates", "refines", "depends", "same-as", "contrast"]);
+const normConceptKey = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 // Phase 6 — in-session capability extraction. The onboarding skill reads the
 // open codebase and pushes the project's technical capabilities here, instead
@@ -21,7 +36,7 @@ import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "
 //
 // Project resolution is owner-tolerant (exact github_full_name, then repo name).
 
-type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown; mode?: unknown };
+type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown; mode?: unknown; concepts?: unknown };
 
 // Cap the stored report so a runaway agent can't write megabytes.
 const MAX_REPORT_CHARS = 24_000;
@@ -175,6 +190,49 @@ export async function POST(req: Request) {
       .filter((g): g is string => typeof g === "string" && !!g.trim())
       .slice(0, 8)
       .map((g) => ({ statement: g.trim().slice(0, 200), source: "user" as const, confidence: "high" as const }));
+  }
+
+  // Vault concept structure (optional) — the decision-unit nodes + wikilinks the
+  // agent lifted from a Graphify/Obsidian/ADR vault. Sanitize hard: drop any
+  // code-unit-shaped title/link (path, symbol, filename), cap lengths, dedup by
+  // normalized title. Only touched when `concepts` is actually provided, so a
+  // mode='merge' triage call (or any call without concepts) never wipes them.
+  if (Array.isArray(body.concepts)) {
+    const parsedConcepts: VaultConcept[] = [];
+    const seen = new Set<string>();
+    for (const c of (body.concepts as unknown[]).slice(0, 60)) {
+      if (!c || typeof c !== "object") continue;
+      const cc = c as Record<string, unknown>;
+      const title = typeof cc.title === "string" ? cc.title.trim().slice(0, 120) : "";
+      if (!title || looksLikeCodeUnit(title)) continue;
+      const key = normConceptKey(title);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const grounds = Array.isArray(cc.grounds)
+        ? (cc.grounds as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 12)
+        : undefined;
+      const links = Array.isArray(cc.links)
+        ? (cc.links as unknown[])
+            .map((l) => (l && typeof l === "object" ? (l as Record<string, unknown>) : null))
+            .filter((l): l is Record<string, unknown> => !!l && typeof l.to === "string")
+            .map((l) => {
+              const to = (l.to as string).trim().slice(0, 120);
+              const rel = typeof l.rel === "string" && VAULT_REL.has(l.rel) ? (l.rel as NonNullable<VaultConcept["links"]>[number]["rel"]) : undefined;
+              return { to, rel };
+            })
+            .filter((l) => l.to && !looksLikeCodeUnit(l.to))
+            .slice(0, 20)
+        : undefined;
+      parsedConcepts.push({ title, grounds: grounds?.length ? grounds : undefined, links: links?.length ? links : undefined });
+    }
+    if (body.mode === "merge" && Array.isArray(summary.vaultConcepts)) {
+      const byTitle = new Map<string, VaultConcept>();
+      for (const v of summary.vaultConcepts) byTitle.set(normConceptKey(v.title), v);
+      for (const v of parsedConcepts) byTitle.set(normConceptKey(v.title), v);
+      summary.vaultConcepts = [...byTitle.values()];
+    } else {
+      summary.vaultConcepts = parsedConcepts;
+    }
   }
 
   // The agent's grounded project report (optional) — stored as an additional

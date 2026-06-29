@@ -410,6 +410,31 @@ const TOOLS: Tool[] = [
             ],
           },
         },
+        concepts: {
+          type: "array",
+          description:
+            "OPTIONAL: concept/entity nodes lifted from a knowledge-graph vault (Graphify / Obsidian / ADRs) you grounded from — the decision-unit STRUCTURE, so Replen can traverse YOUR graph for cross-repo leaps. ONLY concept/entity note titles — NEVER file/symbol/function/class/module notes, never note bodies, never file paths (those ride a capability's `paths`). Each: {title, grounds:[capability tags this concept grounded], links:[{to:<other concept title>, rel}]}. rel is one of relates|refines|depends|same-as|contrast. Respect the cover — sanitize titles, no codenames.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Concept/entity note title — never a file/symbol path" },
+              grounds: { type: "array", items: { type: "string" }, description: "Capability tags (matching `capabilities`) this concept note grounded" },
+              links: {
+                type: "array",
+                description: "Wikilinks to other concept notes",
+                items: {
+                  type: "object",
+                  properties: {
+                    to: { type: "string", description: "Title of the linked concept note" },
+                    rel: { type: "string", enum: ["relates", "refines", "depends", "same-as", "contrast"] },
+                  },
+                  required: ["to"],
+                },
+              },
+            },
+            required: ["title"],
+          },
+        },
       },
       required: ["capabilities"],
     },
@@ -429,6 +454,14 @@ const TOOLS: Tool[] = [
             paths: z.array(z.string()).max(5).optional(),
           }),
         ])).max(40),
+        concepts: z.array(z.object({
+          title: z.string(),
+          grounds: z.array(z.string()).max(12).optional(),
+          links: z.array(z.object({
+            to: z.string(),
+            rel: z.enum(["relates", "refines", "depends", "same-as", "contrast"]).optional(),
+          })).max(20).optional(),
+        })).max(60).optional(),
         mode: z.enum(["replace", "merge"]).optional(),
       }).parse(args);
       if (!parsed.repo && parsed.repoId === undefined) {

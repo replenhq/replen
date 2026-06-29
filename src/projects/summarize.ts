@@ -99,11 +99,28 @@ export type ProjectSummary = {
     detected: string[];
   };
 
+  // Optional: concept/entity nodes lifted from a user-pointed knowledge-graph
+  // vault (Graphify / Obsidian / ADRs) during onboarding — the decision-unit
+  // STRUCTURE, never code units. Each concept carries the capability tags it
+  // grounded plus its wikilinks to other concepts (rel = how they relate).
+  // build.ts turns these into `concept` nodes + GROUNDS/VAULT_LINK edges and
+  // Leaps traverses them. Titles + relation strings only ever leave the
+  // machine — never note bodies, file paths, or code (see CLAUDE.md privacy).
+  vaultConcepts?: VaultConcept[];
+
   // Metadata for the UI + debugging.
   generatedAt: string;
   sourceFiles: string[];
   llmModel: string;
   promptVersion: string;
+};
+
+export type VaultConcept = {
+  title: string;
+  // Capability tags (matching capabilityTags) this concept note grounded.
+  grounds?: string[];
+  // Wikilinks to other concept notes, with the asserted relationship kind.
+  links?: { to: string; rel?: "relates" | "refines" | "depends" | "same-as" | "contrast" }[];
 };
 
 export type SummarizeInput = {

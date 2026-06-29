@@ -175,6 +175,15 @@ code only to VERIFY (the vault may be stale); don't re-derive what it already
 holds. Privacy is unchanged: only capabilities/descriptors/paths/tags leave
 the machine, exactly as with a code-read — never vault content or code.
 
+**Use the note→note `[[wikilinks]]` BETWEEN concept/entity notes as capability-
+BOUNDARY evidence** (today you only follow note→FILE links, for `paths`). A tight
+same-as cluster of concepts → emit ONE capability tag (don't split a thing the
+user models as one). A concept fanning out to distinct linked clusters → split
+into the concrete techniques (this is the 2d "break broad capabilities" move,
+now backed by the user's own structure). A typed/deliberate cross-link between
+two distinct concepts → keep them as two RELATED tags. Then, if the vault gave
+you this structure, assemble the optional `concepts` array described in 2d.
+
 ### 2a. Read the code (not just the README)
 
 Read enough source to actually understand the project: entry points, the core
@@ -268,6 +277,18 @@ strings. Each is `{tag, descriptor, modality}`:
 Break broad capabilities into the concrete techniques the code uses. Be
 specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
 
+**If you grounded from a vault (2a-pre), also assemble a `concepts` array** so
+Replen can traverse the user's OWN graph for cross-repo leaps. For each
+concept/entity note — **NEVER a file/symbol/function/class/module note** — emit
+`{title, grounds: [the capability tags this note grounded], links: [{to: <other
+concept title>, rel}]}` where `rel` is one of `relates | refines | depends |
+same-as | contrast`. Pass it to `replen_set_capabilities` in 2e (it's optional —
+omit it entirely if there's no vault). Hard rules (already true for everything
+else, restated because this is new structure leaving the machine): lift only
+concept/capability-LEVEL notes; note BODIES and code never leave; a note→file
+link stays as a capability `path`, never a concept link; respect the cover —
+sanitize titles, no codenames.
+
 **Also capture architectural PRACTICES as capabilities.** Beyond what the code
 *does*, note the distinctive structural *moves* it makes — these are what let
 Replen suggest a pattern to your OTHER projects ("acme made its domain model
@@ -333,6 +354,10 @@ typed properties, computed properties as rows", never the entity names).
    Paths only, never code. You just read these files; recording WHERE each
    capability lives lets Replen point another of the user's projects straight
    at the implementation worth porting ("acme solved this — see src/cv/…").
+   **If you grounded from a vault, also pass the `concepts` array from 2d** —
+   concept titles + their `[[wikilinks]]` only (never file/symbol notes, never
+   bodies). Replen turns these into graph nodes + your-own-graph leaps. Omit it
+   when there's no vault.
 4. **Report pinned versions** with `replen_set_versions` — the resolved DIRECT
    dependency versions from the lockfile (package-lock.json / poetry.lock /
    uv.lock / Cargo.lock), plus runtimes under canonical keys (`node` from

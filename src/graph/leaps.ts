@@ -10,6 +10,10 @@
 //      distinct (not a synonym), with the best catalogue repo that fills it.
 //   3. cross-user endorsement — a repo that scored adopt/port across ≥K other
 //      users whose projects look like yours, that you haven't evaluated. k-anon.
+//   4. vault-bridge — hops the user's OWN wikilinks (concept→concept) from a
+//      capability they have to a related one they don't, pointing at the repo
+//      another of their projects adopted for it (or a catalogue fill). The one
+//      generator that rides the user's asserted graph, not embedding cosine.
 
 import { eq, gte, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
@@ -36,9 +40,16 @@ const CROSS_USER_BONUS = Math.max(0, parseFloat(process.env.REPLEN_LEAP_XUSER_BO
 const CROSS_USER_K = Math.max(2, parseInt(process.env.REPLEN_LEAP_XUSER_K ?? "3", 10) || 3);
 const XUSER_SIM_MIN = Math.max(0, parseFloat(process.env.REPLEN_LEAP_XUSER_SIM ?? "0.55"));
 const PROVENANCE_W: Record<string, number> = { grounded: 1.0, extracted: 0.9, inferred: 0.75, ambiguous: 0.4 };
+// Trust weight for vault-bridge leaps. VAULT_LINK carries an ASSERTED relation
+// with no embedding similarity, so it gets its own base weight (not the cosine
+// LEAP_ADJ band). Kept modest so cosine-grounded leaps still rank above it.
+const LEAP_VAULT_W = Math.max(0, parseFloat(process.env.REPLEN_LEAP_VAULT_W ?? "0.7"));
+// Cap vault leaps per project so a densely-wikilinked vault can't flood the
+// queue (calm-cadence contract: 1-3 actionable matches/project/month).
+const LEAP_VAULT_PER_PROJECT = Math.max(1, parseInt(process.env.REPLEN_LEAP_VAULT_CAP ?? "2", 10) || 2);
 
 export type Leap = {
-  kind: "cross-project" | "adjacency" | "cross-user";
+  kind: "cross-project" | "adjacency" | "cross-user" | "vault";
   forProject: string;        // slug the leap is for
   capability: string;        // capability at the heart of the leap
   candidate: string | null;  // owner/name to bring in (null = use your own approach)
@@ -104,6 +115,21 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
     const cand = candNodeById.get(e.dstId);
     if (cand) evaluatedFullNames.add(norm(String(cand.data.fullName ?? cand.label)));
     if (verdict === "adopt" || verdict === "port") { const a = projAdopted.get(e.srcId) ?? []; a.push({ cand: e.dstId, verdict }); projAdopted.set(e.srcId, a); }
+  }
+  // vault concept layer (goal b): GROUNDS (concept→capability) + VAULT_LINK
+  // (concept↔concept). Indexed with their OWN trust weight, NOT the cosine
+  // adjacency band — these are the user's asserted relations.
+  const conceptGroundsCap = new Map<number, Set<number>>(); // conceptId → capIds
+  const capGroundedBy = new Map<number, Set<number>>();      // capId → conceptIds
+  for (const e of edges) if (e.kind === "GROUNDS") {
+    (conceptGroundsCap.get(e.srcId) ?? conceptGroundsCap.set(e.srcId, new Set()).get(e.srcId)!).add(e.dstId);
+    (capGroundedBy.get(e.dstId) ?? capGroundedBy.set(e.dstId, new Set()).get(e.dstId)!).add(e.srcId);
+  }
+  const conceptLinks = new Map<number, Array<{ concept: number; rel?: string }>>(); // undirected
+  for (const e of edges) if (e.kind === "VAULT_LINK") {
+    const rel = typeof e.data.rel === "string" ? e.data.rel : undefined;
+    (conceptLinks.get(e.srcId) ?? conceptLinks.set(e.srcId, []).get(e.srcId)!).push({ concept: e.dstId, rel });
+    (conceptLinks.get(e.dstId) ?? conceptLinks.set(e.dstId, []).get(e.dstId)!).push({ concept: e.srcId, rel });
   }
 
   // Prebuild the catalogue capability index ONCE. This used to be a full
@@ -215,20 +241,86 @@ export async function computeLeaps(userId: number, opts: { scopeProject?: string
     }
   }
 
+  // ── Generator 4: vault-bridge (graph-only; hops the user's OWN wikilinks) ──
+  // The vault asserts concept↔concept relations a cosine matcher can't see.
+  // Path: project P has cap K → concept(s) grounding K → VAULT_LINK neighbour
+  // concept C' → cap K' that C' grounds (and P lacks). If another project Q has
+  // K', that's a transfer along the user's own structure (point at what Q
+  // adopted); else fill K' from the catalogue. `same-as` links are skipped (that
+  // collapses into one capability at build time — it's not a bridge to a new one).
+  for (const pid of projectIds) {
+    const pcaps = projHasCap.get(pid); if (!pcaps) continue;
+    // capId(K) → kPrimeId(K') → the wikilink path that bridged them
+    const bridged = new Map<number, Map<number, { fromConcept: string; toConcept: string; rel?: string }>>();
+    for (const capId of pcaps.keys()) {
+      for (const conceptId of capGroundedBy.get(capId) ?? []) {
+        const fromConcept = byId.get(conceptId)?.label ?? "";
+        for (const { concept: c2, rel } of conceptLinks.get(conceptId) ?? []) {
+          if (rel === "same-as") continue;
+          const toConcept = byId.get(c2)?.label ?? "";
+          for (const kPrime of conceptGroundsCap.get(c2) ?? []) {
+            if (kPrime === capId || isSynonymOfProject(kPrime, pcaps)) continue;
+            const m = bridged.get(capId) ?? bridged.set(capId, new Map()).get(capId)!;
+            if (!m.has(kPrime)) m.set(kPrime, { fromConcept, toConcept, rel });
+          }
+        }
+      }
+    }
+    for (const [capId, kPrimes] of bridged) {
+      const kLabel = capById.get(capId)?.label ?? "";
+      for (const [kPrimeId, path] of kPrimes) {
+        const kPrime = capById.get(kPrimeId); if (!kPrime) continue;
+        // Another of the user's projects that has K' (point at what it adopted)?
+        let donor: number | null = null;
+        for (const q of capHasProj.get(kPrimeId) ?? []) {
+          if (q === pid || sameProduct(pid, q)) continue;
+          donor = q; break;
+        }
+        let candidate: string | null = null, url: string | null = null, stars: number | null = null;
+        let sourceProject: string | null = null, candBacked = false;
+        if (donor != null) {
+          sourceProject = slugOf(donor);
+          const adoptedThere = (projAdopted.get(donor) ?? []).find((x) => fills.get(x.cand)?.has(kPrimeId));
+          const candNode = adoptedThere ? candNodeById.get(adoptedThere.cand) : null;
+          if (candNode) { candidate = String(candNode.data.fullName ?? candNode.label); url = (candNode.data.url as string) ?? null; stars = (candNode.data.stars as number) ?? null; candBacked = true; }
+        } else {
+          const cat = catByCap.get(kPrime.label.toLowerCase());
+          if (!cat) continue; // nothing actionable to point at
+          candidate = cat.fullName; url = cat.url; stars = cat.stars;
+        }
+        const key = `vault:${pid}:${kPrimeId}:${candidate ? norm(candidate) : kPrimeId}`;
+        if (seen.has(key)) continue; seen.add(key);
+        const wikilink = path.fromConcept && path.toConcept ? `via your vault: [[${path.fromConcept}]] → [[${path.toConcept}]]; ` : "";
+        const via = sourceProject
+          ? `${wikilink}${kLabel} relates to ${kPrime.label}, which you ${candBacked ? "brought into" : "have in"} ${sourceProject} but ${slugOf(pid)} doesn't have`
+          : `${wikilink}${kLabel} relates to ${kPrime.label} (not in ${slugOf(pid)} yet); ${candidate} fills it`;
+        leaps.push({
+          kind: "vault", forProject: slugOf(pid), capability: kPrime.label,
+          candidate, url, stars, sourceProject, usersEndorsed: null, via,
+          score: LEAP_VAULT_W * (candBacked ? CANDIDATE_BACKED_MULT : 1),
+        });
+      }
+    }
+  }
+
   leaps.sort((a, b) => b.score - a.score);
-  // Diversify: cap per project (≤4), and cap per (project, source) pair (≤2) so a
-  // single related project doesn't fill a project's slots with near-identical lines.
+  // Diversify: cap per project (≤4), cap per (project, source) pair (≤2), and a
+  // tighter per-project cap on vault leaps so a densely-wikilinked vault can't
+  // crowd out the cosine-grounded generators.
   const perProject = new Map<string, number>();
   const perPair = new Map<string, number>();
+  const perVault = new Map<string, number>();
   const out: Leap[] = [];
   for (const l of leaps) {
     const n = perProject.get(l.forProject) ?? 0;
     if (n >= 4) continue;
+    if (l.kind === "vault" && (perVault.get(l.forProject) ?? 0) >= LEAP_VAULT_PER_PROJECT) continue;
     const pairKey = `${l.forProject}|${l.kind}|${l.sourceProject ?? ""}`;
     const pn = perPair.get(pairKey) ?? 0;
     if (l.kind === "cross-project" && pn >= 2) continue;
     perProject.set(l.forProject, n + 1);
     perPair.set(pairKey, pn + 1);
+    if (l.kind === "vault") perVault.set(l.forProject, (perVault.get(l.forProject) ?? 0) + 1);
     out.push(l);
     if (out.length >= limit) break;
   }
