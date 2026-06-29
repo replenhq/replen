@@ -17,6 +17,7 @@ import { looksLikeHype } from "./derive-capabilities";
 import { classifyRepos, KEEP_KINDS, type RepoKind } from "./classify";
 import { type Modality } from "../projects/modality";
 import { readRunOrEnv } from "../analyzer/run-context";
+import { testUserIds } from "../lib/test-cohort";
 
 const MIN_STARS = Math.max(0, parseInt(process.env.REPLEN_CATALOGUE_MIN_STARS ?? "80", 10) || 80);
 const PER_CAPABILITY = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_PER_CAPABILITY ?? "8", 10) || 8);
@@ -179,6 +180,10 @@ export async function promoteCandidatesToCatalogue(): Promise<{ promoted: number
   const ghToken = readRunOrEnv("githubToken", "GITHUB_TOKEN");
 
   // Distinct-user count per GitHub repo across the whole candidate pool.
+  // Test-cohort users are EXCLUDED from the count (same cross-user invariant as
+  // refreshCatalogueStep): a synthetic cohort we control must never be able to
+  // push a repo over the K threshold into the shared catalogue.
+  const testUids = await testUserIds();
   const rows = await db
     .select({ githubUrl: schema.candidates.githubUrl, userId: schema.candidates.userId })
     .from(schema.candidates)
@@ -186,7 +191,7 @@ export async function promoteCandidatesToCatalogue(): Promise<{ promoted: number
   const byRepo = new Map<string, Set<number>>();
   for (const r of rows) {
     const m = r.githubUrl?.toLowerCase().match(/github\.com\/([^/]+\/[^/#?]+)/);
-    if (!m || r.userId == null) continue;
+    if (!m || r.userId == null || testUids.has(r.userId)) continue;
     const fn = m[1].replace(/\.git$/, "");
     let s = byRepo.get(fn);
     if (!s) { s = new Set(); byRepo.set(fn, s); }

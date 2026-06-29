@@ -13,7 +13,7 @@
 // from summarize/classify (no LLM). The only server cost is the embedding call,
 // exactly like the descriptor-facet build.
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, realpathSync } from "node:fs";
 import { resolve, relative, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { DEFAULT_CODE_EXTENSIONS } from "../lib/repo-index/walker";
@@ -27,7 +27,12 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const MAX_FILE_BYTES = 1_000_000;
 // Re-apply the loader's secret deny-list at read time, EVEN IF the agent listed
 // such a path as evidence — a credential file must never be read or embedded.
-const SECURITY_DENY = [".env", ".pem", ".key", ".p12", ".pfx", ".asc", "credentials", "secrets/", "id_rsa", "id_ed25519"];
+// Matched per path SEGMENT (not raw substring), so a top-level `secrets.ts` or a
+// `secret_key.py` is caught, not only a `secrets/` directory.
+const SECURITY_DENY = [
+  ".env", ".pem", ".key", ".p12", ".pfx", ".asc", ".crt", ".pgpass", ".netrc",
+  "credentials", "secrets", "secret", "id_rsa", "id_ed25519",
+];
 // Bound the work: total code-facets appended per project, and chunks per file.
 const MAX_CODE_FACETS = Math.max(0, parseInt(process.env.REPLEN_IMMERSION_MAX_FACETS ?? "60", 10) || 60);
 const MAX_CHUNKS_PER_FILE = Math.max(1, parseInt(process.env.REPLEN_IMMERSION_MAX_CHUNKS_PER_FILE ?? "6", 10) || 6);
@@ -73,18 +78,33 @@ export function parentCapabilityLabel(label: string): string {
 }
 
 function isDenied(rel: string): boolean {
-  const low = rel.toLowerCase();
-  return SECURITY_DENY.some((d) => low.includes(d));
+  const segs = rel.toLowerCase().split(/[/\\]/);
+  // Any path segment (a directory name OR the filename) containing a denied
+  // token blocks the read — covers `secrets/x.py`, `secrets.ts`, `app.env`.
+  return segs.some((s) => SECURITY_DENY.some((d) => s.includes(d)));
 }
 
 // Resolve a capability path under the repo root, refusing anything that escapes
-// it (`..`, absolute paths, symlink-style traversal collapses via resolve()).
+// it. resolve() collapses `..` and absolute paths but does NOT follow symlinks,
+// so we ALSO realpath the target and re-check containment — otherwise an in-repo
+// symlink pointing at /etc/passwd would pass the lexical check and be read.
 function safeResolve(root: string, p: string): string | null {
   const cleaned = p.trim().replace(/^[/\\]+/, "");
   if (!cleaned) return null;
   const abs = resolve(root, cleaned);
   if (abs !== root && !abs.startsWith(root + "/")) return null;
-  return abs;
+  try {
+    // realpath CHECK only (resolves symlinks); return the lexical `abs` so the
+    // caller's relative(root, abs) stays correct (root itself may be under a
+    // symlinked prefix, e.g. macOS /var -> /private/var). Reading abs follows
+    // the same links to the same file.
+    const real = realpathSync(abs);
+    const realRoot = realpathSync(root);
+    if (real !== realRoot && !real.startsWith(realRoot + "/")) return null; // symlink escapes the tree
+    return abs;
+  } catch {
+    return null; // missing / broken / unreadable — skip silently
+  }
 }
 
 export type CodeFacetResult = {

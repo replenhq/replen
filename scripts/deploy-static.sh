@@ -38,6 +38,8 @@ rsync_site() {
     --exclude='AGENTS.md' \
     --exclude='CLAUDE.md' \
     --exclude='GEMINI.md' \
+    --exclude='.env' \
+    --exclude='.env.*' \
     "$src/" "$REMOTE:$dest/"
   echo "[$label] done"
 }

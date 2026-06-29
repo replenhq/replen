@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { sql } from "drizzle-orm";
 import { getEmbeddingHealth } from "@/lib/embeddings";
-import { keystoneCoverage } from "@/lib/keystone";
 
 // Liveness + readiness probe for uptime monitors (UptimeRobot,
 // BetterStack, Cloudflare Health Checks) and on-host healthchecks.
@@ -29,21 +28,23 @@ export async function GET() {
     // candidates/facets silently stop getting vectors. We still return 200 (the
     // process IS live + serving), but flag `embeddings` so monitors/operators
     // can alert on a degraded-but-up state instead of discovering it weeks later.
+    // Coarse embedding health only (no raw provider error text). A public probe
+    // shouldn't leak upstream error bodies or internal ontology counts — those
+    // moved off this endpoint; operators read detail from an authed surface.
     const emb = getEmbeddingHealth();
     const embedding = emb.ok
-      ? { ok: true, lastSuccessAt: emb.lastSuccessAt }
-      : { ok: false, quotaExhausted: emb.lastFailure?.quotaExhausted ?? false, since: emb.lastFailure?.at ?? null, message: emb.lastFailure?.message };
-    // Keystone coverage — what the ontology actually knows. Visible here so an
-    // unseeded layer (e.g. 0 algorithm edges) is obvious, not silently inert.
-    let keystone: Awaited<ReturnType<typeof keystoneCoverage>> | { error: string };
-    try { keystone = await keystoneCoverage(); } catch (e) { keystone = { error: e instanceof Error ? e.message : String(e) }; }
+      ? { ok: true }
+      : { ok: false, quotaExhausted: emb.lastFailure?.quotaExhausted ?? false };
     return NextResponse.json(
-      { ok: true, db: "ok", dbMs, embedding, keystone, at: new Date().toISOString() },
+      { ok: true, db: "ok", dbMs, embedding, at: new Date().toISOString() },
       { status: 200, headers: { "cache-control": "no-store" } },
     );
   } catch (e) {
+    // Log the detail server-side; return a static reason (no DB path / driver
+    // error string to a public probe).
+    console.error("[healthz] db check failed:", e instanceof Error ? e.message : String(e));
     return NextResponse.json(
-      { ok: false, db: "error", error: e instanceof Error ? e.message : String(e), at: new Date().toISOString() },
+      { ok: false, db: "error", error: "db unreachable", at: new Date().toISOString() },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }

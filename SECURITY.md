@@ -125,6 +125,21 @@ process that doesn't go through a browser preflight at all. Browser
 cross-origin calls therefore fail at preflight even with a stolen token —
 the token check is defence in depth, not the only line.
 
+## Security posture
+
+Replen is built so that its most sensitive guarantees are enforced by architecture, not convention:
+
+- **No server-side per-candidate reasoning.** The expensive per-candidate analysis runs inside your own AI tool's session, never on the server, so there is no server-side model call to inject into or run up a bill on.
+- **Source code stays on your machine.** Out of the box the server sees repository identity, your curated tags, and aggregate signal only. The optional hosted code-grounding tier sends source to an embedding provider purely to turn it into numeric vectors, then discards it; only the vectors persist, never source at rest.
+- **Credentials are protected at rest.** Access tokens are stored only as hashes and looked up by hash. Per-user secrets (GitHub tokens, webhook URLs, model keys) are encrypted with per-user keys wrapped by a master key, with the account identity bound into each record so ciphertexts cannot be transplanted between accounts.
+- **Strong tenant isolation.** Every authenticated read and write is scoped to the authenticated account, and client-supplied identifiers are re-validated against that account before any change.
+- **Anonymity on shared data.** The cross-user catalogue carries no account identity and no code. A capability term is shared only when it is a generic seed term or independently present for enough distinct accounts, and synthetic test accounts are excluded from these aggregates.
+- **External content is data, not instructions.** Third-party repository content (READMEs, descriptions, file contents) is treated as untrusted data to evaluate, both in the server-side analysis and on the in-session triage path, so it cannot steer your agent.
+- **Standard web defenses in depth.** Parameterized database access, validated and address-pinned outbound requests, a strict nonce-based content security policy, transport security, and secure signed session cookies are applied centrally.
+
+The project is reviewed adversarially on a recurring basis. Findings are triaged by severity, material findings are resolved promptly, and remaining low-severity items are tracked as hardening. We do not publish exploit-enabling specifics; please report anything you find via the process above.
+
 ## Past audits
 
+- 2026-06-29: full adversarial review covering the server, MCP server, CLI, every API endpoint, the prompt-injection / agent-trust boundary, cross-user privacy, secret handling, and infrastructure. 1 high, 1 medium, 10 low, 4 informational; no critical findings. Material findings resolved in commits dated 2026-06-29; remaining low-severity items tracked as hardening. See git log for the granular changes.
 - 2026-05-15: full internal audit. 2 critical + 5 high + 7 medium findings, all addressed in commits dated 2026-05-15 through 2026-05-16. See git log for the granular changes.

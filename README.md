@@ -25,7 +25,7 @@
 </div>
 
 <p align="center">
-  <a href="https://replen.dev"><img src="assets/replen-demo.gif" alt="Replen in a Claude Code session — surfacing a match, triaging it against the real code, and porting the one worth porting" width="820"></a>
+  <a href="https://replen.dev"><img src="assets/replen-demo.gif" alt="Replen in a Claude Code session: surfacing a match, triaging it against the real code, and porting the one worth porting" width="820"></a>
 </p>
 
 ---
@@ -59,21 +59,21 @@ The loop: Atlas records what you build, Brainstem matches it against what Watcht
 
 Three steps: **install → onboard → use.**
 
-### 1. Install — `npx replen`
+### 1. Install: `npx replen`
 
 ```bash
 npx replen
 ```
 
-One command, ~60 seconds: signs you in (Google / GitHub / email link), asks **which repos to include** (all — the default — a subset, or none for now), and wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server plus the `/replen` + `/replen-onboard` skills into Claude Code / Codex / Gemini. It also auto-extracts tags from each repo's manifests and drops a small "Replen integration" section into each included project's `CLAUDE.md` / `AGENTS.md`. No API key, no GitHub PAT, no manual project setup. (Repo discovery details and non-conventional-folder handling are in [How repo discovery works](#how-repo-discovery-works) below.)
+One command, ~60 seconds: signs you in (Google / GitHub / email link), asks **which repos to include** (all (the default), a subset, or none for now), and wires the [@replen/mcp](https://www.npmjs.com/package/@replen/mcp) server plus the `/replen` + `/replen-onboard` skills into Claude Code / Codex / Gemini. It also auto-extracts tags from each repo's manifests and drops a small "Replen integration" section into each included project's `CLAUDE.md` / `AGENTS.md`. No API key, no GitHub PAT, no manual project setup. (Repo discovery details and non-conventional-folder handling are in [How repo discovery works](#how-repo-discovery-works) below.)
 
-### 2. Onboard — `/replen-onboard` (one-time)
+### 2. Onboard: `/replen-onboard` (one-time)
 
-Open Claude Code in your work and run `/replen-onboard` — the agent also **offers it automatically on your first session**, so you don't have to remember it. It reads each repo and builds a **grounded profile** (capabilities + a project report) so matches are relevant to what you actually build, not a generic trending list. Runs autonomously in the background; once per project.
+Open Claude Code in your work and run `/replen-onboard`. The agent also **offers it automatically on your first session**, so you don't have to remember it. It reads each repo and builds a **grounded profile** (capabilities + a project report) so matches are relevant to what you actually build, not a generic trending list. Runs autonomously in the background; once per project.
 
-### 3. Use — just work
+### 3. Use: just work
 
-Carry on coding. `/replen` triages today's matches for the current repo — a verdict and effort estimate per candidate, against your code — and otherwise Replen drops a calm one-line note in your AI tool's reply when something genuinely fits. Silent on quiet days.
+Carry on coding. `/replen` triages today's matches for the current repo (a verdict and effort estimate per candidate, against your code) and otherwise Replen drops a calm one-line note in your AI tool's reply when something genuinely fits. Silent on quiet days.
 
 ### How repo discovery works
 
@@ -81,7 +81,7 @@ Replen finds your projects by locating **git repos** (directories containing a `
 
 1. A `--root <path>` flag you pass explicitly
 2. The `REPLEN_PROJECT_ROOTS` env var (colon-separated dirs)
-3. **Walk-up from the current directory** — if you run `npx replen` from inside a repo (or one of its subfolders), Replen finds that repo and scans its parent folder for siblings
+3. **Walk-up from the current directory**: if you run `npx replen` from inside a repo (or one of its subfolders), Replen finds that repo and scans its parent folder for siblings
 4. Repos you've opened in Claude Code (`~/.claude.json`)
 5. Conventional folders: `~/github`, `~/code`, `~/projects`, `~/dev`, `~/src`, `~/work`
 6. An interactive prompt asking where your code lives
@@ -108,7 +108,7 @@ For self-host: `REPLEN_BASE=https://replen.your-domain.dev npx replen`.
 
 Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen mcp setup` · `replen logout` · `replen uninstall` · `replen --help`.
 
-**Backing out:** `npx replen uninstall` reverses every local change — the MCP wiring (Claude / Codex / Gemini), the installed skills, the per-repo `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` integration blocks, and `~/.replen`. It asks before each category (nothing is removed without a yes; `--dry-run` previews). It only touches this machine — your server-side profile is deleted separately from the dashboard.
+**Backing out:** `npx replen uninstall` reverses every local change: the MCP wiring (Claude / Codex / Gemini), the installed skills, the per-repo `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` integration blocks, and `~/.replen`. It asks before each category (nothing is removed without a yes; `--dry-run` previews). It only touches this machine. Your server-side profile is deleted separately from the dashboard.
 
 ## What it does
 
@@ -127,19 +127,19 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
 - **🔭 Projects that fit a capability you have.** Scored against what your repo actually does. A CV library for your vision pipeline, a backtesting framework for your trading bot, an algorithm worth porting into a file you maintain. Drawn from a capability catalogue that sharpens with every project. *(See the example below.)*
 
 - **🔒 Security in your stack: known advisories.** A new CVE in a dependency you use, mapped from your manifest to the public advisory database, gated to what you'd actually act on.
-  > *By the way — a security advisory affects a dependency you use: `drizzle-orm` (CVE-2026-39356, HIGH — SQL injection).*
+  > *By the way, a security advisory affects a dependency you use: `drizzle-orm` (CVE-2026-39356, HIGH: SQL injection).*
 
-- **📦 Your stack: dependency releases.** When a vendor you actually depend on ships, you hear about it — `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
-  > *By the way — a dependency you use just shipped: OpenAI SDK v6.39.0.*
+- **📦 Your stack: dependency releases.** When a vendor you actually depend on ships, you hear about it: `next`, `openai`, `prisma`, `viem`, `stripe`-class SDKs and ~20 more, matched against your `package.json` / lockfile so it's *your* dependencies, not a firehose.
+  > *By the way, a dependency you use just shipped: OpenAI SDK v6.39.0.*
 
-- **📜 The standards you implement: spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends — matched to the standards your project actually touches.
-  > *By the way — a standard your code implements just changed: ERC-5516.*
+- **📜 The standards you implement: spec changes.** EIPs/ERCs for web3 code, TC39 stage advancements for JS/TS, Chrome Platform Status deprecations for frontends, matched to the standards your project actually touches.
+  > *By the way, a standard your code implements just changed: ERC-5516.*
 
 - **🩺 The health of what you build on: upstream risk.** A direct dependency gone stale or archived, a high-engagement bug others are hitting in one of your deps, or an active incident on a managed service you use (Vercel, Supabase, Cloudflare, …). When something IS dying, the same breath names maintained alternatives from the catalogue.
-  > *By the way — an upstream you depend on needs attention: `request` looks dead (no push in 654 days). Maintained alternatives exist (`sindresorhus/got`).*
+  > *By the way, an upstream you depend on needs attention: `request` looks dead (no push in 654 days). Maintained alternatives exist (`sindresorhus/got`).*
 
-- **💷 The price of what you run on: pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations — EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
-  > *P.s. python 3.10 reaches end-of-life on 31 Oct — affects `acme` (3.10.12).*
+- **💷 The price of what you run on: pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations: EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
+  > *P.s. python 3.10 reaches end-of-life on 31 Oct. Affects `acme` (3.10.12).*
 
 Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing, with no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. The inventory also learns from how people triage: a candidate enough users judge rubbish stops being shown to anyone, while one that proves useful for a project like yours can surface to you too. That uses repo identity and aggregate signal only, never your code or anyone else's.
 
@@ -151,7 +151,7 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 
 > **roboflow/supervision** · high · 87 · 38.7k★ · MIT · pushed 3d ago
 >
-> Reusable CV building blocks in Python: bounding-box drawing, mask compositing, video sinks, and a small set of trackers (ByteTrack + a Norfair adapter). Active — 11 PRs merged this week.
+> Reusable CV building blocks in Python: bounding-box drawing, mask compositing, video sinks, and a small set of trackers (ByteTrack + a Norfair adapter). Active: 11 PRs merged this week.
 >
 > For *my-cv-project* specifically, there are 3 concrete plug points where it earns its place. Listed in increasing ambition:
 >
@@ -159,7 +159,7 @@ Not a one-liner. Each match is a 400-900 word writeup with the same shape:
 > 2. **Replace trackers/byte.py with supervision.ByteTrack.** You vendored ByteTrack in May; supervision tracks upstream and ships the class-aware tracking fix from October. Drops ~600 lines plus the requirements pin. ~1h to wire up + verify the multi-class regression test passes.
 > 3. **Use the video utilities** (`sv.VideoSink`, `sv.get_video_frames_generator`). You call `cv2.VideoCapture` / `VideoWriter` directly across 4 files; supervision wraps them with proper resource management and progress reporting. Less load-bearing than (1) and (2); only if you're already in that code path.
 >
-> Do (1) first — single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
+> Do (1) first: single PR, isolated blast radius, demonstrates the value before committing to the dependency. (2) only after (1) merges. Skip (3) unless you're already in the video path for something else.
 
 The plug points reference your project's actual files because *your AI tool reads them in-session*. The shape is always: intro (what the repo is) → "For PROJECT specifically, N plug points" bridge → numbered plug points naming real files / modules → scoping paragraph telling you the smallest first move.
 
@@ -175,14 +175,14 @@ When a capability you already cover has a concretely better option in the ecosys
 
 The bar is high: a named, specific improvement, not "this also looks good". A vague "you could improve here" stays silent. It rides the same cadence as everything else, surfaced quietly in your AI tool's next reply, only when the win is real and concrete.
 
-This judgment isn't pattern-matching on stars or buzz. It's grounded in a **capability ontology** Replen maintains: a structured map of capabilities, the tools and approaches that fill each one, and *better-than* relationships scoped to a task — X beats Y *for this job*, not in the abstract. That structure is what lets Replen make a specific, defensible "there's a better way" call instead of a vague nudge.
+This judgment isn't pattern-matching on stars or buzz. It's grounded in a **capability ontology** Replen maintains: a structured map of capabilities, the tools and approaches that fill each one, and *better-than* relationships scoped to a task: X beats Y *for this job*, not in the abstract. That structure is what lets Replen make a specific, defensible "there's a better way" call instead of a vague nudge.
 
 ## Atlas
 
 Discovery brings the outside world in. Atlas is the other half, a living map of everything you have already built and the connections inside it.
 
 <p align="center">
-  <a href="https://app.replen.dev/atlas"><img src="assets/atlas-demo.gif" alt="Atlas — your whole dev world as an interactive graph: projects, capabilities, tools, and the connections across them" width="820"></a>
+  <a href="https://app.replen.dev/atlas"><img src="assets/atlas-demo.gif" alt="Atlas, your whole dev world as an interactive graph: projects, capabilities, tools, and the connections across them" width="820"></a>
 </p>
 
 As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
@@ -199,7 +199,7 @@ Atlas tiles double as a **memory layer for your coding agents**: plain markdown 
 
 Replen deliberately doesn't map your code's internals; it **ingests whatever already does**. If a repo carries a **Graphify** vault, an **Obsidian** vault, or `docs/adr/` decision records, the onboarding agent uses them as its grounding source: entity notes become grounded capabilities, note bodies become descriptors, and the files they link become evidence anchors. That's faster and richer than a cold code-read, and the deep graph stays where it lives. Your Graphify graph makes Replen's matching smarter; Replen makes your graph actionable. Privacy is unchanged: only capability specs, paths, and tags ever leave your machine, never vault content or code.
 
-Vaults are auto-detected inside the repo (`graph/`, `vault/`, `.graphify/`, `docs/adr/`). If yours lives **elsewhere** — a central Obsidian vault for everything, or a Graphify graph kept outside the repo — point Replen at it:
+Vaults are auto-detected inside the repo (`graph/`, `vault/`, `.graphify/`, `docs/adr/`). If yours lives **elsewhere** (a central Obsidian vault for everything, or a Graphify graph kept outside the repo), point Replen at it:
 
 ```bash
 npx replen vault ~/ObsidianVault          # a vault that covers all your repos
@@ -362,13 +362,13 @@ Self-contained npm package (`@replen/mcp`) that exposes 14 tools to Claude Code 
 | | `replen_record_triage` | Persist the agent's verdict (adopt / port / cherry-pick / clean-room / upgrade / skip + score + effort) back to Replen |
 | **Atlas & memory** | `replen_leaps` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
 | | `replen_recall` | Recall. In-session memory over your past triage decisions and capabilities; answers what you have ported, weighed before, or already build elsewhere |
-| | `replen_capture_insight` | Bank a transferable insight from triage's generative-skip lane — a borrowed premise (a `lesson`) or a sharpened `boundary` — even when the candidate itself is a direct-use skip |
+| | `replen_capture_insight` | Bank a transferable insight from triage's generative-skip lane, a borrowed premise (a `lesson`) or a sharpened `boundary`, even when the candidate itself is a direct-use skip |
 | | `replen_queue` | The awareness→action queue: items parked from the weekly Brief / alerts ("queue for next session"). `replen_match` surfaces the oldest and offers to act on it |
 | **Configuration** | `replen_set_capabilities` | Set a project's grounded capabilities (tag + descriptor + data modality) and report, so matching fits the code from day one |
 | | `replen_set_tags` | Set a project's broad domain tags from the in-session agent |
-| | `replen_set_versions` | Report pinned dependency/runtime versions (names + versions only, never code), so EOL / CVE / brief alerts get specific — and alarms suppress for versions you're verifiably not on |
+| | `replen_set_versions` | Report pinned dependency/runtime versions (names + versions only, never code), so EOL / CVE / brief alerts get specific, and alarms suppress for versions you're verifiably not on |
 | | `replen_set_product` | Group several repos as one product, so their capabilities are unioned when you work in any of them |
-| | `replen_onboard_state` | Per-repo onboarding state for the whole portfolio — the cheap pre-flight for `/replen-onboard`, so it does the minimum work per repo instead of re-reading every codebase |
+| | `replen_onboard_state` | Per-repo onboarding state for the whole portfolio: the cheap pre-flight for `/replen-onboard`, so it does the minimum work per repo instead of re-reading every codebase |
 | **Actions** | `replen_handoff` | Opens a handoff PR for a starred match |
 | **Discovery** | `replen_help` | Tool-discovery list; useful when bootstrapping the connection |
 

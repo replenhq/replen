@@ -98,7 +98,12 @@ After running this, restart Claude Code. The "${args.name}" MCP server will be a
   if (existsSync(args.configPath)) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const backup = `${args.configPath}.bak.${ts}`;
-    writeFileSync(backup, readFileSync(args.configPath));
+    // 0600: the backup is a verbatim copy of ~/.claude.json, which holds the
+    // Replen DIGEST_TOKEN (and every other MCP server's secrets). The primary
+    // file is written 0600 for exactly this reason; the backup must match, or
+    // it leaks the credential set to every local user on a shared host.
+    writeFileSync(backup, readFileSync(args.configPath), { mode: 0o600 });
+    try { chmodSync(backup, 0o600); } catch { /* best effort if it pre-existed */ }
     console.error(`  backup:  ${backup}`);
   }
 

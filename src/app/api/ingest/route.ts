@@ -39,6 +39,11 @@ export async function POST(req: Request) {
   if (!row) return NextResponse.json({ ok: false, error: "invalid token" }, { status: 401 });
   // Suspended or pending users keep the token bytes, but the surface goes dark.
   if (row.status !== "active") return NextResponse.json({ ok: false, error: "account inactive" }, { status: 403 });
+  // Token-expiry gate, consistent with the shared authenticate() helper: a
+  // leaked/aged token (90-day stamp) must not stay valid on this write surface
+  // when every MCP/projects/graph route already rejects it.
+  const expiresAt = row.settings.ingestTokenExpiresAt;
+  if (expiresAt && +expiresAt < Date.now()) return NextResponse.json({ ok: false, error: "token expired" }, { status: 401 });
   const settings = row.settings;
 
   // Sliding-hour rate limit + outstanding-cap. Without this a leaked token
@@ -87,6 +92,11 @@ export async function POST(req: Request) {
   }
   const url = (body.url ?? "").trim();
   if (!url) return NextResponse.json({ ok: false, error: "url required" }, { status: 400 });
+  // Length caps (consistent with the explicit caps on triage/queue/versions/tags):
+  // bound what a token holder can persist into the candidates table.
+  if (url.length > 2048) return NextResponse.json({ ok: false, error: "url too long" }, { status: 400 });
+  const title = typeof body.title === "string" ? body.title.slice(0, 200) : null;
+  const note = typeof body.note === "string" ? body.note.slice(0, 1000) : null;
 
   // Extract owner/name if it's a github URL; otherwise store as a plain
   // candidate with the URL as-is. The pipeline only analyses candidates with
@@ -112,10 +122,10 @@ export async function POST(req: Request) {
       userId: settings.userId,
       source: "manual",
       sourceItemId,
-      title: body.title ?? null,
+      title,
       url,
       githubUrl,
-      author: body.note ?? null,
+      author: note,
       score: 100, // manual ingest is high signal - surface it first
       postedAt: new Date(),
       fetchedAt: new Date(),
