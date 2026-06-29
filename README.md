@@ -174,6 +174,8 @@ When a capability you already cover has a concretely better option in the ecosys
 
 The bar is high: a named, specific improvement, not "this also looks good". A vague "you could improve here" stays silent. It rides the same cadence as everything else, surfaced quietly in your AI tool's next reply, only when the win is real and concrete.
 
+This judgment isn't pattern-matching on stars or buzz. It's grounded in a **capability ontology** Replen maintains: a structured map of capabilities, the tools and approaches that fill each one, and *better-than* relationships scoped to a task — X beats Y *for this job*, not in the abstract. That structure is what lets Replen make a specific, defensible "there's a better way" call instead of a vague nudge.
+
 ## Atlas
 
 Discovery brings the outside world in. Atlas is the other half, a living map of everything you have already built and the connections inside it.

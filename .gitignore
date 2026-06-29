@@ -31,3 +31,6 @@ scripts/*.local.plist
 # Local operator notes (deployment topology, credentials, runbooks).
 # Kept out of the public mirror.
 *.local.md
+
+# Synthetic test-cohort harness (operator-only; cohort.json holds real tokens)
+testbed/

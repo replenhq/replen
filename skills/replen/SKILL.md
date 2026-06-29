@@ -216,8 +216,14 @@ For tech-news-site:
 
 (Triaged 9 candidates; surfacing the 2 worth acting on + 1 idea worth keeping.)
 
-What would you like to do with each? (star / hide / handoff)
+What would you like to do with each? — star (save it for later; won't
+re-surface), hide (dismiss; never show again), or handoff (open a pull
+request against your repo for it). Or skip and decide later.
 ```
+
+Always present the options WITH that one-line gloss the first time in a
+session — never the bare "(star / hide / handoff)". A new user doesn't know
+what they mean, and the calm-cadence promise dies if the user has to ask.
 
 The one-line "(Triaged N…)" footer is the *only* acknowledgement that skips
 happened — honest, but it doesn't parade them.

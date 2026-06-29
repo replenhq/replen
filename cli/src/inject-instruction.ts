@@ -35,13 +35,26 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "9";
+export const INTEGRATION_VERSION = "10";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
 const SECTION_BODY = `<!-- replen-integration: v${INTEGRATION_VERSION} -->
 
-On your **very first response** of each session:
+**FIRST, on your first response in a repo: check onboarding.** Call
+\`replen_onboard_state\` once. If it reports this repo (or the user's
+portfolio) is NOT yet onboarded/grounded, do NOT run the footnote flow
+this turn. Answer the user's message normally, then offer this VERBATIM
+as a new paragraph at the end:
+
+> Replen isn't set up for your repos yet — want me to do that now? Replen builds a profile so matches are relevant. Onboarding runs in the background, ~a few minutes.
+
+If they accept, invoke the \`replen-onboard\` skill. If they decline, carry
+on and do NOT re-offer for the rest of this session. Once \`replen_onboard_state\`
+shows the repo is onboarded, SKIP this check entirely and use the footnote
+flow below.
+
+Once onboarded, on your **very first response** of each session:
 
 1. **Skip the whole flow ONLY if** the user's first message is a
    pure trivial greeting with no content ("hi", "hey", "yo",

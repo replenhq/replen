@@ -186,13 +186,20 @@ export async function runInit(): Promise<void> {
   await runFirstIngest({ token: exchange.token, base: exchange.base, savedAt: "" });
 
   console.log("");
-  console.log("  All set. Restart Claude Code and try:");
-  console.log("    /replen       → triage today's candidates against this repo,");
-  console.log("                         in-session, using your subscription tokens");
-  console.log("    (no LLM API keys needed — the agent does the reasoning)");
+  console.log("  All set. Restart Claude Code, then do these two — IN THIS ORDER:");
   console.log("");
-  console.log("  Other MCP hosts (Codex / Cursor / Aider):");
-  console.log("    \"use replen_match\" — same tool, no slash command");
+  console.log("    1. /replen-onboard   ONE-TIME, FIRST. Reads your repos and builds a");
+  console.log("                         tailored profile so matches are relevant, not");
+  console.log("                         generic. Runs in the background — kick it off,");
+  console.log("                         then just keep working.");
+  console.log("");
+  console.log("    2. /replen           ANYTIME after that. Triages the candidates for");
+  console.log("                         the current repo, in-session, on your own");
+  console.log("                         subscription tokens — no LLM API key needed.");
+  console.log("");
+  console.log("  (Onboarding is once per project. After that, it's just /replen.)");
+  console.log("");
+  console.log("  Other MCP hosts (Codex / Cursor / Aider): \"use replen_match\" — same tool.");
   console.log("");
   console.log(`  Dashboard: ${exchange.base}`);
   console.log("");

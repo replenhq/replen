@@ -40,7 +40,10 @@ Parse the JSON response. Note:
 
 - `filterMode` — `tags`, `zero-knowledge`, or `fingerprint`
 - `scopedTo` — confirms the project context the user has open
-- `candidates[]` — the actual list to triage
+- `candidates[]` — the actual list to triage. Each carries `solid: true|false` —
+  the ones Replen counts as genuinely worth your time (clear domain-fit + posture +
+  not-already-covered, or a dependency-maintenance match). The footnote's count is
+  the number of `solid` ones; the rest are "worth a glance" laterals.
 
 If `candidates.length === 0`, tell the user "No new candidates today for
 `<owner/name>`. Calm-cadence working as designed — 1-3 actionable
@@ -50,8 +53,11 @@ If 1+ candidates, continue.
 
 ### Step 3 — Per-candidate analysis
 
-**Cap at 5 candidates.** If the inventory returned more, take the top 5
-by `whyShortlisted` strength + stars + recency, defer the rest.
+**Triage the `solid` candidates first** (cap at 5). If there are more than 5
+solid, take the top 5 by `whyShortlisted` strength + stars + recency. The
+non-`solid` "worth a glance" entries are optional — skim them only if the solid
+set is thin or the user asks. A low-domain-fit lateral there can still be a real
+port/cherry-pick, so don't dismiss them blindly, but they're not the headline.
 
 For each candidate, do this loop:
 
@@ -210,8 +216,14 @@ For tech-news-site:
 
 (Triaged 9 candidates; surfacing the 2 worth acting on + 1 idea worth keeping.)
 
-What would you like to do with each? (star / hide / handoff)
+What would you like to do with each? — star (save it for later; won't
+re-surface), hide (dismiss; never show again), or handoff (open a pull
+request against your repo for it). Or skip and decide later.
 ```
+
+Always present the options WITH that one-line gloss the first time in a
+session — never the bare "(star / hide / handoff)". A new user doesn't know
+what they mean, and the calm-cadence promise dies if the user has to ask.
 
 The one-line "(Triaged N…)" footer is the *only* acknowledgement that skips
 happened — honest, but it doesn't parade them.
