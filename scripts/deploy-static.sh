@@ -12,15 +12,19 @@
 #   DEPLOY_HOST       SSH alias (default: replen-host)
 #   MARKETING_SRC     local dir for marketing site (default: ~/github/replen.dev)
 #   DOCS_SRC          local dir for docs site (default: ~/github/replen-docs)
+#   STATUS_SRC        local dir for status site (default: ~/github/replen-status)
 #   MARKETING_DEST    remote dir (default: /var/www/replen.dev)
 #   DOCS_DEST         remote dir (default: /var/www/docs.replen.dev)
+#   STATUS_DEST       remote dir (default: /var/www/status.replen.dev)
 set -euo pipefail
 
 REMOTE="${DEPLOY_HOST:-replen-host}"
 MARKETING_SRC="${MARKETING_SRC:-$HOME/github/replen.dev}"
 DOCS_SRC="${DOCS_SRC:-$HOME/github/replen-docs}"
+STATUS_SRC="${STATUS_SRC:-$HOME/github/replen-status}"
 MARKETING_DEST="${MARKETING_DEST:-/var/www/replen.dev}"
 DOCS_DEST="${DOCS_DEST:-/var/www/docs.replen.dev}"
+STATUS_DEST="${STATUS_DEST:-/var/www/status.replen.dev}"
 
 WHICH="${1:-both}"
 
@@ -45,17 +49,22 @@ case "$WHICH" in
   docs)
     rsync_site "$DOCS_SRC" "$DOCS_DEST" "docs"
     ;;
+  status)
+    rsync_site "$STATUS_SRC" "$STATUS_DEST" "status"
+    ;;
   both)
     rsync_site "$MARKETING_SRC" "$MARKETING_DEST" "marketing"
     rsync_site "$DOCS_SRC" "$DOCS_DEST" "docs"
+    [ -d "$STATUS_SRC" ] && rsync_site "$STATUS_SRC" "$STATUS_DEST" "status" || true
     ;;
   *)
-    echo "Usage: $0 [marketing|docs|both]" >&2
+    echo "Usage: $0 [marketing|docs|status|both]" >&2
     exit 1
     ;;
 esac
 
 echo
-echo "Done. nginx serves both from 127.0.0.1:8080 via Cloudflare Tunnel."
+echo "Done. nginx serves these from 127.0.0.1:8080 via Cloudflare Tunnel."
 echo "  https://replen.dev"
 echo "  https://docs.replen.dev"
+echo "  https://status.replen.dev   (needs the nginx vhost + tunnel route + DNS, see scripts/status-subdomain-setup.md)"

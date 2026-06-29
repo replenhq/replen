@@ -152,6 +152,11 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname === "/api/healthz") {
     return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
   }
+  // /api/status: public, CORS-open status board consumed by status.replen.dev.
+  // Coarse component health + published versions only; no user data, no auth.
+  if (request.nextUrl.pathname === "/api/status") {
+    return applySecurityHeaders(NextResponse.next({ request: { headers: forwardedHeaders } }), nonce);
+  }
   // /api/ingest: per-user token auth from the route; bookmarklets POST here
   // from any origin (CORS preflight is OPTIONS).
   if (request.nextUrl.pathname.startsWith("/api/ingest")) {
