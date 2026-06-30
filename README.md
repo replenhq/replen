@@ -224,6 +224,16 @@ npx replen vault --list                    # show what's configured
 
 Then re-run `/replen-onboard` and the agent grounds from it. (`--vault PATH` also works inline on `npx replen` and `npx replen sync-projects`.)
 
+## Research
+
+The core idea behind Replen, scoring a candidate against your *whole portfolio* rather than just the repo in front of you, turns out to be measurable.
+
+A single-repo similarity has a failure mode. A library that *fills a gap* is, by definition, less similar to your current code than one that duplicates what you already have, so a per-repo matcher quietly prefers the redundant candidate. In a held-out benchmark, ranking novel-vs-already-covered candidates by single-repo similarity scored **AUC 0.415** (worse than chance) and adding a portfolio prior derived from your other repos lifted it to **0.862** (Cohen's *d* = 1.94, *p* < 0.001). It's the same prior that powers Brainstem's down-ranking and [Atlas](#atlas)'s Leaps.
+
+This is an applied result, a real failure mode and a fix grounded in private cross-repo signal, the suppression arm is strong, while surfacing the genuinely novel candidate to the top stays hard.
+
+[Read our paper here](https://replen.dev/research/).
+
 ## Numbers
 
 Things we measure, not claims we promise.
