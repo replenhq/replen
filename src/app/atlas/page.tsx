@@ -5,19 +5,54 @@ import { computeOverlay } from "@/graph/overlay";
 import { computeSemanticMap } from "@/graph/semantic-map";
 import { AtlasGraph, type GNode, type GEdge } from "./AtlasGraph";
 import { suggestUpgrades } from "@/lib/keystone";
+import { CartsView } from "./CartsView";
+import { buildCartEngine, CARTS, type CartLayout } from "@/graph/carts";
 
 export const dynamic = "force-dynamic";
+
+// The Atlas sub-strip: title, Graph|Carts tabs, and the node/edge meta. Shared
+// by both halves of Atlas (the graph = explore, Carts = browse + work).
+function AtlasSubStrip({ view, nodes, edges, note }: { view: "graph" | "carts"; nodes: number; edges: number; note?: string }) {
+  return (
+    <div className="atlas-substrip">
+      <h1>Atlas</h1>
+      <nav className="atlas-tabs">
+        <a href="/atlas" className={view === "graph" ? "active" : ""}>Graph</a>
+        <a href="/atlas?view=carts" className={view === "carts" ? "active" : ""}>Carts</a>
+      </nav>
+      <span className="atlas-meta">{nodes} nodes&nbsp;·&nbsp;{edges} edges{note ?? ""}</span>
+    </div>
+  );
+}
 
 // Atlas webapp view — mission control for the portfolio. The force layout is
 // the navigation; the dossier panel (server action) is the destination; the
 // operational overlay (alerts / blind spots / queued work) is the live state;
 // the semantic map view positions everything by MEANING (PCA over the same
-// embeddings the matcher uses).
-export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string }> }) {
+// embeddings the matcher uses). Carts (?view=carts) is the database half.
+export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string; view?: string; cart?: string; layout?: string; q?: string; prov?: string; mod?: string }> }) {
   const user = await requireUser();
+  const sp = await searchParams;
   // Deep-link target ("tool:eslint") — footnote/Brief lines link here so
   // "where do I use this?" is one click. Resolved client-side by AtlasGraph.
-  const { node: focusNode } = await searchParams;
+  const focusNode = sp.node ?? null;
+
+  // ---- Carts: the database half of Atlas (rail + table/board over the graph)
+  if (sp.view === "carts") {
+    const engine = await buildCartEngine(user.id);
+    const activeId = sp.cart && CARTS.some((c) => c.id === sp.cart) ? sp.cart : CARTS[0].id;
+    const layout = (["table", "board", "cards", "map", "timeline"].includes(sp.layout ?? "")
+      ? sp.layout : CARTS.find((c) => c.id === activeId)?.layout) as CartLayout;
+    return (
+      <main className="atlas-main">
+        <AtlasSubStrip view="carts" nodes={engine.nodeCount} edges={engine.edgeCount} />
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          <CartsView engine={engine} activeId={activeId} layout={layout}
+            filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod }} />
+        </div>
+      </main>
+    );
+  }
   const [rawNodes, rawEdges, overlay, mapPoints] = await Promise.all([
     db.select({ id: schema.graphNodes.id, kind: schema.graphNodes.kind, nodeKey: schema.graphNodes.nodeKey, label: schema.graphNodes.label, data: schema.graphNodes.data })
       .from(schema.graphNodes).where(eq(schema.graphNodes.userId, user.id)),
@@ -139,20 +174,16 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
 
   const alertTotal = nodes.reduce((s, n) => s + (n.alertCount > 0 ? 1 : 0), 0);
   const blindspots = nodes.filter((n) => n.blindspot).length;
+  const note =
+    (alertTotal > 0 ? ` · ${alertTotal} node${alertTotal === 1 ? "" : "s"} with live alerts` : "") +
+    (blindspots > 0 ? ` · ${blindspots} blind spot${blindspots === 1 ? "" : "s"}` : "") +
+    (nodes.length === 0 ? " · run /replen-onboard and a pipeline run to build it." : "");
 
   // Full-bleed: escape the global `main { max-width: 1100px }` container —
   // the graph owns every pixel below the nav.
   return (
-    <main style={{ padding: 0, maxWidth: "none", width: "100vw", margin: "-24px calc(50% - 50vw) -64px", height: "calc(100vh - 62px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ padding: "4px 24px 8px", borderBottom: "1px solid var(--border, #262626)", flexShrink: 0 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "inline" }}>Atlas</h1>
-        <span style={{ marginLeft: 14, color: "var(--dim, #a3a3a3)", fontSize: 13 }}>
-          {nodes.length} nodes · {edges.length} edges
-          {alertTotal > 0 ? ` · ${alertTotal} node${alertTotal === 1 ? "" : "s"} with live alerts` : ""}
-          {blindspots > 0 ? ` · ${blindspots} blind spot${blindspots === 1 ? "" : "s"}` : ""}
-          {nodes.length === 0 ? " — run /replen-onboard and a pipeline run to build it." : ""}
-        </span>
-      </div>
+    <main className="atlas-main">
+      <AtlasSubStrip view="graph" nodes={nodes.length} edges={edges.length} note={note} />
       <div style={{ flex: 1, minHeight: 0 }}>
         {nodes.length > 0 ? <AtlasGraph nodes={nodes} edges={edges} mapPos={mapPos} initialFocus={focusNode ?? null} /> : null}
       </div>

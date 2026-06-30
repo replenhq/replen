@@ -104,6 +104,28 @@ export function IconSprite() {
           <circle cx="12" cy="18" r="2.4" />
           <path d="M7.7 7.7l3 8.6M16.4 8.9l-3.3 7.4M8 6.4h7.6" />
         </symbol>
+        <symbol id="i-hexagon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2.6l8.1 4.7v9.4L12 21.4 3.9 16.7V7.3L12 2.6z" />
+        </symbol>
+        <symbol id="i-table" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+          <path d="M3.5 9.5h17M9 9.5v10" />
+        </symbol>
+        <symbol id="i-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3.5" y="4.5" width="4.3" height="15" rx="1.4" />
+          <rect x="9.85" y="4.5" width="4.3" height="11" rx="1.4" />
+          <rect x="16.2" y="4.5" width="4.3" height="15" rx="1.4" />
+        </symbol>
+        <symbol id="i-cards" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3.5" y="4" width="7.5" height="7.5" rx="1.6" />
+          <rect x="13" y="4" width="7.5" height="7.5" rx="1.6" />
+          <rect x="3.5" y="13.5" width="7.5" height="7.5" rx="1.6" />
+          <rect x="13" y="13.5" width="7.5" height="7.5" rx="1.6" />
+        </symbol>
+        <symbol id="i-gap" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M6 18L18 6" />
+        </symbol>
       </defs>
     </svg>
   );
