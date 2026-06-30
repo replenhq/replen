@@ -7,7 +7,7 @@
   <p>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/v/replen?style=flat-square&color=d97706" alt="npm version"></a>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/dm/replen?style=flat-square&color=d97706" alt="npm downloads"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-FSL--1.1--MIT-blue?style=flat-square" alt="FSL-1.1-MIT License"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="Apache-2.0 License"></a>
     <a href="https://replen.dev"><img src="https://img.shields.io/badge/website-replen.dev-d97706?style=flat-square" alt="Website"></a>
     <a href="security/skillspector/SUMMARY.md"><img src="https://img.shields.io/badge/NVIDIA%20SkillSpector-SAFE-22c55e?style=flat-square" alt="NVIDIA SkillSpector: SAFE"></a>
   </p>
@@ -476,16 +476,14 @@ replen/
 
 ## License
 
-[FSL-1.1-MIT](LICENSE): Functional Source License with a 2-year MIT future grant. In plain English:
+[Apache-2.0](LICENSE): a permissive, OSI-approved open-source licence. In plain English:
 
-- **You can self-host Replen for your own use** (internal, personal, your company's internal tooling). Free, no asterisks.
-- **You can read, modify, and redistribute the source code** for any non-competing purpose.
-- **You can't run Replen as a commercial service that competes with us** (e.g. offering "Hosted Replen" to other people) until the 2-year window expires for that version.
-- **After 2 years, each version auto-converts to MIT**, the same permissive licence as before, just delayed.
+- **You can self-host, use, modify, and redistribute Replen** — for any purpose, commercial or not. Free, no asterisks.
+- **You get an explicit patent grant** from every contributor (Apache §3), with patent-retaliation termination.
+- **The trademark stays ours** (Apache §6): the code is open, but "Replen", "Atlas", "Watchtower" and the other named surfaces are not licensed for use to identify your own product.
+- **Keep the `LICENSE` and `NOTICE` files** with any redistribution, and note significant changes you make to files.
 
-The FSL terms apply to all commits from `1361647` onward (2026-05-17). The public mirror at [replenhq/replen](https://github.com/replenhq/replen) is FSL-1.1-MIT from its first commit.
-
-If you want to use Replen in a way that might cross the "competing use" line, get in touch via [replen.dev](https://replen.dev) and we'll sort out a commercial licence.
+The Apache-2.0 terms apply to the whole project. The public mirror at [replenhq/replen](https://github.com/replenhq/replen) is Apache-2.0 as well.
 
 ## Credits
 

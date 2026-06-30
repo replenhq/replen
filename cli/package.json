@@ -16,7 +16,8 @@
     "dist",
     "extras",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "keywords": [
     "replen",
@@ -32,7 +33,7 @@
   },
   "bugs": "https://github.com/replenhq/replen/issues",
   "author": "replen.dev",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=18"
   },

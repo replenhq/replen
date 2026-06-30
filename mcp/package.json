@@ -15,7 +15,8 @@
     "dist",
     "extras",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "keywords": [
     "mcp",
@@ -38,7 +39,7 @@
     "url": "https://github.com/replenhq/replen/issues"
   },
   "author": "replen.dev",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
   },

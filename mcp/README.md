@@ -96,4 +96,4 @@ No additional replen-side cost vs the web dashboard - the MCP server queries the
 
 ## License
 
-FSL-1.1-MIT - see `LICENSE`. Free for self-hosting and internal use; no competing-service use during the 2-year non-compete window; auto-converts to MIT after 2 years.
+Apache-2.0 - see `LICENSE`. Permissive open source: free to use, modify, and redistribute for any purpose, with an explicit patent grant. "Replen" and the other named surfaces remain trademarks (Apache §6).
