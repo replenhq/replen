@@ -20,6 +20,7 @@
     <a href="mcp/">MCP</a> ·
     <a href="skills/">Skill</a> ·
     <a href="#self-host">Self-host</a> ·
+    <a href="https://replen.dev/research/">Research</a> ·
     <a href="https://app.replen.dev">app.replen.dev</a>
   </p>
 </div>
@@ -476,14 +477,7 @@ replen/
 
 ## License
 
-[Apache-2.0](LICENSE): a permissive, OSI-approved open-source licence. In plain English:
-
-- **You can self-host, use, modify, and redistribute Replen** — for any purpose, commercial or not. Free, no asterisks.
-- **You get an explicit patent grant** from every contributor (Apache §3), with patent-retaliation termination.
-- **The trademark stays ours** (Apache §6): the code is open, but "Replen", "Atlas", "Watchtower" and the other named surfaces are not licensed for use to identify your own product.
-- **Keep the `LICENSE` and `NOTICE` files** with any redistribution, and note significant changes you make to files.
-
-The Apache-2.0 terms apply to the whole project. The public mirror at [replenhq/replen](https://github.com/replenhq/replen) is Apache-2.0 as well.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ## Credits
 

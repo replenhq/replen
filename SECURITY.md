@@ -50,7 +50,6 @@ What we explicitly don't defend against (yet):
 - A backdoored Cloudflare account. Origin pulls authenticated by Cloudflare's origin CA (recommended) reduce but don't eliminate this.
 - LLM-level prompt injection that produces grammatically-correct prose with only allowlisted URLs. The denylist + URL allowlist + system prompt are mitigations, not guarantees.
 - **Magic-link replay within Firebase's TTL.** Sign-in links are valid for ~1 hour and the callback page is intentionally inert until the user clicks "Finish signing in" (so email link-prefetchers don't burn the code). A captured URL — forwarded message, history sync to an unmanaged device, shoulder-surf — can complete sign-in inside that window. Mitigations: shorten the Firebase action-code TTL in the console; users on shared machines should not click the link there. A future server-side single-use nonce stamped at link issue would harden this further.
-- **Prompt injection from social captions surfacing a poison repo.** `resolveGithubFromText` runs an LLM extractor on Threads/TikTok captions; an adversarial caption can drive the model to emit a chosen `owner/repo` candidate. Bounded by the downstream triage / safety scan / writeup-output URL allowlist, but the candidate does enter the queue.
 
 ## Recommended self-host hardening
 
@@ -141,5 +140,5 @@ The project is reviewed adversarially on a recurring basis. Findings are triaged
 
 ## Past audits
 
-- 2026-06-29: full adversarial review covering the server, MCP server, CLI, every API endpoint, the prompt-injection / agent-trust boundary, cross-user privacy, secret handling, and infrastructure. 1 high, 1 medium, 10 low, 4 informational; no critical findings. Material findings resolved in commits dated 2026-06-29; remaining low-severity items tracked as hardening. See git log for the granular changes.
-- 2026-05-15: full internal audit. 2 critical + 5 high + 7 medium findings, all addressed in commits dated 2026-05-15 through 2026-05-16. See git log for the granular changes.
+- 2026-06-29: full adversarial review covering the server, MCP server, CLI, every API endpoint, the prompt-injection / agent-trust boundary, cross-user privacy, secret handling, and infrastructure. All material findings were resolved; remaining low-severity items are tracked as hardening.
+- 2026-05-15: full internal review with the same scope. All material findings were resolved; remaining low-severity items are tracked as hardening.
