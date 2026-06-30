@@ -1,7 +1,8 @@
 import { Icon } from "@/components/Icons";
+import { CartsBoard } from "./CartsBoard";
 import {
   CARTS, cartCount, runCart, fmtAgo, fmtStars,
-  type CartEngine, type CartLayout, type CartResult, type CartColumn, type CartFilters, type CartCard,
+  type CartEngine, type CartLayout, type CartResult, type CartColumn, type CartFilters,
 } from "@/graph/carts";
 
 // The "database" half of Atlas. Server-rendered: the rail, switcher, filter row,
@@ -13,7 +14,7 @@ const RAIL_ICON: Record<string, string> = {
   "blind-spots": "gap", triage: "board", keystones: "cards",
   "brought-in": "table", stale: "table", "by-domain": "compass",
 };
-const META_ICON: Record<string, string> = { star: "star", hex: "hexagon", doc: "doc", split: "split" };
+const CANDIDATE_CARTS = new Set(["triage", "brought-in", "stale"]);
 const LAYOUTS: { id: CartLayout; label: string; icon: string }[] = [
   { id: "table", label: "Table", icon: "table" },
   { id: "board", label: "Board", icon: "board" },
@@ -31,22 +32,27 @@ export function CartsView({
   engine: CartEngine; activeId: string; layout: CartLayout; filters: CartFilters;
 }) {
   const result = runCart(engine, activeId, { layout, filters });
-  // available modality options for the filter dropdown (from real data)
+  const candidateCart = CANDIDATE_CARTS.has(activeId);
+  // available filter options (from real data)
   const modalities = [...new Set((engine.byKind.get("capability") ?? []).flatMap((c) => c.modality))].sort();
+  const projects = [...new Set((engine.byKind.get("project") ?? []).map((p) => p.label))].sort();
 
   // Link builder — merges the current view state with overrides, drops empties.
-  const href = (o: Partial<{ cart: string; layout: string; q: string; prov: string; mod: string }>): string => {
+  const href = (o: Partial<{ cart: string; layout: string; q: string; prov: string; mod: string; proj: string }>): string => {
     const p = new URLSearchParams();
     p.set("view", "carts");
     p.set("cart", o.cart ?? activeId);
-    const lay = o.layout ?? (o.cart && o.cart !== activeId ? "" : layout);
+    const changed = o.cart && o.cart !== activeId; // a rail click resets filters
+    const lay = o.layout ?? (changed ? "" : layout);
     if (lay) p.set("layout", lay);
-    const q = o.q !== undefined ? o.q : (o.cart && o.cart !== activeId ? "" : filters.q);
-    const prov = o.prov !== undefined ? o.prov : (o.cart && o.cart !== activeId ? "" : filters.provenance);
-    const mod = o.mod !== undefined ? o.mod : (o.cart && o.cart !== activeId ? "" : filters.modality);
+    const q = o.q !== undefined ? o.q : (changed ? "" : filters.q);
+    const prov = o.prov !== undefined ? o.prov : (changed ? "" : filters.provenance);
+    const mod = o.mod !== undefined ? o.mod : (changed ? "" : filters.modality);
+    const proj = o.proj !== undefined ? o.proj : (changed ? "" : filters.project);
     if (q) p.set("q", q);
     if (prov) p.set("prov", prov);
     if (mod) p.set("mod", mod);
+    if (proj) p.set("proj", proj);
     return `/atlas?${p.toString()}`;
   };
 
@@ -93,16 +99,21 @@ export function CartsView({
             <input type="hidden" name="layout" value={layout} />
             {filters.provenance ? <input type="hidden" name="prov" value={filters.provenance} /> : null}
             {filters.modality ? <input type="hidden" name="mod" value={filters.modality} /> : null}
+            {filters.project ? <input type="hidden" name="proj" value={filters.project} /> : null}
             <Icon name="search" size={14} />
             <input type="search" name="q" defaultValue={filters.q ?? ""} placeholder="Search this cart…" />
           </form>
-          <FilterMenu label="Provenance" active={filters.provenance} options={PROVENANCE} hrefFor={(v) => href({ prov: v })} />
-          <FilterMenu label="Modality" active={filters.modality} options={modalities} hrefFor={(v) => href({ mod: v })} />
+          {candidateCart
+            ? <FilterMenu label="Project" active={filters.project} options={projects} hrefFor={(v) => href({ proj: v })} />
+            : <>
+                <FilterMenu label="Provenance" active={filters.provenance} options={PROVENANCE} hrefFor={(v) => href({ prov: v })} />
+                <FilterMenu label="Modality" active={filters.modality} options={modalities} hrefFor={(v) => href({ mod: v })} />
+              </>}
           <span className="carts-results">{result.count} {result.layout === "board" ? "cards" : "results"}</span>
         </div>
 
         {result.layout === "board"
-          ? <BoardLayout result={result} />
+          ? <CartsBoard groups={result.groups ?? []} note="Drag a card into a verdict column to record or override it. Click a card for its full detail." />
           : <TableLayout result={result} />}
       </section>
     </div>
@@ -182,55 +193,6 @@ function cell(c: CartColumn, row: Record<string, unknown>, barMax: number, href:
   }
 }
 
-// ---- Board -----------------------------------------------------------------
-function BoardLayout({ result }: { result: CartResult }) {
-  const groups = result.groups ?? [];
-  if (!groups.length) return <EmptyCart name={result.name} />;
-  return (
-    <div className="carts-board-wrap">
-      <div className="carts-board">
-        {groups.map((g) => (
-          <div key={g.key} className="carts-col">
-            <div className="carts-col-head">
-              <span className="carts-col-name">{g.label}</span>
-              <span className="carts-col-count">{g.total}</span>
-              <span className="carts-col-dots">···</span>
-            </div>
-            <div className="carts-col-body">
-              {g.cards.map((card) => <BoardCard key={card.key} card={card} />)}
-              <div className="carts-add">+&nbsp;&nbsp;Add a card</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="carts-board-note">
-        Drag a card between columns to record or override a verdict, writing an EVALUATED edge back to the graph.
-      </div>
-    </div>
-  );
-}
-
-function BoardCard({ card }: { card: CartCard }) {
-  const ext = isExternal(card.href);
-  const Inner = (
-    <>
-      <div className="carts-card-title">{card.title}</div>
-      {card.meta.map((m, i) => (
-        <div key={i} className="carts-card-meta"><Icon name={META_ICON[m.icon] ?? "doc"} size={13} />{m.text}</div>
-      ))}
-      {card.match != null && (
-        <div className="carts-card-match">
-          <div className="carts-card-match-row"><span>Match</span><span className="carts-card-match-pct">{card.match}%</span></div>
-          <span className="carts-bar-track"><span className="carts-bar-fill" style={{ width: `${card.match}%` }} /></span>
-        </div>
-      )}
-      {card.sub && <div className="carts-card-sub">{card.sub}</div>}
-    </>
-  );
-  return card.href
-    ? <a className="carts-card" href={card.href} {...(ext ? { target: "_blank", rel: "noopener" } : {})}>{Inner}</a>
-    : <div className="carts-card">{Inner}</div>;
-}
 
 function EmptyCart({ name }: { name: string }) {
   return (

@@ -10,77 +10,18 @@
 // computed from edges. Starter Carts ship built in; user-saved Carts come later.
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
+import {
+  CARTS, fmtStars,
+  type CartLayout, type CartColumn, type CartColumnType, type CartCard, type CartCardMeta,
+  type CartGroup, type CartResult, type CartFilters,
+} from "./carts-shared";
 
-// ---------------------------------------------------------------------------
-// Result contract (what the UI renders)
-// ---------------------------------------------------------------------------
-export type CartLayout = "table" | "board" | "cards" | "map" | "timeline";
-
-export type CartColumnType =
-  | "title"        // primary cell; the UI links it (href on the row)
-  | "text"
-  | "num"
-  | "bar"          // amber degree/score bar, scaled to result.barMax
-  | "modality"     // plain comma-joined list
-  | "provenance"   // brightness hierarchy, no pill
-  | "date";
-
-export type CartColumn = { key: string; label: string; type: CartColumnType; align?: "right" };
-
-export type CartCardMeta = { icon: "star" | "hex" | "doc" | "split"; text: string };
-export type CartCard = {
-  key: string;
-  title: string;
-  href: string | null;
-  meta: CartCardMeta[];
-  match: number | null; // 0..100, the amber "Match" bar; null hides it
-  sub: string | null;   // a projected-action line when there's no score
-};
-export type CartGroup = { key: string; label: string; total: number; cards: CartCard[] };
-
-export type CartResult = {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  layout: CartLayout;
-  count: number;
-  // table/cards
-  columns: CartColumn[];
-  rows: Record<string, string | number | boolean | string[] | null>[];
-  barMax: number;
-  // board
-  groups?: CartGroup[];
-  // footer
-  summary?: { text: string; accent?: boolean }[];
-};
-
-export type CartFilters = {
-  provenance?: string;
-  modality?: string;
-  verdict?: string;
-  q?: string;
-};
-
-// ---------------------------------------------------------------------------
-// Starter Carts (the rail). id is the URL key; layout is the default view.
-// ---------------------------------------------------------------------------
-export type CartMeta = { id: string; name: string; description: string; icon: string; layout: CartLayout };
-
-export const CARTS: CartMeta[] = [
-  { id: "blind-spots", name: "Blind spots", icon: "gap", layout: "table",
-    description: "capabilities you have with no tool, library or candidate filling them" },
-  { id: "triage", name: "Triage board", icon: "board", layout: "board",
-    description: "candidates and suggestions, grouped by verdict" },
-  { id: "keystones", name: "Keystones", icon: "cards", layout: "table",
-    description: "the capabilities that recur across the most repos" },
-  { id: "brought-in", name: "Brought in", icon: "table", layout: "table",
-    description: "candidates you adopted, ported, or cherry-picked" },
-  { id: "stale", name: "Stale deferrals", icon: "table", layout: "table",
-    description: "verdicts to port or cherry-pick that you haven't acted on, oldest first" },
-  { id: "by-domain", name: "By domain", icon: "map", layout: "table",
-    description: "capabilities grouped by the domain they belong to" },
-];
+// Re-export the pure surface so server callers keep importing "@/graph/carts".
+export { CARTS, VERDICT_COLUMNS, fmtStars, fmtAgo } from "./carts-shared";
+export type {
+  CartLayout, CartColumnType, CartColumn, CartCardMeta, CartCard, CartCardDetail,
+  CartGroup, CartResult, CartFilters, CartMeta,
+} from "./carts-shared";
 
 const PROV_ORDER = ["grounded", "extracted", "inferred", "ambiguous"];
 const strongerProv = (a: string | null, b: string | null): string | null => {
@@ -110,8 +51,11 @@ type Attrs = {
   // candidate / suggestion
   fullName: string | null; stars: number | null; url: string | null;
   verdict: string | null; effort: string | null; score: number | null; reasonCode: string | null; evaluatedAt: string | null;
-  fills: string | null; status: string | null; projected: string | null;
+  fills: string | null; status: string | null; projected: string | null; project: string | null; projectSlug: string | null;
 };
+
+// triage scores are stored 0-100; clamp + round for display.
+const clampPct = (n: number): number => Math.max(0, Math.min(100, Math.round(n)));
 
 export type CartEngine = { attrs: Map<number, Attrs>; byKind: Map<string, Attrs[]>; nodeCount: number; edgeCount: number };
 
@@ -140,7 +84,7 @@ export async function buildCartEngine(userId: number): Promise<CartEngine> {
       waypoint: !!d.waypoint, projects: 0, fillers: 0, evidence: 0, domains: [],
       fullName: (d.fullName as string) ?? null, stars: (d.stars as number) ?? null, url: (d.url as string) ?? null,
       verdict: null, effort: null, score: null, reasonCode: null, evaluatedAt: null,
-      fills: null, status: null, projected: (d.projected as string) ?? null,
+      fills: null, status: null, projected: (d.projected as string) ?? null, project: null, projectSlug: null,
     });
   }
 
@@ -169,10 +113,12 @@ export async function buildCartEngine(userId: number): Promise<CartEngine> {
         dst.score = score ?? dst.score;
         dst.reasonCode = (ed.reasonCode as string) ?? dst.reasonCode;
         dst.evaluatedAt = (ed.at as string) ?? dst.evaluatedAt;
+        if (src?.kind === "project") { dst.project = src.label; dst.projectSlug = src.nodeKey; }
       }
     } else if (e.kind === "SUGGESTED" && dst) {
       dst.status = (ed.status as string) ?? dst.status;
       if (ed.projected && !dst.projected) dst.projected = ed.projected as string;
+      if (src?.kind === "project" && !dst.project) { dst.project = src.label; dst.projectSlug = src.nodeKey; }
     }
   }
 
@@ -224,6 +170,7 @@ const matchFilters = (a: Attrs, f: CartFilters): boolean => {
   if (f.provenance && a.provenance !== f.provenance) return false;
   if (f.modality && !a.modality.includes(f.modality)) return false;
   if (f.verdict && a.verdict !== f.verdict) return false;
+  if (f.project && a.project !== f.project) return false;
   if (f.q) {
     const hay = `${a.label} ${a.fullName ?? ""} ${a.fills ?? ""} ${a.theme ?? ""}`.toLowerCase();
     if (!hay.includes(f.q.toLowerCase())) return false;
@@ -252,7 +199,7 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
     ];
     members.sort((x, y) => BOARD_ORDER.indexOf(x.verdict as typeof BOARD_ORDER[number]) - BOARD_ORDER.indexOf(y.verdict as typeof BOARD_ORDER[number]) || (y.a.score ?? 0) - (x.a.score ?? 0));
     const columns: CartColumn[] = [
-      col("fullName", "Candidate", "title"), col("verdict", "Verdict", "text"),
+      col("fullName", "Candidate", "title"), col("project", "For", "text"), col("verdict", "Verdict", "text"),
       col("fills", "Fills", "text"), col("score", "Match", "bar"),
       col("stars", "Stars", "num"), col("evaluatedAt", "Decided", "date"),
     ];
@@ -271,23 +218,28 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
     const buckets = new Map<string, CartCard[]>();
     const push = (k: string, card: CartCard) => { (buckets.get(k) ?? buckets.set(k, []).get(k)!).push(card); };
     for (const s of suggs) {
-      push(s.status === "starred" ? "evaluating" : "suggested", {
-        key: `s:${s.nodeKey}`, title: s.fullName ?? s.label, href: s.url,
-        meta: starMeta(s.stars).concat(s.projected ? [{ icon: "split", text: s.projected }] : []),
+      const colKey = s.status === "starred" ? "evaluating" : "suggested";
+      push(colKey, {
+        key: `s:${s.nodeKey}`, title: s.fullName ?? s.label, node: `suggestion:${s.nodeKey}`,
+        repo: s.fullName ?? s.label, projectSlug: s.projectSlug, column: colKey,
+        meta: starMeta(s.stars).concat(projMeta(s.project)).concat(s.projected ? [{ icon: "split", text: s.projected }] : []),
         match: null, sub: null,
       });
     }
     for (const c of cands) {
       if (!c.verdict) continue;
       push(c.verdict, {
-        key: `c:${c.nodeKey}`, title: c.fullName ?? c.label, href: c.url,
-        meta: starMeta(c.stars).concat(c.fills ? [{ icon: "hex", text: `fills ${c.fills}` }] : []),
-        match: c.score != null ? Math.round(c.score * 100) : null,
+        key: `c:${c.nodeKey}`, title: c.fullName ?? c.label, node: `candidate:${c.nodeKey}`,
+        repo: c.fullName ?? c.label, projectSlug: c.projectSlug, column: c.verdict,
+        meta: starMeta(c.stars).concat(projMeta(c.project)).concat(c.fills ? [{ icon: "hex", text: `fills ${c.fills}` }] : []),
+        match: c.score != null ? clampPct(c.score) : null,
         sub: c.score == null && c.effort ? c.effort : null,
       });
     }
-    const present = BOARD_ORDER.filter((k) => buckets.has(k));
-    const order = present.length ? present : (["suggested"] as string[]);
+    // Render ALL standard columns (even empty) so every verdict is a drop
+    // target; append any non-standard verdict that showed up in the data.
+    const extra = [...buckets.keys()].filter((k) => !(BOARD_ORDER as readonly string[]).includes(k));
+    const order = [...BOARD_ORDER, ...extra];
     const groups: CartGroup[] = order.map((k) => {
       const cards = (buckets.get(k) ?? []).sort((a, b) => (b.match ?? -1) - (a.match ?? -1));
       return { key: k, label: BOARD_LABEL[k] ?? k, total: cards.length, cards };
@@ -328,7 +280,7 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
     rows = cands.filter((c) => ["adopt", "port", "cherry-pick", "clean-room"].includes(c.verdict ?? ""))
       .sort((a, b) => (b.evaluatedAt ?? "").localeCompare(a.evaluatedAt ?? ""));
     columns = [
-      col("fullName", "Candidate", "title"), col("verdict", "Verdict", "text"),
+      col("fullName", "Candidate", "title"), col("project", "For", "text"), col("verdict", "Verdict", "text"),
       col("effort", "Effort", "text"), col("fills", "Fills", "text"),
       col("score", "Match", "bar"), col("stars", "Stars", "num"), col("evaluatedAt", "Decided", "date"),
     ];
@@ -338,7 +290,7 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
     rows = cands.filter((c) => ["port", "cherry-pick", "clean-room"].includes(c.verdict ?? ""))
       .sort((a, b) => (a.evaluatedAt ?? "").localeCompare(b.evaluatedAt ?? ""));
     columns = [
-      col("fullName", "Candidate", "title"), col("verdict", "Verdict", "text"),
+      col("fullName", "Candidate", "title"), col("project", "For", "text"), col("verdict", "Verdict", "text"),
       col("fills", "Fills", "text"), col("score", "Match", "bar"), col("evaluatedAt", "Deferred since", "date"),
     ];
     barKey = "score";
@@ -353,7 +305,7 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
     summary = [{ text: `${rows.length} capabilities` }, { text: `${new Set(rows.flatMap((r) => r.domains)).size} domains` }];
   }
 
-  const barMax = Math.max(1, ...rows.map((r) => Number((r as unknown as Record<string, number>)[barKey] ?? 0) || (barKey === "score" ? (r.score ?? 0) : 0)));
+  const barMax = barKey === "score" ? 100 : Math.max(1, ...rows.map((r) => Number((r as unknown as Record<string, number>)[barKey] ?? 0)));
   const outRows = rows.map((r) => toRow(r, columns, r.kind === "candidate" ? candHref(r) : capHref(r)));
   return { ...base, layout: "table", count: rows.length, columns, rows: outRows, barMax, summary };
 }
@@ -364,38 +316,24 @@ const col = (key: string, label: string, type: CartColumnType): CartColumn =>
 
 const starMeta = (stars: number | null): CartCardMeta[] =>
   stars != null ? [{ icon: "star", text: `${fmtStars(stars)} stars` }] : [];
+const projMeta = (project: string | null): CartCardMeta[] =>
+  project ? [{ icon: "folder", text: `for ${project}` }] : [];
 
-const capHref = (a: Attrs): string | null => `/atlas?node=capability:${encodeURIComponent(a.nodeKey)}`;
-const candHref = (a: Attrs): string | null => a.url ?? `/atlas?node=candidate:${encodeURIComponent(a.nodeKey)}`;
+// Clicking a row/card opens its dossier in the graph (the full decision log:
+// verdict, score, reasoning, the agent's writeup, where-used), NOT the repo.
+const nodeHref = (kind: string, nodeKey: string): string => `/atlas?node=${kind}:${encodeURIComponent(nodeKey)}`;
+const capHref = (a: Attrs): string | null => nodeHref("capability", a.nodeKey);
+const candHref = (a: Attrs): string | null => nodeHref("candidate", a.nodeKey);
 
 function toRow(a: Attrs, columns: CartColumn[], href: string | null): Record<string, string | number | boolean | string[] | null> {
   const r: Record<string, string | number | boolean | string[] | null> = { __href: href };
   for (const c of columns) {
     const v = (a as unknown as Record<string, unknown>)[c.key];
-    if (c.type === "bar") r[c.key] = c.key === "score" ? (a.score != null ? Math.round(a.score * 100) : 0) : (typeof v === "number" ? v : 0);
+    if (c.type === "bar") r[c.key] = c.key === "score" ? (a.score != null ? clampPct(a.score) : 0) : (typeof v === "number" ? v : 0);
     else if (c.type === "modality") r[c.key] = Array.isArray(v) ? (v as string[]) : [];
     else if (c.type === "num") r[c.key] = typeof v === "number" ? v : 0;
     else if (c.type === "date") r[c.key] = typeof v === "number" ? v : (typeof v === "string" ? v : null);
     else r[c.key] = (v as string) ?? null;
   }
   return r;
-}
-
-export function fmtStars(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
-  return String(n);
-}
-
-export function fmtAgo(epochOrIso: string | number | null): string {
-  if (epochOrIso == null) return "";
-  let then: number;
-  if (typeof epochOrIso === "number") then = epochOrIso * 1000;
-  else { const t = Date.parse(epochOrIso); if (Number.isNaN(t)) return String(epochOrIso); then = t; }
-  const days = Math.floor((Date.now() - then) / 86400000);
-  if (days <= 0) return "today";
-  if (days === 1) return "1d ago";
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
 }

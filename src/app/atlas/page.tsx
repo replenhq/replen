@@ -30,7 +30,7 @@ function AtlasSubStrip({ view, nodes, edges, note }: { view: "graph" | "carts"; 
 // operational overlay (alerts / blind spots / queued work) is the live state;
 // the semantic map view positions everything by MEANING (PCA over the same
 // embeddings the matcher uses). Carts (?view=carts) is the database half.
-export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string; view?: string; cart?: string; layout?: string; q?: string; prov?: string; mod?: string }> }) {
+export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string; view?: string; cart?: string; layout?: string; q?: string; prov?: string; mod?: string; proj?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   // Deep-link target ("tool:eslint") — footnote/Brief lines link here so
@@ -48,7 +48,7 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
         <AtlasSubStrip view="carts" nodes={engine.nodeCount} edges={engine.edgeCount} />
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
           <CartsView engine={engine} activeId={activeId} layout={layout}
-            filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod }} />
+            filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod, project: sp.proj }} />
         </div>
       </main>
     );
