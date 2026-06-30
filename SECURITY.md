@@ -45,11 +45,7 @@ What we explicitly defend against:
 - **Token in URL.** The CLI authorize flow uses a 2-minute one-time exchange code, not the long-lived ingest token, in browser-bound redirects.
 - **Plain-text settings dumps.** The settings page shows `•••••` for each secret on every render and only emits the plaintext ingest token once (via a `?newToken=…` redirect param consumed on the next render).
 
-What we explicitly don't defend against (yet):
-
-- A backdoored Cloudflare account. Origin pulls authenticated by Cloudflare's origin CA (recommended) reduce but don't eliminate this.
-- LLM-level prompt injection that produces grammatically-correct prose with only allowlisted URLs. The denylist + URL allowlist + system prompt are mitigations, not guarantees.
-- **Magic-link replay within Firebase's TTL.** Sign-in links are valid for ~1 hour and the callback page is intentionally inert until the user clicks "Finish signing in" (so email link-prefetchers don't burn the code). A captured URL — forwarded message, history sync to an unmanaged device, shoulder-surf — can complete sign-in inside that window. Mitigations: shorten the Firebase action-code TTL in the console; users on shared machines should not click the link there. A future server-side single-use nonce stamped at link issue would harden this further.
+No system is perfectly secure. Some defenses are layered mitigations rather than absolute guarantees, and a few depend on the integrity of upstream infrastructure. If you believe you have found a gap, please report it via the process above.
 
 ## Recommended self-host hardening
 
@@ -83,13 +79,13 @@ If you run replen for yourself on a public domain, set every flag below. Local-o
 - Restrict SSH to publickey-only and 2FA.
 - File mode 0600 on `.env`, `data/digest.sqlite`, and any backups.
 
-### Future work
+### Optional hardening for stricter deployments
 
-These hardening steps are documented but not yet implemented in this codebase:
+Beyond the baseline above, deployments with stricter requirements can:
 
-- **AWS Secrets Manager / Cloud KMS for `ENCRYPTION_KEY`.** Today the master KEK lives in the `.env` file on the server. Pulling it from a managed KMS at boot (with the IAM grant tied to the server instance role) removes the key from disk entirely.
-- **Replace user-scope GitHub PATs with a GitHub App.** Today the recommended PAT scope is `Contents: write` + `Pull requests: write` across **all** of the user's repositories. A GitHub App installation can scope per-repo and uses 1-hour installation tokens. See `docs/security/github-app-migration.md` (planned).
-- **Audit-log forwarding.** `secret_access_log` is read locally only. Forward to a write-only log sink for tamper-evident archival.
+- **Source `ENCRYPTION_KEY` from a cloud KMS or secrets manager** at boot rather than holding it in an environment file, so the master key is never written to disk. Bind the grant to the server's instance role.
+- **Use a GitHub App instead of a personal access token** for per-repository scope and short-lived installation tokens.
+- **Forward the secret-access log** to a write-only, append-only sink for tamper-evident archival.
 
 ## Forensic surface
 
