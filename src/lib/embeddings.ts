@@ -215,26 +215,57 @@ export function normalizeVec(v: number[]): number[] {
   return v.map((x) => x / mag);
 }
 
+// Embeddings are stored as float32 (the model's native precision) encoded
+// base64 in the same TEXT column — ~3.7x smaller than the JSON-float64 text it
+// replaces, with no measurable effect on cosine (the model already emits
+// float32; the round-trip error is ~1e-7, far below any decision boundary, and
+// backfill-embeddings.ts parity-checks every converted row). Little-endian is
+// written explicitly so the encoding is platform-independent.
+function encodeF32(vector: number[]): string {
+  const dv = new DataView(new ArrayBuffer(vector.length * 4));
+  for (let i = 0; i < vector.length; i++) dv.setFloat32(i * 4, vector[i], true);
+  return Buffer.from(dv.buffer).toString("base64");
+}
+function decodeF32(b64: string): number[] | null {
+  const buf = Buffer.from(b64, "base64");
+  if (buf.byteLength === 0 || buf.byteLength % 4 !== 0) return null;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const n = buf.byteLength / 4;
+  const out = new Array<number>(n);
+  for (let i = 0; i < n; i++) out[i] = dv.getFloat32(i * 4, true);
+  return out;
+}
+
 /**
- * Pull an embedding vector out of the JSON-serialised form stored in
- * the DB. Returns null for malformed / missing data; callers should
- * treat null as "no embedding yet" and either skip ranking or fall
- * back to the previous tag-based ordering.
+ * Pull an embedding vector out of its stored form. Accepts BOTH the current
+ * base64-float32 form and the legacy JSON-array form (so reads work before,
+ * during, and after the backfill). Returns null for malformed / missing data;
+ * callers treat null as "no embedding yet" and skip ranking.
  */
 export function parseStoredEmbedding(raw: string | null | undefined): number[] | null {
   if (!raw) return null;
+  // Legacy JSON-array form starts with "[" — not a base64 character.
+  if (raw.charCodeAt(0) === 0x5b /* "[" */) {
+    try {
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || arr.length !== DIMS) return null;
+      if (!arr.every((n) => typeof n === "number")) return null;
+      return arr;
+    } catch {
+      return null;
+    }
+  }
+  // Current base64-float32 form.
   try {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr) || arr.length !== DIMS) return null;
-    if (!arr.every((n) => typeof n === "number")) return null;
-    return arr;
+    const v = decodeF32(raw);
+    return v && v.length === DIMS ? v : null;
   } catch {
     return null;
   }
 }
 
 export function serialiseEmbedding(vector: number[]): string {
-  return JSON.stringify(vector);
+  return encodeF32(vector);
 }
 
 /**
