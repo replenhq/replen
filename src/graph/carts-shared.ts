@@ -31,6 +31,27 @@ export type CartCard = {
 export type CartCardDetail = CartCard; // alias for the drawer
 export type CartGroup = { key: string; label: string; total: number; cards: CartCard[] };
 
+// A node placed on the semantic (PCA) map. Position is joined in the UI from
+// computeSemanticMap by the `node` ref ("kind:nodeKey").
+export type CartMapPoint = {
+  node: string;              // "kind:nodeKey" — join key + dossier ref
+  label: string;
+  kind: string;
+  theme: string | null;
+  provenance: string | null;
+  modality: string | null;
+  verdict: string | null;
+};
+
+// A node on the Timeline layout, placed by its timestamp (epoch seconds).
+export type CartTimelineItem = {
+  node: string;              // dossier ref
+  title: string;
+  at: number | null;         // epoch seconds; null = undated
+  tag: string | null;        // verdict / theme
+  sub: string | null;
+};
+
 export type CartResult = {
   id: string;
   name: string;
@@ -42,6 +63,8 @@ export type CartResult = {
   rows: Record<string, string | number | boolean | string[] | null>[];
   barMax: number;
   groups?: CartGroup[];
+  points?: CartMapPoint[];
+  timeline?: CartTimelineItem[];
   summary?: { text: string; accent?: boolean }[];
 };
 

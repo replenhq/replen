@@ -13,7 +13,7 @@ import { db, schema } from "@/db/client";
 import {
   CARTS, fmtStars,
   type CartLayout, type CartColumn, type CartColumnType, type CartCard, type CartCardMeta,
-  type CartGroup, type CartResult, type CartFilters,
+  type CartGroup, type CartResult, type CartFilters, type CartMapPoint, type CartTimelineItem,
 } from "./carts-shared";
 
 // Re-export the pure surface so server callers keep importing "@/graph/carts".
@@ -191,6 +191,24 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
 
   const base = { id: meta.id, name: meta.name, description: meta.description, icon: meta.icon, layout };
 
+  // ---- Map (PCA semantic scatter) — the UI joins these to positions -------
+  if (layout === "map") {
+    const points = mapPointsFor(id, caps, cands, suggs);
+    return { ...base, layout: "map", count: points.length, columns: [], rows: [], barMax: 0, points };
+  }
+
+  // ---- Cards (grouped card grid) -----------------------------------------
+  if (layout === "cards") {
+    const groups = cardGroupsFor(id, caps, cands, suggs);
+    return { ...base, layout: "cards", count: groups.reduce((s, g) => s + g.total, 0), columns: [], rows: [], barMax: 0, groups };
+  }
+
+  // ---- Timeline (nodes by timestamp, newest first) -----------------------
+  if (layout === "timeline") {
+    const timeline = timelineItemsFor(id, caps, cands, suggs);
+    return { ...base, layout: "timeline", count: timeline.length, columns: [], rows: [], barMax: 0, timeline };
+  }
+
   // ---- Triage as a flat table (the Board↔Table flip) ---------------------
   if (id === "triage" && layout === "table") {
     const members = [
@@ -308,6 +326,83 @@ export function runCart(engine: CartEngine, id: string, opts: { layout?: CartLay
   const barMax = barKey === "score" ? 100 : Math.max(1, ...rows.map((r) => Number((r as unknown as Record<string, number>)[barKey] ?? 0)));
   const outRows = rows.map((r) => toRow(r, columns, r.kind === "candidate" ? candHref(r) : capHref(r)));
   return { ...base, layout: "table", count: rows.length, columns, rows: outRows, barMax, summary };
+}
+
+// The cart's nodes as map points (position is joined in the UI). Mirrors each
+// cart's natural node set so the scatter matches the table/board.
+function mapPointsFor(id: string, caps: Attrs[], cands: Attrs[], suggs: Attrs[]): CartMapPoint[] {
+  const capPt = (a: Attrs): CartMapPoint => ({ node: `capability:${a.nodeKey}`, label: a.label, kind: "capability", theme: a.theme, provenance: a.provenance, modality: a.modality[0] ?? null, verdict: null });
+  const candPt = (a: Attrs): CartMapPoint => ({ node: `${a.kind}:${a.nodeKey}`, label: a.fullName ?? a.label, kind: a.kind, theme: null, provenance: a.provenance, modality: null, verdict: a.verdict ?? (a.status === "starred" ? "evaluating" : "suggested") });
+  switch (id) {
+    case "blind-spots": return caps.filter((c) => c.projects > 0 && c.fillers === 0).map(capPt);
+    case "keystones": return caps.filter((c) => c.waypoint || c.degree >= 3).map(capPt);
+    case "by-domain": return caps.filter((c) => c.domains.length > 0).map(capPt);
+    case "brought-in": return cands.filter((c) => ["adopt", "port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candPt);
+    case "stale": return cands.filter((c) => ["port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candPt);
+    case "triage": return [...suggs.map(candPt), ...cands.filter((c) => c.verdict).map(candPt)];
+    default: return caps.map(capPt);
+  }
+}
+
+// Grouped card grid: candidate carts group by verdict, capability carts by
+// theme (or domain for by-domain). Reuses the board's CartCard shape.
+function cardGroupsFor(id: string, caps: Attrs[], cands: Attrs[], suggs: Attrs[]): CartGroup[] {
+  const capCard = (a: Attrs, group: string): CartCard => ({
+    key: `cap:${a.nodeKey}`, title: a.label, node: `capability:${a.nodeKey}`, repo: a.label,
+    projectSlug: null, column: group,
+    meta: ([] as CartCardMeta[])
+      .concat(a.provenance ? [{ icon: "doc", text: a.provenance }] : [])
+      .concat(a.modality.length ? [{ icon: "hex", text: a.modality.join(", ") }] : [])
+      .concat([{ icon: "folder", text: `${a.projects} project${a.projects === 1 ? "" : "s"}` }]),
+    match: null, sub: a.fillers === 0 ? "no tool fills it" : `${a.fillers} filling`,
+  });
+  const candCard = (a: Attrs): CartCard => ({
+    key: `${a.kind}:${a.nodeKey}`, title: a.fullName ?? a.label, node: `${a.kind}:${a.nodeKey}`,
+    repo: a.fullName ?? a.label, projectSlug: a.projectSlug,
+    column: a.verdict ?? (a.status === "starred" ? "evaluating" : "suggested"),
+    meta: starMeta(a.stars).concat(projMeta(a.project)).concat(a.fills ? [{ icon: "hex", text: `fills ${a.fills}` }] : []),
+    match: a.score != null ? clampPct(a.score) : null, sub: null,
+  });
+  const group = (cards: CartCard[], order?: readonly string[]): CartGroup[] => {
+    const m = new Map<string, CartCard[]>();
+    for (const c of cards) (m.get(c.column) ?? m.set(c.column, []).get(c.column)!).push(c);
+    let keys = [...m.keys()];
+    keys = order
+      ? [...order.filter((k) => m.has(k)), ...keys.filter((k) => !order.includes(k))]
+      : keys.sort((a, b) => m.get(b)!.length - m.get(a)!.length);
+    return keys.map((k) => ({ key: k, label: BOARD_LABEL[k] ?? k, total: m.get(k)!.length, cards: m.get(k)! }));
+  };
+  switch (id) {
+    case "blind-spots": return group(caps.filter((c) => c.projects > 0 && c.fillers === 0).map((c) => capCard(c, c.theme ?? "untyped")));
+    case "keystones": return group(caps.filter((c) => c.waypoint || c.degree >= 3).map((c) => capCard(c, c.theme ?? "untyped")));
+    case "by-domain": return group(caps.filter((c) => c.domains.length > 0).map((c) => capCard(c, c.domains[0])));
+    case "brought-in": return group(cands.filter((c) => ["adopt", "port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candCard), BOARD_ORDER);
+    case "stale": return group(cands.filter((c) => ["port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candCard), BOARD_ORDER);
+    case "triage": return group([...suggs.map(candCard), ...cands.filter((c) => c.verdict).map(candCard)], BOARD_ORDER);
+    default: return group(caps.map((c) => capCard(c, c.theme ?? "untyped")));
+  }
+}
+
+// Timeline: nodes by their timestamp (candidates = evaluatedAt, capabilities =
+// last seen), newest first; undated sink to the end.
+function timelineItemsFor(id: string, caps: Attrs[], cands: Attrs[], suggs: Attrs[]): CartTimelineItem[] {
+  void suggs;
+  const capItem = (a: Attrs): CartTimelineItem => ({ node: `capability:${a.nodeKey}`, title: a.label, at: a.updatedAt || null, tag: a.theme, sub: `${a.projects} project${a.projects === 1 ? "" : "s"}${a.fillers === 0 ? " · blind spot" : ""}` });
+  const candItem = (a: Attrs): CartTimelineItem => {
+    const t = a.evaluatedAt ? Date.parse(a.evaluatedAt) : NaN;
+    return { node: `${a.kind}:${a.nodeKey}`, title: a.fullName ?? a.label, at: Number.isNaN(t) ? null : Math.floor(t / 1000), tag: a.verdict, sub: a.fills ? `fills ${a.fills}` : (a.project ? `for ${a.project}` : null) };
+  };
+  let items: CartTimelineItem[];
+  switch (id) {
+    case "brought-in": items = cands.filter((c) => ["adopt", "port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candItem); break;
+    case "stale": items = cands.filter((c) => ["port", "cherry-pick", "clean-room"].includes(c.verdict ?? "")).map(candItem); break;
+    case "triage": items = cands.filter((c) => c.verdict).map(candItem); break;
+    case "blind-spots": items = caps.filter((c) => c.projects > 0 && c.fillers === 0).map(capItem); break;
+    case "keystones": items = caps.filter((c) => c.waypoint || c.degree >= 3).map(capItem); break;
+    case "by-domain": items = caps.filter((c) => c.domains.length > 0).map(capItem); break;
+    default: items = caps.map(capItem);
+  }
+  return items.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 }
 
 // ---- row / href helpers -----------------------------------------------------

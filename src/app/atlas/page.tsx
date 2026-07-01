@@ -43,11 +43,19 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
     const activeId = sp.cart && CARTS.some((c) => c.id === sp.cart) ? sp.cart : CARTS[0].id;
     const layout = (["table", "board", "cards", "map", "timeline"].includes(sp.layout ?? "")
       ? sp.layout : CARTS.find((c) => c.id === activeId)?.layout) as CartLayout;
+    // The map layout needs PCA positions (same projection as the graph); only
+    // compute them when actually showing the map.
+    let mapPos: Record<string, { x: number; y: number }> | undefined;
+    if (layout === "map") {
+      const pts = await computeSemanticMap(user.id);
+      mapPos = {};
+      for (const p of pts) mapPos[`${p.kind}:${p.nodeKey}`] = { x: p.x, y: p.y };
+    }
     return (
       <main className="atlas-main">
         <AtlasSubStrip view="carts" nodes={engine.nodeCount} edges={engine.edgeCount} />
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-          <CartsView engine={engine} activeId={activeId} layout={layout}
+          <CartsView engine={engine} activeId={activeId} layout={layout} mapPos={mapPos}
             filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod, project: sp.proj }} />
         </div>
       </main>

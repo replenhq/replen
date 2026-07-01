@@ -2,9 +2,9 @@
 
 import { useOptimistic, useState, useTransition } from "react";
 import { Icon } from "@/components/Icons";
-import { getNodeDossier, type Dossier } from "./actions";
 import { setCartVerdict } from "./carts-actions";
-import { VERDICT_COLUMNS, fmtAgo, type CartGroup, type CartCard } from "@/graph/carts-shared";
+import { NodeDrawer } from "./CartsDrawer";
+import { VERDICT_COLUMNS, type CartGroup, type CartCard } from "@/graph/carts-shared";
 
 const META_ICON: Record<string, string> = { star: "star", hex: "hexagon", doc: "doc", split: "split", folder: "folder" };
 const DROP = new Set(VERDICT_COLUMNS);
@@ -23,19 +23,7 @@ export function CartsBoard({ groups, note }: { groups: CartGroup[]; note: string
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [sel, setSel] = useState<CartCard | null>(null);
-  const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [loadingDoss, setLoadingDoss] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  function openCard(card: CartCard) {
-    setSel(card);
-    setDossier(null);
-    setLoadingDoss(true);
-    const i = card.node.indexOf(":");
-    const kind = card.node.slice(0, i);
-    const key = card.node.slice(i + 1);
-    getNodeDossier(kind, key).then((d) => { setDossier(d); setLoadingDoss(false); }).catch(() => setLoadingDoss(false));
-  }
 
   function drop(columnKey: string) {
     setOverCol(null);
@@ -80,7 +68,7 @@ export function CartsBoard({ groups, note }: { groups: CartGroup[]; note: string
                     draggable
                     onDragStart={() => setDragKey(card.key)}
                     onDragEnd={() => { setDragKey(null); setOverCol(null); }}
-                    onClick={() => openCard(card)}
+                    onClick={() => setSel(card)}
                   >
                     <div className="carts-card-title">{card.title}</div>
                     {card.meta.map((mt, i) => (
@@ -106,57 +94,7 @@ export function CartsBoard({ groups, note }: { groups: CartGroup[]; note: string
         {pending ? <span className="carts-saving">  ·  saving…</span> : null}
       </div>
 
-      {sel && (
-        <>
-          <div className="carts-drawer-scrim" onClick={() => setSel(null)} />
-          <aside className="carts-drawer">
-            <div className="carts-drawer-head">
-              <div className="carts-drawer-title">{sel.title}</div>
-              <button className="carts-drawer-close" onClick={() => setSel(null)} aria-label="Close">×</button>
-            </div>
-            {loadingDoss && <div className="carts-drawer-loading">Loading detail…</div>}
-            {!loadingDoss && dossier && <Detail dossier={dossier} />}
-            {!loadingDoss && !dossier && <div className="carts-drawer-loading">No detail available for this node.</div>}
-          </aside>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Detail({ dossier }: { dossier: Dossier }) {
-  return (
-    <div className="carts-drawer-body">
-      {dossier.subtitle && <div className="carts-drawer-subtitle">{dossier.subtitle}</div>}
-      {dossier.url && <a className="carts-drawer-repo" href={dossier.url} target="_blank" rel="noopener">Open repo →</a>}
-
-      {dossier.decisions && dossier.decisions.length > 0 && (
-        <div className="carts-drawer-section">
-          <div className="carts-drawer-h">Decision log</div>
-          {dossier.decisions.map((d, i) => (
-            <div key={i} className="carts-decision">
-              <div className="carts-decision-head">
-                <span className="carts-verdict-pill">{d.verdict}</span>
-                {d.score != null && <span className="carts-dim">{d.score}% match</span>}
-                {d.effort && <span className="carts-faint">{d.effort}</span>}
-                <span className="carts-faint">{d.project}{d.at ? `  ·  ${fmtAgo(d.at)}` : ""}</span>
-              </div>
-              {d.oneLine && <div className="carts-decision-one">{d.oneLine}</div>}
-              {d.writeup && <div className="carts-decision-writeup">{d.writeup}</div>}
-              {d.reason && <div className="carts-faint">reason: {d.reason}</div>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {dossier.sections?.map((s, i) => (
-        s.items.length > 0 ? (
-          <div key={i} className="carts-drawer-section">
-            <div className="carts-drawer-h">{s.heading}</div>
-            <ul className="carts-drawer-list">{s.items.map((it, j) => <li key={j}>{it}</li>)}</ul>
-          </div>
-        ) : null
-      ))}
+      <NodeDrawer nodeRef={sel?.node ?? null} title={sel?.title ?? ""} onClose={() => setSel(null)} />
     </div>
   );
 }

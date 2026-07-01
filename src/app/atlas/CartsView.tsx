@@ -1,5 +1,8 @@
 import { Icon } from "@/components/Icons";
 import { CartsBoard } from "./CartsBoard";
+import { CartsMap } from "./CartsMap";
+import { CartsCards } from "./CartsCards";
+import { CartsTimeline } from "./CartsTimeline";
 import {
   CARTS, cartCount, runCart, fmtAgo, fmtStars,
   type CartEngine, type CartLayout, type CartResult, type CartColumn, type CartFilters,
@@ -27,9 +30,10 @@ const PROVENANCE = ["grounded", "extracted", "inferred"];
 const isExternal = (h: string | null): boolean => !!h && /^https?:\/\//.test(h);
 
 export function CartsView({
-  engine, activeId, layout, filters,
+  engine, activeId, layout, filters, mapPos,
 }: {
   engine: CartEngine; activeId: string; layout: CartLayout; filters: CartFilters;
+  mapPos?: Record<string, { x: number; y: number }>;
 }) {
   const result = runCart(engine, activeId, { layout, filters });
   const candidateCart = CANDIDATE_CARTS.has(activeId);
@@ -83,7 +87,8 @@ export function CartsView({
           </div>
           <div className="carts-switcher">
             {LAYOUTS.map((l) => {
-              const live = l.id === "table" || (l.id === "board" && activeId === "triage");
+              // every layout is live now; Board is the only cart-specific one.
+              const live = l.id === "board" ? activeId === "triage" : true;
               const active = l.id === layout;
               if (active) return <span key={l.id} className="carts-tab active"><Icon name={l.icon} size={14} />{l.label}</span>;
               if (!live) return <span key={l.id} className="carts-tab ghost"><Icon name={l.icon} size={14} />{l.label}</span>;
@@ -114,6 +119,12 @@ export function CartsView({
 
         {result.layout === "board"
           ? <CartsBoard groups={result.groups ?? []} note="Drag a card into a verdict column to record or override it. Click a card for its full detail." />
+          : result.layout === "map"
+          ? <CartsMap points={result.points ?? []} positions={mapPos ?? {}} />
+          : result.layout === "cards"
+          ? <CartsCards groups={result.groups ?? []} />
+          : result.layout === "timeline"
+          ? <CartsTimeline items={result.timeline ?? []} />
           : <TableLayout result={result} />}
       </section>
     </div>
