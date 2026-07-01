@@ -78,6 +78,10 @@ export type CartFilters = {
 
 export type CartMeta = { id: string; name: string; description: string; icon: string; layout: CartLayout };
 
+// A user-saved view: a built-in cart + a layout + saved filters, persisted in
+// atlas_carts. Presentation config only.
+export type SavedCart = { id: number; name: string; baseCart: string; layout: CartLayout | null; filters: CartFilters };
+
 // Columns a card can be dragged INTO (real verdicts). suggested/evaluating are
 // statuses, not verdicts, so they are not drop targets.
 export const VERDICT_COLUMNS = ["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip"];

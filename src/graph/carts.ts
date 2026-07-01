@@ -8,19 +8,20 @@
 // using the ontology's typed props (src/graph/ontology.ts). The graph plots these
 // as dots and hides the rest; Carts surface them. Reads only, derived columns
 // computed from edges. Starter Carts ship built in; user-saved Carts come later.
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import {
   CARTS, fmtStars,
   type CartLayout, type CartColumn, type CartColumnType, type CartCard, type CartCardMeta,
   type CartGroup, type CartResult, type CartFilters, type CartMapPoint, type CartTimelineItem,
+  type SavedCart,
 } from "./carts-shared";
 
 // Re-export the pure surface so server callers keep importing "@/graph/carts".
 export { CARTS, VERDICT_COLUMNS, fmtStars, fmtAgo } from "./carts-shared";
 export type {
   CartLayout, CartColumnType, CartColumn, CartCardMeta, CartCard, CartCardDetail,
-  CartGroup, CartResult, CartFilters, CartMeta,
+  CartGroup, CartResult, CartFilters, CartMeta, CartMapPoint, CartTimelineItem, SavedCart,
 } from "./carts-shared";
 
 const PROV_ORDER = ["grounded", "extracted", "inferred", "ambiguous"];
@@ -148,6 +149,27 @@ export async function buildCartEngine(userId: number): Promise<CartEngine> {
     byKind.set(a.kind, arr);
   }
   return { attrs, byKind, nodeCount: rawNodes.length, edgeCount: rawEdges.length };
+}
+
+// ---- user-saved carts (atlas_carts) ----------------------------------------
+type AtlasCartRow = { id: number; name: string; baseCart: string; layout: string | null; filtersJson: string | null };
+function toSavedCart(r: AtlasCartRow): SavedCart {
+  let filters: CartFilters = {};
+  try { filters = r.filtersJson ? (JSON.parse(r.filtersJson) as CartFilters) : {}; } catch { /* */ }
+  return { id: r.id, name: r.name, baseCart: r.baseCart, layout: (r.layout as CartLayout) ?? null, filters };
+}
+export async function loadSavedCarts(userId: number): Promise<SavedCart[]> {
+  const rows = await db.select({ id: schema.atlasCarts.id, name: schema.atlasCarts.name, baseCart: schema.atlasCarts.baseCart, layout: schema.atlasCarts.layout, filtersJson: schema.atlasCarts.filtersJson })
+    .from(schema.atlasCarts).where(eq(schema.atlasCarts.userId, userId)).orderBy(schema.atlasCarts.createdAt);
+  return rows.map(toSavedCart);
+}
+export async function findSavedCart(userId: number, nameOrId: string): Promise<SavedCart | null> {
+  const asId = Number(nameOrId);
+  const row = await db.select({ id: schema.atlasCarts.id, name: schema.atlasCarts.name, baseCart: schema.atlasCarts.baseCart, layout: schema.atlasCarts.layout, filtersJson: schema.atlasCarts.filtersJson })
+    .from(schema.atlasCarts)
+    .where(and(eq(schema.atlasCarts.userId, userId), Number.isInteger(asId) && String(asId) === nameOrId ? eq(schema.atlasCarts.id, asId) : eq(schema.atlasCarts.name, nameOrId)))
+    .get();
+  return row ? toSavedCart(row) : null;
 }
 
 // Cheap per-cart counts for the rail, off the same engine.

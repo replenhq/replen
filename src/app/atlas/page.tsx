@@ -6,7 +6,7 @@ import { computeSemanticMap } from "@/graph/semantic-map";
 import { AtlasGraph, type GNode, type GEdge } from "./AtlasGraph";
 import { suggestUpgrades } from "@/lib/keystone";
 import { CartsView } from "./CartsView";
-import { buildCartEngine, CARTS, type CartLayout } from "@/graph/carts";
+import { buildCartEngine, loadSavedCarts, CARTS, type CartLayout } from "@/graph/carts";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ function AtlasSubStrip({ view, nodes, edges, note }: { view: "graph" | "carts"; 
 // operational overlay (alerts / blind spots / queued work) is the live state;
 // the semantic map view positions everything by MEANING (PCA over the same
 // embeddings the matcher uses). Carts (?view=carts) is the database half.
-export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string; view?: string; cart?: string; layout?: string; q?: string; prov?: string; mod?: string; proj?: string }> }) {
+export default async function AtlasPage({ searchParams }: { searchParams: Promise<{ node?: string; view?: string; cart?: string; layout?: string; q?: string; prov?: string; mod?: string; proj?: string; saved?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   // Deep-link target ("tool:eslint") — footnote/Brief lines link here so
@@ -39,7 +39,7 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
 
   // ---- Carts: the database half of Atlas (rail + table/board over the graph)
   if (sp.view === "carts") {
-    const engine = await buildCartEngine(user.id);
+    const [engine, savedCarts] = await Promise.all([buildCartEngine(user.id), loadSavedCarts(user.id)]);
     const activeId = sp.cart && CARTS.some((c) => c.id === sp.cart) ? sp.cart : CARTS[0].id;
     const layout = (["table", "board", "cards", "map", "timeline"].includes(sp.layout ?? "")
       ? sp.layout : CARTS.find((c) => c.id === activeId)?.layout) as CartLayout;
@@ -56,7 +56,8 @@ export default async function AtlasPage({ searchParams }: { searchParams: Promis
         <AtlasSubStrip view="carts" nodes={engine.nodeCount} edges={engine.edgeCount} />
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
           <CartsView engine={engine} activeId={activeId} layout={layout} mapPos={mapPos}
-            filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod, project: sp.proj }} />
+            filters={{ q: sp.q, provenance: sp.prov, modality: sp.mod, project: sp.proj }}
+            savedCarts={savedCarts} activeSaved={sp.saved ?? null} />
         </div>
       </main>
     );

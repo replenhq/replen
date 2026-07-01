@@ -3,9 +3,10 @@ import { CartsBoard } from "./CartsBoard";
 import { CartsMap } from "./CartsMap";
 import { CartsCards } from "./CartsCards";
 import { CartsTimeline } from "./CartsTimeline";
+import { SaveView, DeleteCart } from "./CartsSave";
 import {
   CARTS, cartCount, runCart, fmtAgo, fmtStars,
-  type CartEngine, type CartLayout, type CartResult, type CartColumn, type CartFilters,
+  type CartEngine, type CartLayout, type CartResult, type CartColumn, type CartFilters, type SavedCart,
 } from "@/graph/carts";
 
 // The "database" half of Atlas. Server-rendered: the rail, switcher, filter row,
@@ -30,10 +31,11 @@ const PROVENANCE = ["grounded", "extracted", "inferred"];
 const isExternal = (h: string | null): boolean => !!h && /^https?:\/\//.test(h);
 
 export function CartsView({
-  engine, activeId, layout, filters, mapPos,
+  engine, activeId, layout, filters, mapPos, savedCarts = [], activeSaved = null,
 }: {
   engine: CartEngine; activeId: string; layout: CartLayout; filters: CartFilters;
   mapPos?: Record<string, { x: number; y: number }>;
+  savedCarts?: SavedCart[]; activeSaved?: string | null;
 }) {
   const result = runCart(engine, activeId, { layout, filters });
   const candidateCart = CANDIDATE_CARTS.has(activeId);
@@ -60,13 +62,27 @@ export function CartsView({
     return `/atlas?${p.toString()}`;
   };
 
+  // A saved cart's link carries its own base cart + layout + filters.
+  const savedHref = (sc: SavedCart): string => {
+    const p = new URLSearchParams();
+    p.set("view", "carts");
+    p.set("cart", sc.baseCart);
+    if (sc.layout) p.set("layout", sc.layout);
+    if (sc.filters.q) p.set("q", sc.filters.q);
+    if (sc.filters.provenance) p.set("prov", sc.filters.provenance);
+    if (sc.filters.modality) p.set("mod", sc.filters.modality);
+    if (sc.filters.project) p.set("proj", sc.filters.project);
+    p.set("saved", String(sc.id));
+    return `/atlas?${p.toString()}`;
+  };
+
   return (
     <div className="carts-root">
       {/* left rail */}
       <aside className="carts-rail">
         <div className="carts-rail-label">CARTS</div>
         {CARTS.map((c) => {
-          const active = c.id === activeId;
+          const active = c.id === activeId && !activeSaved;
           return (
             <a key={c.id} href={href({ cart: c.id })} className={`carts-rail-item${active ? " active" : ""}`}>
               <Icon name={RAIL_ICON[c.id] ?? "doc"} size={15} />
@@ -75,7 +91,21 @@ export function CartsView({
             </a>
           );
         })}
-        <div className="carts-rail-new">+&nbsp;&nbsp;New cart</div>
+        {savedCarts.length > 0 && (
+          <>
+            <div className="carts-rail-label carts-rail-label-saved">SAVED</div>
+            {savedCarts.map((sc) => (
+              <div key={sc.id} className={`carts-rail-item saved${activeSaved === String(sc.id) ? " active" : ""}`}>
+                <a href={savedHref(sc)} className="carts-rail-savedlink">
+                  <Icon name="bookmark" size={14} />
+                  <span className="carts-rail-name">{sc.name}</span>
+                </a>
+                <DeleteCart id={sc.id} />
+              </div>
+            ))}
+          </>
+        )}
+        <SaveView baseCart={activeId} layout={layout} filters={filters} />
       </aside>
 
       {/* main */}

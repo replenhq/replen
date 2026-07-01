@@ -11,9 +11,44 @@ import { db, schema } from "@/db/client";
 import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 import { buildUserGraph } from "@/graph/build";
+import { CARTS, type CartFilters } from "@/graph/carts-shared";
 import { revalidatePath } from "next/cache";
 
 const VERDICTS = new Set(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip"]);
+const BUILTIN = new Set(CARTS.map((c) => c.id));
+
+// Save (or update) a filtered view as a named cart.
+export async function saveCart(
+  name: string, baseCart: string, layout: string | null, filters: CartFilters,
+): Promise<{ ok: boolean; id?: number; error?: string }> {
+  const user = await requireWritableUser();
+  name = name.trim().slice(0, 60);
+  if (!name) return { ok: false, error: "name required" };
+  if (!BUILTIN.has(baseCart)) return { ok: false, error: "unknown cart" };
+  const clean: CartFilters = {};
+  for (const k of ["provenance", "modality", "verdict", "project", "q"] as const) {
+    const v = filters[k];
+    if (typeof v === "string" && v) clean[k] = v;
+  }
+  const now = new Date();
+  try {
+    const r = await db.insert(schema.atlasCarts)
+      .values({ userId: user.id, name, baseCart, layout: layout || null, filtersJson: JSON.stringify(clean), createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: [schema.atlasCarts.userId, schema.atlasCarts.name], set: { baseCart, layout: layout || null, filtersJson: JSON.stringify(clean), updatedAt: now } })
+      .returning({ id: schema.atlasCarts.id });
+    revalidatePath("/atlas");
+    return { ok: true, id: r[0]?.id };
+  } catch {
+    return { ok: false, error: "could not save" };
+  }
+}
+
+export async function deleteCart(id: number): Promise<{ ok: boolean }> {
+  const user = await requireWritableUser();
+  await db.delete(schema.atlasCarts).where(and(eq(schema.atlasCarts.id, id), eq(schema.atlasCarts.userId, user.id)));
+  revalidatePath("/atlas");
+  return { ok: true };
+}
 
 export async function setCartVerdict(
   repoFullName: string,

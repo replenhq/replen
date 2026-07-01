@@ -1047,6 +1047,29 @@ export const userGraphMeta = sqliteTable("user_graph_meta", {
   builtAt: integer("built_at", { mode: "timestamp" }),
 });
 
+// Atlas Carts — a user-saved view over a built-in cart: the base cart it
+// derives from + a layout + saved filters. Presentation config only; the data
+// is still the graph (graph_nodes/graph_edges). No node text lives here.
+export const atlasCarts = sqliteTable(
+  "atlas_carts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull(),
+    name: text("name").notNull(),
+    // The built-in cart this saved view derives from (blind-spots, triage, …).
+    baseCart: text("base_cart").notNull(),
+    layout: text("layout"),
+    // JSON { provenance?, modality?, verdict?, project?, q? }
+    filtersJson: text("filters_json"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    uniqName: uniqueIndex("uniq_atlas_cart_user_name").on(t.userId, t.name),
+    idxUser: index("idx_atlas_cart_user").on(t.userId),
+  }),
+);
+
 // ============================================================================
 // Pricing watch — track the pricing pages of ~255 paid developer tools and
 // surface "P.s. <vendor> updated their pricing" when a tool a user actually

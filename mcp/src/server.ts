@@ -64,6 +64,7 @@ const TOOLS: Tool[] = [
         "  Atlas (the knowledge graph + memory):",
         "    replen_leaps            Leaps — non-obvious cross-project / adjacency / cross-user connections, path-explained.",
         "    replen_recall           Memory over capabilities, decisions, reports, and your anchored notes.",
+        "    replen_cart             Atlas Carts — pull a saved, filtered view (blind spots, triage, keystones, brought in, stale, by domain, or your saved carts).",
         "    replen_queue            The Queue — list / add / done / dismiss work waiting for a session.",
         "    replen_handoff          Open a handoff PR in the matched project's own repo.",
         "",
@@ -191,6 +192,36 @@ const TOOLS: Tool[] = [
     handler: async (cfg, args) => {
       const parsed = z.object({ query: z.string().optional().default(""), verdict: z.enum(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip", "defer"]).optional(), limit: z.number().int().min(1).max(20).default(8) }).parse(args);
       const data = await apiPost(cfg, "/api/graph/recall", parsed);
+      return JSON.stringify(data, null, 2);
+    },
+  },
+  {
+    name: "replen_cart",
+    description:
+      "Atlas Carts — pull a saved, filtered VIEW over the user's decision graph so you can act on it in-session. " +
+      "Built-in carts: 'blind-spots' (capabilities they have with NO tool/library filling them — the gaps), " +
+      "'triage' (candidates + suggestions grouped by verdict), 'keystones' (capabilities recurring across the most repos), " +
+      "'brought-in' (what they adopted / ported / cherry-picked), 'stale' (port/cherry-pick verdicts they haven't acted on, oldest first), " +
+      "'by-domain' (capabilities grouped by domain) — plus any carts the user saved in the Atlas webapp. " +
+      "Call with NO cart to LIST every available cart with its row count; then call again with cart='<id or saved name>'. " +
+      "Returns { cart, count, columns, rows } (read-only). Use it for 'what are my blind spots?', 'what have I been meaning to port?', or to open a named saved cart.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cart: { type: "string", description: "Cart id ('blind-spots','triage','keystones','brought-in','stale','by-domain') or a saved-cart name. Omit to list all carts." },
+        project: { type: "string", description: "Optional: scope to one of the user's project slugs (candidate carts)." },
+        verdict: { type: "string", enum: ["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip"], description: "Optional verdict filter (candidate carts)." },
+        provenance: { type: "string", enum: ["grounded", "extracted", "inferred"], description: "Optional provenance filter (capability carts)." },
+        modality: { type: "string", description: "Optional modality filter (capability carts), e.g. 'timeseries', 'image', 'text'." },
+        q: { type: "string", description: "Optional free-text search within the cart." },
+      },
+    },
+    handler: async (cfg, args) => {
+      const parsed = z.object({
+        cart: z.string().optional(), project: z.string().optional(), verdict: z.string().optional(),
+        provenance: z.string().optional(), modality: z.string().optional(), q: z.string().optional(),
+      }).parse(args);
+      const data = await apiGet(cfg, "/api/mcp/cart", { cart: parsed.cart, project: parsed.project, verdict: parsed.verdict, prov: parsed.provenance, mod: parsed.modality, q: parsed.q });
       return JSON.stringify(data, null, 2);
     },
   },

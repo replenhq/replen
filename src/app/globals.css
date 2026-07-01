@@ -839,6 +839,25 @@ td.path {
 .carts-rail-count { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .carts-rail-item.active .carts-rail-count { color: var(--dim); }
 .carts-rail-new { padding: 11px 10px; color: var(--faint); font-size: 13px; font-weight: 400; }
+.carts-rail-label-saved { margin-top: 16px; }
+.carts-rail-item.saved { display: flex; align-items: center; gap: 0; padding: 0 4px 0 0; }
+.carts-rail-savedlink { flex: 1; display: flex; align-items: center; gap: 11px; padding: 8px 10px; color: inherit; text-decoration: none; min-width: 0; }
+.carts-rail-item.saved svg { color: var(--faint); flex-shrink: 0; }
+.carts-rail-item.saved.active svg, .carts-rail-item.saved:hover svg { color: var(--fg); }
+.carts-rail-del { background: transparent; border: 0; color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 7px; border-radius: 6px; opacity: 0; flex-shrink: 0; }
+.carts-rail-item.saved:hover .carts-rail-del { opacity: 1; }
+.carts-rail-del:hover { color: #ff8b7a; }
+.carts-rail-save { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 11px 10px; margin-top: 4px; color: var(--faint); font: inherit; font-size: 13px; font-weight: 400; cursor: pointer; }
+.carts-rail-save:hover { color: var(--fg); }
+.carts-rail-saveform { padding: 8px 6px; margin-top: 4px; }
+.carts-rail-saveform input { width: 100%; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 10px; color: var(--fg); font: inherit; font-size: 13px; font-weight: 300; }
+.carts-rail-saveform input:focus { outline: 1px solid var(--amber); border-color: var(--amber-line); }
+.carts-rail-saveform-row { display: flex; gap: 6px; margin-top: 6px; }
+.carts-rail-saveconfirm { flex: 1; background: var(--amber-soft); border: 1px solid var(--amber-line); color: var(--amber); border-radius: 7px; padding: 6px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.carts-rail-saveconfirm:disabled { opacity: 0.6; }
+.carts-rail-savecancel { background: transparent; border: 1px solid var(--line); color: var(--dim); border-radius: 7px; padding: 6px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.carts-rail-savecancel:hover { color: var(--fg); }
+.carts-rail-saveerr { color: #ff8b7a; font-size: 11.5px; margin-top: 5px; }
 
 /* main column */
 .carts-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }

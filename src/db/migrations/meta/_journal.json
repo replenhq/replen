@@ -1,531 +1,538 @@
 {
-	"version": "7",
-	"dialect": "sqlite",
-	"entries": [
-		{
-			"idx": 0,
-			"version": "6",
-			"when": 1778599428191,
-			"tag": "0000_medical_pyro",
-			"breakpoints": true
-		},
-		{
-			"idx": 1,
-			"version": "6",
-			"when": 1778679805093,
-			"tag": "0001_complete_ultragirl",
-			"breakpoints": true
-		},
-		{
-			"idx": 2,
-			"version": "6",
-			"when": 1778681219972,
-			"tag": "0002_swift_energizer",
-			"breakpoints": true
-		},
-		{
-			"idx": 3,
-			"version": "6",
-			"when": 1778683382134,
-			"tag": "0003_magenta_colleen_wing",
-			"breakpoints": true
-		},
-		{
-			"idx": 4,
-			"version": "6",
-			"when": 1778683955308,
-			"tag": "0004_certain_azazel",
-			"breakpoints": true
-		},
-		{
-			"idx": 5,
-			"version": "6",
-			"when": 1778688754873,
-			"tag": "0005_lively_runaways",
-			"breakpoints": true
-		},
-		{
-			"idx": 6,
-			"version": "6",
-			"when": 1778749637487,
-			"tag": "0006_opposite_glorian",
-			"breakpoints": true
-		},
-		{
-			"idx": 7,
-			"version": "6",
-			"when": 1778752131664,
-			"tag": "0007_equal_hobgoblin",
-			"breakpoints": true
-		},
-		{
-			"idx": 8,
-			"version": "6",
-			"when": 1778763588702,
-			"tag": "0008_pink_ken_ellis",
-			"breakpoints": true
-		},
-		{
-			"idx": 9,
-			"version": "6",
-			"when": 1778769604741,
-			"tag": "0009_marvelous_chat",
-			"breakpoints": true
-		},
-		{
-			"idx": 10,
-			"version": "6",
-			"when": 1778790632793,
-			"tag": "0010_pretty_viper",
-			"breakpoints": true
-		},
-		{
-			"idx": 11,
-			"version": "6",
-			"when": 1778791063857,
-			"tag": "0011_careful_captain_britain",
-			"breakpoints": true
-		},
-		{
-			"idx": 12,
-			"version": "6",
-			"when": 1778833206403,
-			"tag": "0012_handy_kitty_pryde",
-			"breakpoints": true
-		},
-		{
-			"idx": 13,
-			"version": "6",
-			"when": 1778833528821,
-			"tag": "0013_material_miss_america",
-			"breakpoints": true
-		},
-		{
-			"idx": 14,
-			"version": "6",
-			"when": 1778836239106,
-			"tag": "0014_careless_leech",
-			"breakpoints": true
-		},
-		{
-			"idx": 15,
-			"version": "6",
-			"when": 1778877021229,
-			"tag": "0015_lethal_zarek",
-			"breakpoints": true
-		},
-		{
-			"idx": 16,
-			"version": "6",
-			"when": 1778877966361,
-			"tag": "0016_little_hiroim",
-			"breakpoints": true
-		},
-		{
-			"idx": 17,
-			"version": "6",
-			"when": 1778886945326,
-			"tag": "0017_niche_search_keywords",
-			"breakpoints": true
-		},
-		{
-			"idx": 18,
-			"version": "6",
-			"when": 1778933365553,
-			"tag": "0018_generic_llm_slots",
-			"breakpoints": true
-		},
-		{
-			"idx": 19,
-			"version": "6",
-			"when": 1778934309979,
-			"tag": "0019_extra_doc_paths",
-			"breakpoints": true
-		},
-		{
-			"idx": 20,
-			"version": "6",
-			"when": 1779026400000,
-			"tag": "0020_digest_runs_user_time_idx",
-			"breakpoints": true
-		},
-		{
-			"idx": 21,
-			"version": "6",
-			"when": 1779030000000,
-			"tag": "0021_next_fenris",
-			"breakpoints": true
-		},
-		{
-			"idx": 22,
-			"version": "6",
-			"when": 1779033600000,
-			"tag": "0022_project_summary_json",
-			"breakpoints": true
-		},
-		{
-			"idx": 23,
-			"version": "6",
-			"when": 1779037200000,
-			"tag": "0023_project_search_vectors",
-			"breakpoints": true
-		},
-		{
-			"idx": 24,
-			"version": "6",
-			"when": 1779040800000,
-			"tag": "0024_match_outcome_attribution",
-			"breakpoints": true
-		},
-		{
-			"idx": 25,
-			"version": "6",
-			"when": 1779044400000,
-			"tag": "0025_match_discovery_mode_and_resurface",
-			"breakpoints": true
-		},
-		{
-			"idx": 26,
-			"version": "6",
-			"when": 1779120000000,
-			"tag": "0026_repo_indexes",
-			"breakpoints": true
-		},
-		{
-			"idx": 27,
-			"version": "6",
-			"when": 1779206400000,
-			"tag": "0027_rename_discovery_modes",
-			"breakpoints": true
-		},
-		{
-			"idx": 28,
-			"version": "6",
-			"when": 1779292800000,
-			"tag": "0028_ingest_token_lifecycle",
-			"breakpoints": true
-		},
-		{
-			"idx": 29,
-			"version": "6",
-			"when": 1779379200000,
-			"tag": "0029_drop_ingest_token_plaintext",
-			"breakpoints": true
-		},
-		{
-			"idx": 30,
-			"version": "6",
-			"when": 1779465600000,
-			"tag": "0030_project_activity",
-			"breakpoints": true
-		},
-		{
-			"idx": 31,
-			"version": "6",
-			"when": 1779552000000,
-			"tag": "0031_match_pruned_dep",
-			"breakpoints": true
-		},
-		{
-			"idx": 32,
-			"version": "6",
-			"when": 1779638400000,
-			"tag": "0032_match_insights",
-			"breakpoints": true
-		},
-		{
-			"idx": 33,
-			"version": "6",
-			"when": 1779724800000,
-			"tag": "0033_candidate_inventory_fields",
-			"breakpoints": true
-		},
-		{
-			"idx": 34,
-			"version": "6",
-			"when": 1779728400000,
-			"tag": "0034_match_pruned_dep_replacement",
-			"breakpoints": true
-		},
-		{
-			"idx": 35,
-			"version": "6",
-			"when": 1779732000000,
-			"tag": "0035_match_effort_band",
-			"breakpoints": true
-		},
-		{
-			"idx": 36,
-			"version": "6",
-			"when": 1779735600000,
-			"tag": "0036_user_last_mcp_check",
-			"breakpoints": true
-		},
-		{
-			"idx": 37,
-			"version": "6",
-			"when": 1779739200000,
-			"tag": "0037_project_shape",
-			"breakpoints": true
-		},
-		{
-			"idx": 38,
-			"version": "6",
-			"when": 1779742800000,
-			"tag": "0038_skill_mode_data_model",
-			"breakpoints": true
-		},
-		{
-			"idx": 39,
-			"version": "6",
-			"when": 1779746400000,
-			"tag": "0039_triage_events",
-			"breakpoints": true
-		},
-		{
-			"idx": 40,
-			"version": "6",
-			"when": 1779830605651,
-			"tag": "0040_embeddings",
-			"breakpoints": true
-		},
-		{
-			"idx": 41,
-			"version": "6",
-			"when": 1779834205651,
-			"tag": "0041_surfaced_count",
-			"breakpoints": true
-		},
-		{
-			"idx": 42,
-			"version": "6",
-			"when": 1779837805651,
-			"tag": "0042_repo_quality",
-			"breakpoints": true
-		},
-		{
-			"idx": 43,
-			"version": "6",
-			"when": 1779841405651,
-			"tag": "0043_facet_embeddings",
-			"breakpoints": true
-		},
-		{
-			"idx": 44,
-			"version": "6",
-			"when": 1779845005651,
-			"tag": "0044_catalogue",
-			"breakpoints": true
-		},
-		{
-			"idx": 45,
-			"version": "6",
-			"when": 1779848605651,
-			"tag": "0045_catalogue_capability_embedding",
-			"breakpoints": true
-		},
-		{
-			"idx": 46,
-			"version": "6",
-			"when": 1779852205651,
-			"tag": "0046_catalogue_created_at",
-			"breakpoints": true
-		},
-		{
-			"idx": 47,
-			"version": "6",
-			"when": 1779855805651,
-			"tag": "0047_catalogue_kind",
-			"breakpoints": true
-		},
-		{
-			"idx": 48,
-			"version": "6",
-			"when": 1779859405651,
-			"tag": "0048_product_key",
-			"breakpoints": true
-		},
-		{
-			"idx": 49,
-			"version": "6",
-			"when": 1779863005651,
-			"tag": "0049_catalogue_modality",
-			"breakpoints": true
-		},
-		{
-			"idx": 50,
-			"version": "6",
-			"when": 1779866605651,
-			"tag": "0050_triage_context",
-			"breakpoints": true
-		},
-		{
-			"idx": 51,
-			"version": "6",
-			"when": 1779870205651,
-			"tag": "0051_agent_report",
-			"breakpoints": true
-		},
-		{
-			"idx": 52,
-			"version": "6",
-			"when": 1779873805651,
-			"tag": "0052_facet_modality",
-			"breakpoints": true
-		},
-		{
-			"idx": 53,
-			"version": "6",
-			"when": 1779877405651,
-			"tag": "0053_reason_code",
-			"breakpoints": true
-		},
-		{
-			"idx": 54,
-			"version": "6",
-			"when": 1779881005651,
-			"tag": "0054_atlas_graph",
-			"breakpoints": true
-		},
-		{
-			"idx": 55,
-			"version": "6",
-			"when": 1779884605651,
-			"tag": "0055_leap_surfaces",
-			"breakpoints": true
-		},
-		{
-			"idx": 56,
-			"version": "6",
-			"when": 1779888205651,
-			"tag": "0056_pricing_watch",
-			"breakpoints": true
-		},
-		{
-			"idx": 57,
-			"version": "6",
-			"when": 1779891805651,
-			"tag": "0057_announcement_sources",
-			"breakpoints": true
-		},
-		{
-			"idx": 58,
-			"version": "6",
-			"when": 1779895405651,
-			"tag": "0058_announcement_events",
-			"breakpoints": true
-		},
-		{
-			"idx": 59,
-			"version": "6",
-			"when": 1779899005651,
-			"tag": "0059_deadline_events",
-			"breakpoints": true
-		},
-		{
-			"idx": 60,
-			"version": "6",
-			"when": 1779902605651,
-			"tag": "0060_always_on_delivery",
-			"breakpoints": true
-		},
-		{
-			"idx": 61,
-			"version": "6",
-			"when": 1779906205651,
-			"tag": "0061_dep_versions",
-			"breakpoints": true
-		},
-		{
-			"idx": 62,
-			"version": "6",
-			"when": 1779909805651,
-			"tag": "0062_queued_actions",
-			"breakpoints": true
-		},
-		{
-			"idx": 63,
-			"version": "6",
-			"when": 1779913405651,
-			"tag": "0063_readme_and_cosine",
-			"breakpoints": true
-		},
-		{
-			"idx": 64,
-			"version": "6",
-			"when": 1779917005651,
-			"tag": "0064_atlas_inputs",
-			"breakpoints": true
-		},
-		{
-			"idx": 65,
-			"version": "6",
-			"when": 1781290937087,
-			"tag": "0065_keystone",
-			"breakpoints": true
-		},
-		{
-			"idx": 66,
-			"version": "6",
-			"when": 1781292148120,
-			"tag": "0066_keystone_surfaces",
-			"breakpoints": true
-		},
-		{
-			"idx": 67,
-			"version": "6",
-			"when": 1781375000000,
-			"tag": "0067_match_features",
-			"breakpoints": true
-		},
-		{
-			"idx": 68,
-			"version": "6",
-			"when": 1781376000000,
-			"tag": "0068_triage_insights",
-			"breakpoints": true
-		},
-		{
-			"idx": 69,
-			"version": "6",
-			"when": 1781568000000,
-			"tag": "0069_project_primary_language",
-			"breakpoints": true
-		},
-		{
-			"idx": 70,
-			"version": "6",
-			"when": 1781654400000,
-			"tag": "0070_candidate_enrichment",
-			"breakpoints": true
-		},
-		{
-			"idx": 71,
-			"version": "6",
-			"when": 1781740800000,
-			"tag": "0071_project_domain_anchor",
-			"breakpoints": true
-		},
-		{
-			"idx": 72,
-			"version": "6",
-			"when": 1781827200000,
-			"tag": "0072_candidate_classifier_summary",
-			"breakpoints": true
-		},
-		{
-			"idx": 73,
-			"version": "6",
-			"when": 1781913600000,
-			"tag": "0073_email_preferences",
-			"breakpoints": true
-		},
-		{
-			"idx": 74,
-			"version": "6",
-			"when": 1782000000000,
-			"tag": "0074_immersion",
-			"breakpoints": true
-		}
-	]
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1778599428191,
+      "tag": "0000_medical_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1778679805093,
+      "tag": "0001_complete_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778681219972,
+      "tag": "0002_swift_energizer",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778683382134,
+      "tag": "0003_magenta_colleen_wing",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1778683955308,
+      "tag": "0004_certain_azazel",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1778688754873,
+      "tag": "0005_lively_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1778749637487,
+      "tag": "0006_opposite_glorian",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1778752131664,
+      "tag": "0007_equal_hobgoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1778763588702,
+      "tag": "0008_pink_ken_ellis",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778769604741,
+      "tag": "0009_marvelous_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778790632793,
+      "tag": "0010_pretty_viper",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1778791063857,
+      "tag": "0011_careful_captain_britain",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778833206403,
+      "tag": "0012_handy_kitty_pryde",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778833528821,
+      "tag": "0013_material_miss_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1778836239106,
+      "tag": "0014_careless_leech",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1778877021229,
+      "tag": "0015_lethal_zarek",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1778877966361,
+      "tag": "0016_little_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1778886945326,
+      "tag": "0017_niche_search_keywords",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1778933365553,
+      "tag": "0018_generic_llm_slots",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1778934309979,
+      "tag": "0019_extra_doc_paths",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1779026400000,
+      "tag": "0020_digest_runs_user_time_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779030000000,
+      "tag": "0021_next_fenris",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1779033600000,
+      "tag": "0022_project_summary_json",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1779037200000,
+      "tag": "0023_project_search_vectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1779040800000,
+      "tag": "0024_match_outcome_attribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779044400000,
+      "tag": "0025_match_discovery_mode_and_resurface",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1779120000000,
+      "tag": "0026_repo_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1779206400000,
+      "tag": "0027_rename_discovery_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1779292800000,
+      "tag": "0028_ingest_token_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1779379200000,
+      "tag": "0029_drop_ingest_token_plaintext",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1779465600000,
+      "tag": "0030_project_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1779552000000,
+      "tag": "0031_match_pruned_dep",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1779638400000,
+      "tag": "0032_match_insights",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1779724800000,
+      "tag": "0033_candidate_inventory_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1779728400000,
+      "tag": "0034_match_pruned_dep_replacement",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1779732000000,
+      "tag": "0035_match_effort_band",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1779735600000,
+      "tag": "0036_user_last_mcp_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1779739200000,
+      "tag": "0037_project_shape",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1779742800000,
+      "tag": "0038_skill_mode_data_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1779746400000,
+      "tag": "0039_triage_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1779830605651,
+      "tag": "0040_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1779834205651,
+      "tag": "0041_surfaced_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1779837805651,
+      "tag": "0042_repo_quality",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1779841405651,
+      "tag": "0043_facet_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1779845005651,
+      "tag": "0044_catalogue",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1779848605651,
+      "tag": "0045_catalogue_capability_embedding",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1779852205651,
+      "tag": "0046_catalogue_created_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1779855805651,
+      "tag": "0047_catalogue_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1779859405651,
+      "tag": "0048_product_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1779863005651,
+      "tag": "0049_catalogue_modality",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1779866605651,
+      "tag": "0050_triage_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1779870205651,
+      "tag": "0051_agent_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1779873805651,
+      "tag": "0052_facet_modality",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1779877405651,
+      "tag": "0053_reason_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1779881005651,
+      "tag": "0054_atlas_graph",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1779884605651,
+      "tag": "0055_leap_surfaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1779888205651,
+      "tag": "0056_pricing_watch",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1779891805651,
+      "tag": "0057_announcement_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1779895405651,
+      "tag": "0058_announcement_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1779899005651,
+      "tag": "0059_deadline_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1779902605651,
+      "tag": "0060_always_on_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1779906205651,
+      "tag": "0061_dep_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1779909805651,
+      "tag": "0062_queued_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1779913405651,
+      "tag": "0063_readme_and_cosine",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1779917005651,
+      "tag": "0064_atlas_inputs",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1781290937087,
+      "tag": "0065_keystone",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1781292148120,
+      "tag": "0066_keystone_surfaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1781375000000,
+      "tag": "0067_match_features",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1781376000000,
+      "tag": "0068_triage_insights",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1781568000000,
+      "tag": "0069_project_primary_language",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1781654400000,
+      "tag": "0070_candidate_enrichment",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1781740800000,
+      "tag": "0071_project_domain_anchor",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1781827200000,
+      "tag": "0072_candidate_classifier_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1781913600000,
+      "tag": "0073_email_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1782000000000,
+      "tag": "0074_immersion",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1782086400000,
+      "tag": "0075_atlas_carts",
+      "breakpoints": true
+    }
+  ]
 }
