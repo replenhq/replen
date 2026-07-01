@@ -8,19 +8,14 @@ The MCP gives the agent **tools** (data access). The skills give the agent **pro
 
 | Skill | Invocation | What it does |
 |---|---|---|
-| `replen-triage` | `/replen-triage` or "triage my digest" | Fetch today's matches, evaluate the high-relevance ones, generate a styled **HTML triage report** (`~/replen/reports/triage-DATE.html`) you can scan + share. Optional briefing sub-protocol produces per-repo HTML deep-dives (`~/replen/briefings/owner-name-DATE.html`). |
-
-### Why HTML output?
-
-The skill writes HTML artifacts instead of dumping markdown into the chat, following [Thariq's "Unreasonable Effectiveness of HTML"](https://x.com/trq212/status/2053872850101285137) argument: triage reports are read-only, scan-heavy, never edited - exactly the kind of artifact where HTML's information density (colour-coded chips, SVG diagrams, click-through links, copy-to-clipboard action buttons) beats markdown. The chat output stays terse; the HTML is the deliverable.
-
-The skill ships with two reference HTML files (`reference-triage.html`, `reference-briefing.html`) that anchor the visual style - Claude generates fresh HTML each run matching those references rather than mechanically filling a rigid template.
+| `replen` | `/replen` or "what's new from Replen?" | Pull today's candidate inventory (`replen_match`), triage each candidate in-session against your code, record the verdicts (`replen_record_triage` / `replen_capture_insight`), and surface only the wins inline in the chat. No HTML report. |
+| `replen-onboard` | `/replen-onboard` or "set up Replen" | One-time grounding setup: works through your active repos, reads each one's code, tidies thin/missing docs, and builds a tailored profile (capabilities + report) so Replen surfaces useful tools instead of generic ones. |
 
 ## Install
 
 ```bash
 mkdir -p ~/.claude/skills
-cp -r skills/replen-triage ~/.claude/skills/
+cp -r skills/replen ~/.claude/skills/
 ```
 
 Restart Claude Code. Skills are auto-discovered from `~/.claude/skills/`.

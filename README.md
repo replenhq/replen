@@ -77,7 +77,7 @@ One command, ~60 seconds: signs you in (Google / GitHub / email link), asks **wh
 
 ### 2. Onboard: `/replen-onboard` (one-time)
 
-Open Claude Code in your work and run `/replen-onboard`. The agent also **offers it automatically on your first session**, so you don't have to remember it. It reads each repo and builds a **grounded profile** (capabilities + a project report) so matches are relevant to what you actually build, not a generic trending list. Runs autonomously in the background; once per project.
+Open Claude Code in your work and run `/replen-onboard`. The agent also **offers it automatically on your first session**, so you don't have to remember it. It reads each repo and builds a **grounded profile** (capabilities + a project report) so matches are relevant to what you actually build, not a generic trending list. Runs autonomously in the background; once per project. For deeper grounding you can opt in with `npx replen immerse`, which embeds your code content locally so only the vectors, never the source, leave your machine.
 
 ### 3. Use: just work
 
@@ -97,10 +97,10 @@ Replen finds your projects by locating **git repos** (directories containing a `
 **If your code lives in a non-conventional folder** (e.g. `~/js stuff`, `~/work-2024`), the conventional-folder scan won't find it. Two easy fixes:
 
 ```bash
-# Option A — run it from inside one of your repos, so the walk-up finds the folder:
+# Option A: run it from inside one of your repos, so the walk-up finds the folder:
 cd ~/js\ stuff/my-project && npx replen
 
-# Option B — point it at your folder explicitly (quote any spaces):
+# Option B: point it at your folder explicitly (quote any spaces):
 npx replen --root "~/js stuff"
 ```
 
@@ -114,7 +114,7 @@ Both work for the initial setup and for `npx replen sync-projects` later.
 
 For self-host: `REPLEN_BASE=https://replen.your-domain.dev npx replen`.
 
-Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen mcp setup` · `replen logout` · `replen uninstall` · `replen --help`.
+Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `replen immerse` · `replen mcp setup` · `replen logout` · `replen uninstall` · `replen --help`.
 
 **Backing out:** `npx replen uninstall` reverses every local change: the MCP wiring (Claude / Codex / Gemini), the installed skills, the per-repo `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` integration blocks, and `~/.replen`. It asks before each category (nothing is removed without a yes; `--dry-run` previews). It only touches this machine. Your server-side profile is deleted separately from the dashboard.
 
@@ -193,20 +193,21 @@ Discovery brings the outside world in. Atlas is the other half, a living map of 
   <a href="https://app.replen.dev/atlas"><img src="assets/atlas-demo.gif" alt="Atlas, your whole dev world as an interactive graph: projects, capabilities, tools, and the connections across them" width="820"></a>
 </p>
 
-As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Three things ride on top of it.
+As Replen grounds each repo it draws them all into one graph. Every project, the capabilities inside each one, the candidates you have triaged, and how they relate. It is rebuilt on every run and derived entirely from the capability profiles your agent already writes, so it stays current on its own and your source is never part of it. Atlas has two halves. The graph is what you explore, and three things ride on it: Leaps, Recall, and the themes and keystones it surfaces. Carts are the other half, browsable and filterable views over the same decision graph.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/atlas-full-dark.svg">
-    <img src="assets/atlas-full.svg" width="960" alt="Atlas, the per-user knowledge graph: 11 node types (project, product, capability, tool, candidate, suggestion, goal, domain, lesson, boundary, concept) and 16 edge types. Onboarding, triage verdicts and your vaults feed it; projects connect to their capabilities, tools, domains, goals and triaged candidates; vault concepts ground capabilities; triage lessons and boundaries link back to the candidates that prompted them; derived edges relate similar capabilities, projects and domains. The graph powers Leaps, Recall, Tiles plus the Atlas webapp, and grounds Brainstem's matching.">
+    <img src="assets/atlas-full.svg" width="960" alt="Atlas, the per-user knowledge graph: 11 node types (project, product, capability, tool, candidate, suggestion, goal, domain, lesson, boundary, concept) and 16 edge types. Onboarding, triage verdicts and your vaults feed it; projects connect to their capabilities, tools, domains, goals and triaged candidates; vault concepts ground capabilities; triage lessons and boundaries link back to the candidates that prompted them; derived edges relate similar capabilities, projects and domains. The graph powers Leaps, Recall, Carts, Tiles plus the Atlas webapp, and grounds Brainstem's matching.">
   </picture>
 </p>
 
 - **Leaps** (`replen_leaps`). Connections across your own work that you would never go looking for. A thing you solved cleanly in one repo is the open gap in another. A capability in one project answers a problem in a project you have not opened in months. Each leap is scored on relevance and surprise, and comes with the path that explains it. Your own portfolio becomes a source, not just the ecosystem.
 - **Recall** (`replen_recall`). In-session memory over your past triage decisions and capabilities. Ask what you have ported, whether you have weighed something before, or which repo already does a thing, and the agent answers from your real history instead of guessing.
 - **Themes and keystones.** Capabilities clustered into themes, with the load-bearing keystones that recur across projects flagged. A quiet read on what your work is made of, plus provenance on every capability (grounded / extracted / inferred) so matching trusts solid signal over soft guesses.
+- **Carts** (`replen_cart`). The graph's other half: browsable, filterable views over the decision graph, pulled straight into a session or opened in the webapp, so a question like *what have I deferred* or *where are my blind spots* becomes a list you can act on.
 
-See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas): explore it in 3D, watch it cluster by domain, click any edge for why it's there, and open any node's **dossier** (the legible decision log for that capability or candidate). Or run `replen atlas` to write the whole map to `~/.replen/atlas/` as **Tiles**, linked markdown notes that stitch together (open the folder in Obsidian for the graph view).
+See it as an interactive graph at [app.replen.dev/atlas](https://app.replen.dev/atlas): explore it in 3D, watch it cluster by domain, click any edge for why it's there, and open any node's **dossier** (the legible decision log for that capability or candidate). The same page opens **Carts**, filterable views over the graph, in six built-in cuts (Blind spots, Triage board, Keystones, Brought in, Stale deferrals, By domain) and five layouts (Table, Board, Cards, Map, Timeline): drag a card to a verdict column on the Board and it writes back to the graph as an evaluated edge, the Map is a PCA scatter of the same rows, and any cut you tune can be saved as a custom cart. Or run `replen atlas` to write the whole map to `~/.replen/atlas/` as **Tiles**, linked markdown notes that stitch together (open the folder in Obsidian for the graph view).
 
 Atlas tiles double as a **memory layer for your coding agents**: plain markdown on disk, kept fresh in the background by the MCP server, and any agent in any repo can read `~/.replen/atlas/MAP.md` for cross-project context (what you've built, what fills each capability, and every decision with the reason) without an API call. The same memory feeds the daily loop itself: candidates arrive annotated with your prior verdicts ("you already cover this with X"), repos you deferred come back for a re-check once they mature, and on quiet days Replen surfaces one leap from your own portfolio instead of silence.
 
@@ -282,7 +283,7 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
     └─ persist with discovery mode tag (scouted / discovered / re-checked)
                                         ↓
 ─── DELIVERY ─────────────────────────────────────────────────
-  → @replen/mcp (stdio, 14 tools)
+  → @replen/mcp (stdio, 15 tools)
        ↑    replen check-new (hook) → "N new" surfaced in session
        │    replen_match            → curated inventory scoped to open repo
        │    replen_state     → star / hide / handoff captured
@@ -298,7 +299,7 @@ Concrete example of a briefing: see [replen.dev](https://replen.dev#the-handoff-
   → SessionStart hook       (npx replen check-new --hook, ~50ms)
   → handoff PR mechanism    (GitHub REST API, optional PAT)
   → high-relevance webhook  (Slack / Discord, optional)
-  → Webapp                  (Next.js, Firebase Auth — settings + history viewer)
+  → Webapp                  (Next.js, Firebase Auth: settings + history viewer)
 ```
 
 ## Local dev
@@ -378,7 +379,7 @@ The MCP gives the agent **tools** (data access); the skill gives it a **playbook
 
 ### MCP server (`mcp/`)
 
-Self-contained npm package (`@replen/mcp`) that exposes 14 tools to Claude Code / Codex / any MCP host. Grouped by role:
+Self-contained npm package (`@replen/mcp`) that exposes 15 tools to Claude Code / Codex / any MCP host. Grouped by role:
 
 | Role | Tool | Returns |
 |---|---|---|
@@ -387,6 +388,7 @@ Self-contained npm package (`@replen/mcp`) that exposes 14 tools to Claude Code 
 | | `replen_record_triage` | Persist the agent's verdict (adopt / port / cherry-pick / clean-room / upgrade / skip + score + effort) back to Replen |
 | **Atlas & memory** | `replen_leaps` | Leaps. Surprising connections across your own Atlas, a capability in one repo that fills a gap in another, each scored and explained by the path that links them |
 | | `replen_recall` | Recall. In-session memory over your past triage decisions and capabilities; answers what you have ported, weighed before, or already build elsewhere |
+| | `replen_cart` | Pull a saved or built-in Atlas Cart's rows in-session (Blind spots, Triage board, Keystones, Brought in, Stale deferrals, By domain, or your saved carts) |
 | | `replen_capture_insight` | Bank a transferable insight from triage's generative-skip lane, a borrowed premise (a `lesson`) or a sharpened `boundary`, even when the candidate itself is a direct-use skip |
 | | `replen_queue` | The awareness→action queue: items parked from the weekly Brief / alerts ("queue for next session"). `replen_match` surfaces the oldest and offers to act on it |
 | **Configuration** | `replen_set_capabilities` | Set a project's grounded capabilities (tag + descriptor + data modality) and report, so matching fits the code from day one |
