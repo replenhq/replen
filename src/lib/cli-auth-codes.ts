@@ -23,7 +23,15 @@
 // process resolves to the same Map instance, restoring the intended
 // single-process semantics.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+
+// Constant-time string compare (length-checked). The state compare below has no
+// timing oracle in practice (the code is single-use and deleted before compare),
+// but this keeps every auth-gating comparison uniformly constant-time.
+const ctEqStr = (a: string, b: string): boolean => {
+  const ba = Buffer.from(a, "utf8"), bb = Buffer.from(b, "utf8");
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+};
 
 type Entry = { token: string; base: string; userId: number; state: string; expiresAt: number };
 
@@ -63,7 +71,7 @@ export function redeemCliAuthCode(code: string, state: string): RedeemResult {
   // Single-use: delete on first read regardless of state-match outcome so a
   // brute-force loop can't probe state values.
   codes.delete(code);
-  if (entry.state !== state) return { ok: false, error: "state mismatch" };
+  if (!ctEqStr(entry.state, state)) return { ok: false, error: "state mismatch" };
   if (entry.expiresAt < Date.now()) return { ok: false, error: "code expired" };
   return { ok: true, token: entry.token, base: entry.base, userId: entry.userId };
 }

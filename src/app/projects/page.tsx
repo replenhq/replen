@@ -2,6 +2,7 @@ import { db, schema } from "@/db/client";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +99,7 @@ export default async function Projects() {
 
 async function toggleIncluded(id: number, value: boolean) {
   "use server";
-  const user = await requireUser();
+  const user = await requireWritableUser();
   await db
     .update(schema.projectProfiles)
     .set({ included: value })
@@ -108,7 +109,7 @@ async function toggleIncluded(id: number, value: boolean) {
 
 async function setProjectTags(id: number, value: string) {
   "use server";
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(id) || id <= 0) throw new Error("invalid project id");
   const tags = normaliseTags(value);
   await db
@@ -120,7 +121,7 @@ async function setProjectTags(id: number, value: string) {
 
 async function setGithubFullName(id: number, value: string) {
   "use server";
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(id) || id <= 0) throw new Error("invalid project id");
   const trimmed = value.trim();
   if (trimmed && !/^[\w.-]{1,80}\/[\w.-]{1,80}$/.test(trimmed)) {
@@ -135,7 +136,7 @@ async function setGithubFullName(id: number, value: string) {
 
 async function deleteProject(id: number) {
   "use server";
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!Number.isInteger(id) || id <= 0) throw new Error("invalid project id");
   await db
     .delete(schema.projectProfiles)
@@ -148,7 +149,7 @@ async function deleteProject(id: number) {
 // correct its owner + include it instead of creating a duplicate.
 async function addProject(repo: string, tagsCsv: string) {
   "use server";
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const gfn = repo.trim();
   if (!/^[\w.-]{1,80}\/[\w.-]{1,80}$/.test(gfn)) {
     throw new Error(`invalid repo: ${gfn} (want owner/name)`);

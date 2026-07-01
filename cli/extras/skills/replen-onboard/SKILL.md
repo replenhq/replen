@@ -291,7 +291,7 @@ sanitize titles, no codenames.
 
 **Also capture architectural PRACTICES as capabilities.** Beyond what the code
 *does*, note the distinctive structural *moves* it makes — these are what let
-Replen suggest a pattern to your OTHER projects ("acme made its domain model
+Replen suggest a pattern to your OTHER projects ("Acme made its domain model
 data-driven; this data-heavy project should consider it"). Include a capability
 for any deliberate practice you find: a **data-driven domain ontology** (entity
 types/relationships stored as DATA/rows, not hardcoded — configurable without a

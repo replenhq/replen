@@ -7,6 +7,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { alternativesFor } from "@/lib/alternatives";
 import { computeOverlay } from "@/graph/overlay";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
@@ -69,7 +70,7 @@ const fmtDate = (iso: string | null | undefined) => {
 };
 
 export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dossier | null> {
-  const user = await requireUser();
+  const user = await requireUser(); // read path: the demo user may view dossiers
   const node = await db.select().from(schema.graphNodes)
     .where(and(eq(schema.graphNodes.userId, user.id), eq(schema.graphNodes.kind, kind), eq(schema.graphNodes.nodeKey, nodeKey))).get();
   if (!node) return null;
@@ -353,7 +354,7 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
 }
 
 export async function queueFromAtlas(title: string, projectSlug?: string | null): Promise<{ ok: boolean; id?: number }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const clean = title.trim().slice(0, 140);
   if (!clean) return { ok: false };
   const inserted = await db.insert(schema.queuedActions).values({
@@ -370,7 +371,7 @@ export async function queueFromAtlas(title: string, projectSlug?: string | null)
 // in-session skill drives via /api/state). The node graduates/disappears on
 // the next graph rebuild.
 export async function suggestionAction(fullName: string, action: "star" | "dismiss", projectSlug?: string | null): Promise<{ ok: boolean }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   if (!/^[^/]+\/[^/]+$/.test(fullName)) return { ok: false };
   const [owner, name] = fullName.split("/");
   const repoId = await resolveOrCreateRepoId(owner, name);
@@ -403,7 +404,7 @@ export async function suggestionAction(fullName: string, action: "star" | "dismi
 // Plan/tier + migrate-off intent on a tool. Plan personalises the pricing
 // watch; migrate-off mutes that vendor's release noise and marks the node.
 export async function setToolPref(tool: string, pref: { plan?: string | null; migrateOff?: boolean }): Promise<{ ok: boolean }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const key = tool.trim().toLowerCase().slice(0, 120);
   if (!key) return { ok: false };
   const now = new Date();
@@ -423,7 +424,7 @@ export async function setToolPref(tool: string, pref: { plan?: string | null; mi
 // A goal: a capability the user WANTS. Embedded once; from then on it's an
 // aspirational facet in matching, a scouted search term, and a graph node.
 export async function addGoal(label: string, opts: { descriptor?: string; projectSlug?: string | null } = {}): Promise<{ ok: boolean; id?: number }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const clean = label.trim().slice(0, 120);
   if (!clean) return { ok: false };
   let embedding: string | null = null;
@@ -441,7 +442,7 @@ export async function addGoal(label: string, opts: { descriptor?: string; projec
 }
 
 export async function resolveGoal(id: number, outcome: "done" | "dropped"): Promise<{ ok: boolean }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const row = await db.select({ id: schema.capabilityGoals.id }).from(schema.capabilityGoals)
     .where(and(eq(schema.capabilityGoals.id, id), eq(schema.capabilityGoals.userId, user.id))).get();
   if (!row) return { ok: false };
@@ -460,7 +461,7 @@ export async function curateCapability(
   action: "delete" | "rename" | "merge" | "confirm",
   target?: string,
 ): Promise<{ ok: boolean; touched: number }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const key = normCap(label);
   if (!key) return { ok: false, touched: 0 };
   const targetClean = target?.trim().slice(0, 120);
@@ -506,7 +507,7 @@ export async function curateCapability(
 
 // Anchored note on a node — flows into recall + the vault.
 export async function setNodeNote(kind: string, nodeKey: string, note: string): Promise<{ ok: boolean }> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const clean = note.trim().slice(0, 2000);
   const k = kind.slice(0, 40);
   const nk2 = nodeKey.slice(0, 200);

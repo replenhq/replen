@@ -16,6 +16,7 @@ import { revalidatePath } from "next/cache";
 
 const VERDICTS = new Set(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip"]);
 const BUILTIN = new Set(CARTS.map((c) => c.id));
+const LAYOUTS = new Set(["table", "board", "cards", "map", "timeline"]);
 
 // Save (or update) a filtered view as a named cart.
 export async function saveCart(
@@ -25,6 +26,7 @@ export async function saveCart(
   name = name.trim().slice(0, 60);
   if (!name) return { ok: false, error: "name required" };
   if (!BUILTIN.has(baseCart)) return { ok: false, error: "unknown cart" };
+  const safeLayout = layout && LAYOUTS.has(layout) ? layout : null;
   const clean: CartFilters = {};
   for (const k of ["provenance", "modality", "verdict", "project", "q"] as const) {
     const v = filters[k];
@@ -33,8 +35,8 @@ export async function saveCart(
   const now = new Date();
   try {
     const r = await db.insert(schema.atlasCarts)
-      .values({ userId: user.id, name, baseCart, layout: layout || null, filtersJson: JSON.stringify(clean), createdAt: now, updatedAt: now })
-      .onConflictDoUpdate({ target: [schema.atlasCarts.userId, schema.atlasCarts.name], set: { baseCart, layout: layout || null, filtersJson: JSON.stringify(clean), updatedAt: now } })
+      .values({ userId: user.id, name, baseCart, layout: safeLayout, filtersJson: JSON.stringify(clean), createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: [schema.atlasCarts.userId, schema.atlasCarts.name], set: { baseCart, layout: safeLayout, filtersJson: JSON.stringify(clean), updatedAt: now } })
       .returning({ id: schema.atlasCarts.id });
     revalidatePath("/atlas");
     return { ok: true, id: r[0]?.id };

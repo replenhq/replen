@@ -6,11 +6,11 @@
 
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
-import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { revalidatePath } from "next/cache";
 
 export async function addQueueItem(formData: FormData): Promise<void> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const title = String(formData.get("title") ?? "").trim().slice(0, 140);
   const project = String(formData.get("project") ?? "").trim().slice(0, 120) || null;
   if (!title) return;
@@ -23,7 +23,7 @@ export async function addQueueItem(formData: FormData): Promise<void> {
 }
 
 export async function resolveQueueItem(formData: FormData): Promise<void> {
-  const user = await requireUser();
+  const user = await requireWritableUser();
   const id = parseInt(String(formData.get("id") ?? ""), 10);
   const outcome = String(formData.get("outcome") ?? "") === "done" ? "done" : "dismissed";
   if (!Number.isFinite(id)) return;

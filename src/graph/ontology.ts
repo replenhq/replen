@@ -1,6 +1,6 @@
 // Replen's Atlas ontology, as DATA. The single source of truth for the graph's
 // node + edge types, modelled after consulting-intel/ontology/schema.py (a
-// Palantir-pattern typed registry, itself an application of the acme pattern).
+// Palantir-pattern typed registry, itself an application of the Acme pattern).
 //
 // Until now Replen's ontology was IMPLICIT, hardcoded as kind-string literals
 // scattered through build.ts (and the readers). This module formalises it: one

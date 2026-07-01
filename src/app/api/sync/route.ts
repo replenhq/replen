@@ -44,7 +44,7 @@ export async function GET(req: Request) {
     const r = await db.select().from(schema.repos).where(eq(schema.repos.id, m.repoId)).get();
     if (!r) continue;
     const slug = m.projectId
-      ? (await db.select().from(schema.projectProfiles).where(eq(schema.projectProfiles.id, m.projectId)).get())?.slug ?? "_general"
+      ? (await db.select().from(schema.projectProfiles).where(and(eq(schema.projectProfiles.id, m.projectId), eq(schema.projectProfiles.userId, userId))).get())?.slug ?? "_general"
       : "_general";
     if (!byProject.has(slug)) byProject.set(slug, { slug, writeups: [] });
     byProject.get(slug)!.writeups.push({

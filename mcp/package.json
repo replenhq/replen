@@ -1,6 +1,6 @@
 {
   "name": "@replen/mcp",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "MCP server for replen — surfaces suggestions for your repo (libraries, dependency releases, security advisories) as tools your AI coding host (Claude Code, Codex, Cursor) can call. Pairs with the /replen skill.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",
     "dev": "tsx src/cli.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && node ../scripts/check-no-private-slugs.mjs"
   },
   "files": [
     "dist",

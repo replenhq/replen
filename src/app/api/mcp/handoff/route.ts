@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   if (match.handoffPrUrl) return NextResponse.json({ ok: true, prUrl: match.handoffPrUrl, reason: "already exists" }, { headers: corsHeaders });
   if (!match.projectId) return NextResponse.json({ error: "_general match has no project to commit to" }, { status: 400, headers: corsHeaders });
 
-  const project = await db.select().from(schema.projectProfiles).where(eq(schema.projectProfiles.id, match.projectId)).get();
+  const project = await db.select().from(schema.projectProfiles).where(and(eq(schema.projectProfiles.id, match.projectId), eq(schema.projectProfiles.userId, auth.userId))).get();
   if (!project?.githubFullName) return NextResponse.json({ error: "set project's github_full_name on /projects first" }, { status: 400, headers: corsHeaders });
   if (!/^[\w.-]+\/[\w.-]+$/.test(project.githubFullName)) return NextResponse.json({ error: "invalid github_full_name format" }, { status: 400, headers: corsHeaders });
 

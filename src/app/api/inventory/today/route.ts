@@ -70,10 +70,15 @@ function clipDesc(desc: string, max: number): string {
   // schemes, so an embedded directive or link can't ride the footnote. The
   // verbatim-relay behaviour is unchanged; only the content it carries is clean.
   const d = sanitizeForMarkdown(desc).trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
-  if (d.length <= max) return d;
-  const cut = d.slice(0, max);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:\s]+$/, "");
+  if (!d) return "";
+  const clipped = d.length <= max
+    ? d
+    : (() => { const cut = d.slice(0, max); const lastSpace = cut.lastIndexOf(" "); return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:\s]+$/, ""); })();
+  // Quote the repo's OWN description so, when the footnote is relayed into chat,
+  // it reads plainly as the repo's words rather than as Replen asserting them.
+  // Plain-text defence-in-depth on top of the markup/scheme sanitize above: an
+  // attacker-authored description can't masquerade as Replen's own voice.
+  return `"${clipped}"`;
 }
 
 export async function GET(req: Request) {

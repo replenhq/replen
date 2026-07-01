@@ -103,7 +103,7 @@ export type PracticeTransfer = {
 // vector (its signals: "many related entity stores", "fork-per-customer pressure"
 // …), NOT the source project's domain — and that the scoped project doesn't yet
 // make but ANOTHER portfolio project does (grounded in the user's own work:
-// "acme does this, and your project looks like one that needs it"). Right
+// "Acme does this, and your project looks like one that needs it"). Right
 // because a practice is broadly applicable: a data-driven ontology helps any
 // data-heavy multi-tenant system regardless of whether its DOMAIN resembles the
 // source. A project "uses" a practice when one of its facets matches a practice

@@ -195,7 +195,7 @@ function sectionsFromDoc(md: string | null, preambleLabel: string, dropNames: Se
  */
 export function extractDocSections(readmeMd: string | null, claudeMd: string | null, projectName?: string | null, projectSlug?: string | null): DocSection[] {
   // Labels matching the project's own name/slug are the title blob — drop them.
-  // BOTH name and slug: the human name ("acme Command Intelligence") and the
+  // BOTH name and slug: the human name ("Acme Command Intelligence") and the
   // slug/H1 ("acme-web") often differ, and the README H1 is usually the slug.
   const dropNames = new Set<string>();
   for (const raw of [projectName, projectSlug]) {
