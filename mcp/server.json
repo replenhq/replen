@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.replenhq/replen",
-  "description": "Capability-aware OSS discovery for AI coding agents. Runs triage in your own session, no API key.",
+  "description": "A local intelligence layer for AI coding agents. Maps your repos, matches the open-source frontier.",
   "repository": {
     "url": "https://github.com/replenhq/replen",
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "1.3.3",
+  "version": "1.3.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@replen/mcp",
-      "version": "1.3.3",
+      "version": "1.3.4",
       "transport": {
         "type": "stdio"
       },

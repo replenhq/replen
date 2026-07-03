@@ -1,8 +1,8 @@
 <div align="center">
   <img src="logo.svg" width="120" alt="Replen">
   <h1>Replen</h1>
-  <p><strong>Smarter AI development workflows</strong></p>
-  <p>OSS discovery scored against what your repos actually do.</p>
+  <p><strong>Smarter AI Development Workflows</strong></p>
+  <p>A local intelligence layer for AI coding agents.</p>
 
   <p>
     <a href="https://www.npmjs.com/package/replen"><img src="https://img.shields.io/npm/v/replen?style=flat-square&color=d97706" alt="npm version"></a>
@@ -31,18 +31,17 @@
 
 ---
 
-Claude Code, Codex, and Cursor already understand your code. Replen maps each repo to what it actually does (computer vision, geospatial, market-making, or whatever you build) and watches the OSS ecosystem for things that fit. Every candidate is scored against your project's real capabilities, so what surfaces is relevant to the code in front of you rather than a trending list.
+Claude Code, Codex and Cursor already help inside the repo you are working on. Replen gives them a local intelligence layer across every repo you build.
 
-What surfaces is rarely "just install this". More often it's something to adapt:
+It maps each project to what it actually does, building an ontology and knowledge graph of your portfolio: computer vision, geospatial analysis, market-making, scraping, workflow automation, or whatever else you build. It then watches the OSS ecosystem and continuously scores relevant projects against your real capabilities, using semantic matching and a self-tuning learning loop shaped by what you adopt, skip and review.
 
-- **Use it as-is.** Now and then a project does exactly what you need, and you add it. Scrapling for a scraping job, for example.
-- **Port a piece of it.** A function or algorithm from a larger project, lifted into one file in your repo.
-- **Cherry-pick the idea.** A technique worth borrowing, without taking the code.
-- **Clean-room build it.** Rebuild an idea from scratch to stay licence-compliant, with your agent doing the work.
+The result is not a trending list, a keyword search, or a static repo graph. Replen autonomously surfaces a small number of high-signal suggestions your AI coding tools can actually use.
 
-The judgment happens inside your session, against your real code. Your code never leaves your machine.
+Sometimes that means adopting a library as-is. Sometimes it means porting a function or algorithm from a larger project. Sometimes it means cherry-picking a technique, or clean-room building an idea from scratch to stay licence-compliant.
 
-Replen aims for a few useful suggestions a month. Most days it says nothing. When something real lands, your AI tool mentions it the next time you open the repo, as a short note at the end of its first reply:
+The judgement happens locally, inside your session, against your real code. Your code never leaves your machine.
+
+Replen aims for a few useful suggestions a month. Most days it says nothing. When something real lands, your AI tool can mention it the next time you open the repo, as a short note at the end of its first reply:
 
 > By the way, `D4Vinci/Scrapling` could help your scraper get past Cloudflare. Want the full review?
 
