@@ -7,6 +7,9 @@
 #   DEPLOY_USER            remote user owning the dir (default: ubuntu)
 #   DEPLOY_NGINX_SITE      filename in /etc/nginx/sites-* (default: replen.conf)
 #   DEPLOY_LOG_DIR         remote log dir (default: /var/log/replen)
+#   DEPLOY_SKIP_NGINX      set to 1 to skip the nginx install/reload step when
+#                          the app is fronted by a tunnel or an externally
+#                          managed reverse proxy (not by this repo's template)
 #
 # The script never copies .env automatically - populate it manually on the
 # server (chmod 600) so secrets aren't in any sync that includes your laptop.
@@ -25,6 +28,12 @@ NGINX_TEMPLATE="${DEPLOY_NGINX_TEMPLATE:-nginx-replen.conf}"
 # config (no placeholders).
 NGINX_DOMAIN="${DEPLOY_NGINX_DOMAIN:-}"
 LOG_DIR="${DEPLOY_LOG_DIR:-/var/log/replen}"
+# Some hosts front the app with a tunnel (cloudflared) or an externally
+# managed reverse proxy, so it isn't nginx-fronted locally. Set
+# DEPLOY_SKIP_NGINX=1 to skip step 5 there: copying the repo template over a
+# host-managed vhost can re-enable a retired site or reference a cert that was
+# never issued on that host, which fails `nginx -t`.
+SKIP_NGINX="${DEPLOY_SKIP_NGINX:-}"
 
 WEB_SVC="${SERVICE_PREFIX}.service"
 CRON_SVC="${SERVICE_PREFIX}-cron.service"
@@ -55,16 +64,20 @@ ssh "$REMOTE" "cd $REMOTE_DIR && npm install --no-audit --no-fund && npm run db:
 echo "[4/6] installing systemd units"
 ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$WEB_SVC /etc/systemd/system/$WEB_SVC && sudo cp $REMOTE_DIR/scripts/$CRON_SVC /etc/systemd/system/$CRON_SVC && sudo systemctl daemon-reload"
 
-echo "[5/6] installing nginx site"
-# Build the final nginx config: copy template, optionally substitute
-# $YOUR_DOMAIN placeholder if DEPLOY_NGINX_DOMAIN was set, then install
-# + reload. The placeholder syntax in the public template is just a
-# string; sed substitution leaves a literal hostname in the deployed
-# config so nginx never tries to interpret $YOUR_DOMAIN as a variable.
-if [ -n "$NGINX_DOMAIN" ]; then
-  ssh "$REMOTE" "sudo sed 's|\$YOUR_DOMAIN|$NGINX_DOMAIN|g' $REMOTE_DIR/scripts/$NGINX_TEMPLATE | sudo tee /etc/nginx/sites-available/$NGINX_SITE > /dev/null && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+if [ -n "$SKIP_NGINX" ]; then
+  echo "[5/6] skipping nginx (DEPLOY_SKIP_NGINX set - host-managed proxy/tunnel)"
 else
-  ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$NGINX_TEMPLATE /etc/nginx/sites-available/$NGINX_SITE && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+  echo "[5/6] installing nginx site"
+  # Build the final nginx config: copy template, optionally substitute
+  # $YOUR_DOMAIN placeholder if DEPLOY_NGINX_DOMAIN was set, then install
+  # + reload. The placeholder syntax in the public template is just a
+  # string; sed substitution leaves a literal hostname in the deployed
+  # config so nginx never tries to interpret $YOUR_DOMAIN as a variable.
+  if [ -n "$NGINX_DOMAIN" ]; then
+    ssh "$REMOTE" "sudo sed 's|\$YOUR_DOMAIN|$NGINX_DOMAIN|g' $REMOTE_DIR/scripts/$NGINX_TEMPLATE | sudo tee /etc/nginx/sites-available/$NGINX_SITE > /dev/null && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+  else
+    ssh "$REMOTE" "sudo cp $REMOTE_DIR/scripts/$NGINX_TEMPLATE /etc/nginx/sites-available/$NGINX_SITE && sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/$NGINX_SITE && sudo nginx -t && sudo systemctl reload nginx"
+  fi
 fi
 
 echo "[6/6] enabling + restarting services"
