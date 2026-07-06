@@ -174,8 +174,8 @@ const DEP_TO_TAGS: Array<{ match: RegExp; tags: string[] }> = [
  *
  * Identity is `githubFullName` on the server side (the bulk endpoint
  * upserts by it); slug is the URL-safe display label derived from the
- * repo name. So a local `~/projects/drone/` whose remote is
- * `acme/palisade-website` registers as slug `palisade-website` — matching
+ * repo name. So a local `~/projects/widget/` whose remote is
+ * `acme/web-app` registers as slug `web-app` — matching
  * the repo, not the local folder.
  */
 export function discoverProjects(roots: string[]): DiscoveryResult {
@@ -203,8 +203,8 @@ export function discoverProjects(roots: string[]): DiscoveryResult {
       // Slug + display name both anchor on the GitHub repo NAME, not the
       // local folder name. Deriving from the folder meant a folder rename (or
       // an org rename) minted a fresh slug and the server
-      // inserted a duplicate row. `~/code/drone` with remote
-      // `nsokin/palisade-website` now registers as slug `palisade-website`.
+      // inserted a duplicate row. `~/code/widget` with remote
+      // `acme/web-app` now registers as slug `web-app`.
       // The repo name is also the fallback display name, so a generic
       // package.json name (the Next.js starter's "nextn", etc.) doesn't stick.
       const repoName = githubFullName.split("/").pop() || dirName;

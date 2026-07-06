@@ -42,7 +42,7 @@ export default async function Projects() {
         }}
         style={{ display: "flex", gap: 8, alignItems: "center", margin: "16px 0", flexWrap: "wrap" }}
       >
-        <input name="repo" placeholder="owner/repo (e.g. nsokin/replen)" required
+        <input name="repo" placeholder="owner/repo (e.g. acme/webapp)" required
           style={{ padding: "4px 8px", fontSize: 13, width: 280, fontFamily: "ui-monospace, monospace" }} />
         <input name="tags" placeholder="tags (optional): nextjs, leaflet, geospatial"
           style={{ padding: "4px 8px", fontSize: 13, width: 280 }} />
