@@ -369,6 +369,11 @@ function stripTomlServer(path: string): void {
   const next: Record<string, unknown> = { ...c, mcp_servers: servers };
   if (Object.keys(servers).length === 0) delete (next as { mcp_servers?: unknown }).mcp_servers;
   backupIfExists(path);
+  // smol-toml doesn't preserve comments/formatting on re-serialise; warn if the
+  // file had comments so their loss on uninstall isn't silent (a .bak is taken).
+  if (existsSync(path) && /^\s*#/m.test(readFileSync(path, "utf8"))) {
+    console.warn(`  ⚠ ${path}: comments/formatting in this TOML aren't preserved (a .bak was saved next to it).`);
+  }
   writeTomlAtomic(path, next);
 }
 

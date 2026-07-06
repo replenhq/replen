@@ -32,6 +32,9 @@ scripts/*.local.plist
 # Kept out of the public mirror.
 *.local.md
 
+# Operator-only funnel self-test harness (mints tokens against a scratch DB)
+src/cli/*.local.ts
+
 # Synthetic test-cohort harness (operator-only; cohort.json holds real tokens)
 testbed/
 mcp/mcp-publisher

@@ -65,6 +65,10 @@ export async function POST(req: Request) {
     productKey = other.productKey ?? deriveProductKey(other.githubFullName) ?? other.slug;
   } else if (typeof body.productKey === "string" && body.productKey.trim()) {
     productKey = body.productKey.trim().toLowerCase();
+    // Bound it: productKey is a slug-like grouping token, not free text.
+    if (productKey.length > 100 || !/^[a-z0-9._/-]+$/.test(productKey)) {
+      return NextResponse.json({ error: "productKey must be <=100 chars of [a-z0-9._/-]" }, { status: 400, headers: corsHeaders });
+    }
   } else {
     return NextResponse.json({ error: "specify sameProductAs (a repo to group with) or productKey" }, { status: 400, headers: corsHeaders });
   }

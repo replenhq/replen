@@ -218,8 +218,12 @@ const TOOLS: Tool[] = [
     },
     handler: async (cfg, args) => {
       const parsed = z.object({
-        cart: z.string().optional(), project: z.string().optional(), verdict: z.string().optional(),
-        provenance: z.string().optional(), modality: z.string().optional(), q: z.string().optional(),
+        cart: z.string().max(120).optional(),
+        project: z.string().max(120).optional(),
+        verdict: z.enum(["adopt", "port", "cherry-pick", "clean-room", "upgrade", "skip"]).optional(),
+        provenance: z.enum(["grounded", "extracted", "inferred"]).optional(),
+        modality: z.string().max(60).optional(),
+        q: z.string().max(200).optional(),
       }).parse(args);
       const data = await apiGet(cfg, "/api/mcp/cart", { cart: parsed.cart, project: parsed.project, verdict: parsed.verdict, prov: parsed.provenance, mod: parsed.modality, q: parsed.q });
       return JSON.stringify(data, null, 2);
@@ -476,21 +480,21 @@ const TOOLS: Tool[] = [
         repoId: z.number().int().positive().optional(),
         report: z.string().max(32 * 1024).optional(),
         purpose: z.string().max(2000).optional(),
-        goals: z.array(z.string()).max(12).optional(),
+        goals: z.array(z.string().max(200)).max(12).optional(),
         capabilities: z.array(z.union([
-          z.string(),
+          z.string().max(120),
           z.object({
-            tag: z.string(),
-            descriptor: z.string().optional(),
-            modality: z.array(z.string()).optional(),
-            paths: z.array(z.string()).max(5).optional(),
+            tag: z.string().max(120),
+            descriptor: z.string().max(800).optional(),
+            modality: z.array(z.string().max(40)).max(8).optional(),
+            paths: z.array(z.string().max(200)).max(5).optional(),
           }),
         ])).max(40),
         concepts: z.array(z.object({
-          title: z.string(),
-          grounds: z.array(z.string()).max(12).optional(),
+          title: z.string().max(120),
+          grounds: z.array(z.string().max(120)).max(12).optional(),
           links: z.array(z.object({
-            to: z.string(),
+            to: z.string().max(120),
             rel: z.enum(["relates", "refines", "depends", "same-as", "contrast"]).optional(),
           })).max(20).optional(),
         })).max(60).optional(),
@@ -561,8 +565,9 @@ const TOOLS: Tool[] = [
     },
     handler: async (cfg, args) => {
       const parsed = z.object({
-        repo: z.string().optional(),
-        versions: z.record(z.string(), z.string()),
+        repo: z.string().max(120).optional(),
+        versions: z.record(z.string().max(120), z.string().max(120))
+          .refine((r) => Object.keys(r).length <= 500, { message: "too many versions (max 500)" }),
       }).parse(args);
       const repo = parsed.repo ?? cfg.defaultRepo ?? undefined;
       if (!repo) throw new Error("no repo given and none detected from cwd — pass repo='owner/name'");

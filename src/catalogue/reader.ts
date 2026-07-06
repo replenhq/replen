@@ -36,6 +36,7 @@ export type CatalogueMatch = {
   repoShape: string | null;
   cosine: number;
   rankCosine?: number; // the rank BASE (= cosine unless top-k-mean aggregation is on); never displayed
+  rankPenalty?: number; // reader's value penalties (language + commodity + infra + IDF − provenance bonus), EXCLUDING covered/taste; the merged ranker in the inventory route subtracts this so a commodity/infra match can't leapfrog on raw cosine
   matchedFacet: string | null;
   matchedProvenance: Provenance | null; // how grounded the matched capability is
   matchedRepo: string | null; // sibling repo this is for, when cross-repo (multi-repo products)
@@ -196,16 +197,22 @@ export async function catalogueMatches(opts: {
     const centroidCos = projectEmbedding ? cosineSimilarity(projectEmbedding, emb) : NaN;
     const cVal = Number.isFinite(centroidCos) ? centroidCos : -Infinity;
 
+    const repoMod = repoModality(r.modality);
     let bestFacet = -Infinity;
     let bestFacetLabel: string | null = null;
     let bestFacetRepo: string | undefined;
-    let bestFacetModality: Modality[] | undefined;
     let bestFacetProvenance: Provenance | undefined;
     const catFacetCos: number[] = []; // admissible facet cosines, for the top-k-mean rank base
     for (const f of projectFacets) {
+      // Cross-modal gate, applied PER FACET (mirrors the inventory route): a
+      // facet whose modality is disjoint from this repo's is a word collision,
+      // not a fit — skip it as a probe so another admissible facet or the
+      // centroid can still lead. Previously the whole repo was dropped when only
+      // its single best facet was cross-modal, unlike the inventory path.
+      if (modalitiesDisjoint(f.modality, repoMod)) continue;
       const s = cosineSimilarity(f.vec, emb);
       if (Number.isFinite(s)) catFacetCos.push(s);
-      if (Number.isFinite(s) && s > bestFacet) { bestFacet = s; bestFacetLabel = f.label; bestFacetRepo = f.repo; bestFacetModality = f.modality; bestFacetProvenance = f.provenance; }
+      if (Number.isFinite(s) && s > bestFacet) { bestFacet = s; bestFacetLabel = f.label; bestFacetRepo = f.repo; bestFacetProvenance = f.provenance; }
     }
 
     const cosine = Math.max(cVal, bestFacet);
@@ -218,13 +225,8 @@ export async function catalogueMatches(opts: {
 
     const facetLed = bestFacetLabel !== null && Number.isFinite(bestFacet) && bestFacet >= cVal;
     const matchedFacet = facetLed ? bestFacetLabel : null;
-
-    // Cross-modal gate: the capability you matched on operates on a DIFFERENT
-    // data modality than this library (telemetry "anomaly detection" vs an IMAGE
-    // anomaly lib). A word collision, not a fit — exclude, like a runtime you
-    // can't use. Only when facet-led + both sides have a known modality (unknown
-    // on either side keeps the gate open, so a warming catalogue never over-cuts).
-    if (facetLed && modalitiesDisjoint(bestFacetModality, repoModality(r.modality))) continue;
+    // (Cross-modal disjoint facets were already skipped as probes above, so the
+    // winning facet is admissible by construction — no whole-repo drop here.)
 
     // Self-match: the candidate IS the framework this facet is named after —
     // "NestJS" → nestjs/nest, "FastAPI" → fastapi/fastapi, "Terraform" →
@@ -288,10 +290,15 @@ export async function catalogueMatches(opts: {
       const t = cosineSimilarity(tasteVec, emb);
       if (Number.isFinite(t)) tasteAdj = Math.max(0, t) * TASTE_W;
     }
+    // Value penalties the ranking applies, bundled for the inventory route's
+    // merged ranker (which otherwise ranked catalogue entries on raw cosine and
+    // let a commodity/infra match headline). EXCLUDES covered + taste — the
+    // route applies those itself, so bundling them here would double-count.
+    const rankPenalty = langPen + commodityPen + infraPen + idfPen(matchedFacet) - provenanceAdj(matchedProvenance ?? undefined);
     out.push({
       fullName: r.fullName, owner: r.owner, name: r.name, description: r.description,
       url: r.url, stars: r.stars, language: r.primaryLanguage, license: r.license,
-      topics, repoShape: r.repoShape, cosine, rankCosine, matchedFacet, matchedProvenance, matchedRepo,
+      topics, repoShape: r.repoShape, cosine, rankCosine, rankPenalty, matchedFacet, matchedProvenance, matchedRepo,
       ageDays, rising: recencyEligible && ageDays != null && ageDays <= RISING_MONTHS * 30,
       tasteAdj, vec: emb,
     });

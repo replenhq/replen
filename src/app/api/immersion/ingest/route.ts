@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 import { resolveProject, effectiveTier, targetsFor, type ImmersionRequest } from "../_shared";
 import { embedCodeItems, mergeCodeFacets, blobHasCodeFacets, type CodeItem } from "@/projects/immersion";
 import { parseFacetCodeHash } from "@/lib/embeddings";
@@ -39,6 +40,10 @@ type FileInput = { rel?: unknown; content?: unknown };
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  // Each call triggers server-paid OpenAI embedding batches — rate limit it.
+  if (!allowAction(`immersion:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
+  }
 
   let body: ImmersionRequest & { files?: FileInput[] };
   try {

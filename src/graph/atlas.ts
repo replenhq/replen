@@ -5,21 +5,48 @@
 // the ecosystem + their decisions for free.
 
 import { eq, and } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { db, schema } from "../db/client";
 
 export type AtlasFile = { path: string; content: string };
 
 const fileSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "untitled";
-const capFile = (label: string) => `capabilities/${fileSlug(label)}`;
-const candFile = (fullName: string) => `candidates/${fileSlug(fullName)}`;
-const projFile = (slug: string) => `projects/${fileSlug(slug)}`;
-const themeFile = (name: string) => `themes/${fileSlug(name)}`;
+const shortHash = (s: string) => createHash("sha1").update(s).digest("hex").slice(0, 6);
 const link = (target: string, display?: string) => display ? `[[${target}|${display}]]` : `[[${target}]]`;
+
+// Per-render slug resolver. Distinct decision units can slugify to one path
+// (candidates "a/b-c" vs "a-b/c" → candidates/a-b-c; labels differing only past
+// 80 chars). fileSlug alone would silently overwrite one note with another. This
+// memoizes by the raw input (each node's identity string) and appends a short
+// hash of that identity when a base slug is already claimed by a DIFFERENT input,
+// so the first claimant keeps the clean name and collisions get a stable suffix.
+// The same resolver produces both the file path and every [[link]] target, so
+// they never disagree. Stateful → created fresh per renderAtlas call.
+function makeSlugResolver(prefix: string): (raw: string) => string {
+  const takenBy = new Map<string, string>(); // base slug → first raw key that claimed it
+  const assigned = new Map<string, string>(); // raw key → final slug
+  return (raw: string) => {
+    const cached = assigned.get(raw);
+    if (cached) return `${prefix}/${cached}`;
+    const base = fileSlug(raw);
+    const owner = takenBy.get(base);
+    const slug = owner === undefined || owner === raw ? base : `${base}-${shortHash(raw)}`;
+    if (owner === undefined) takenBy.set(base, raw);
+    assigned.set(raw, slug);
+    return `${prefix}/${slug}`;
+  };
+}
 
 type GNode = { id: number; kind: string; nodeKey: string; label: string; data: Record<string, unknown> };
 const j = (s: string | null): Record<string, unknown> => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
 
 export async function renderAtlas(userId: number): Promise<AtlasFile[]> {
+  // Collision-safe path builders, scoped to this render (see makeSlugResolver).
+  const capFile = makeSlugResolver("capabilities");
+  const candFile = makeSlugResolver("candidates");
+  const projFile = makeSlugResolver("projects");
+  const themeFile = makeSlugResolver("themes");
+
   const rawNodes = await db.select().from(schema.graphNodes).where(eq(schema.graphNodes.userId, userId));
   const rawEdges = await db.select().from(schema.graphEdges).where(eq(schema.graphEdges.userId, userId));
   if (!rawNodes.length) return [];

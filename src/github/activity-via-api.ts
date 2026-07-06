@@ -22,6 +22,20 @@ import type {
 } from "../projects/activity";
 
 const BASE = "https://api.github.com";
+const ACTIVITY_FETCH_TIMEOUT_MS = Math.max(1000, parseInt(process.env.REPLEN_ACTIVITY_FETCH_TIMEOUT_MS ?? "15000", 10) || 15000);
+// These probes run in an AWAITED pipeline phase, outside the per-fetcher timeout
+// umbrella, so each needs its own deadline or a hung GitHub call stalls the whole
+// pipeline. An abort surfaces as a rejected fetch, caught by each call site's
+// existing try/catch (→ warn + empty result).
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ACTIVITY_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const LOOKBACK_DAYS = 30;
 const MAX_COMMITS = 100;
 const TODO_SEARCH_CAP = 100;
@@ -112,7 +126,7 @@ async function fetchCommits(owner: string, name: string, viewer: string | null, 
   // ghJson (typed as Record). Raw fetch.
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
@@ -169,7 +183,7 @@ async function fetchTodoClusters(owner: string, name: string, token: string): Pr
   const url = `${BASE}/search/code?q=${encodeURIComponent(q)}&per_page=${TODO_SEARCH_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
@@ -213,7 +227,7 @@ async function fetchOpenPRs(owner: string, name: string, token: string): Promise
   const url = `${BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls?state=open&per_page=${OPEN_PR_CAP}&sort=updated&direction=desc`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
@@ -258,7 +272,7 @@ async function fetchOpenPRs(owner: string, name: string, token: string): Promise
 async function ghJson(token: string, url: string): Promise<Record<string, unknown> | null> {
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,

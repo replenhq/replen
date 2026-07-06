@@ -78,6 +78,13 @@ export async function syncDiscoveredProjects({
     await persistRoots(result.scannedRoots);
   }
 
+  // The absolute local checkout path carries the OS username; it is only useful
+  // to a server running ON this machine (self-host at localhost) for Immersion.
+  // A remote/hosted server can't read it, so don't leak it there.
+  const isLocalBase = (() => {
+    try { const h = new URL(base).hostname; return h === "localhost" || h === "127.0.0.1" || h === "::1"; }
+    catch { return false; }
+  })();
   const payload = {
     projects: result.projects.map((p) => ({
       slug: p.slug,
@@ -85,11 +92,9 @@ export async function syncDiscoveredProjects({
       name: p.name,
       tags: p.tags,
       primaryLanguage: p.primaryLanguage ?? undefined,
-      // Absolute local checkout path. Used by Immersion on a self-host install
-      // (server == this machine) to ground on the actual source; inert on the
-      // hosted server, which can't read it. Always sent — it's identity, not
-      // code; nothing is read unless the operator enables Immersion.
-      localPath: p.localPath,
+      // Only sent to a local (self-host) server; omitted for a remote host so
+      // the username-bearing absolute path never leaves the machine.
+      localPath: isLocalBase ? p.localPath : undefined,
     })),
   };
 

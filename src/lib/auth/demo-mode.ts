@@ -1,14 +1,14 @@
-// Demo mode infrastructure.
+// Demo-account infrastructure.
 //
-// /demo/* are real, public Next.js routes — each demo page renders the
-// seeded demo user's data directly. No cookie, no auth bypass, no
-// middleware rewrite. The demo user is created by scripts/seed-demo.ts
-// with email DEMO_USER_EMAIL (default "demo@replen.dev").
+// There is no longer a live web demo surface (the old /demo routes were
+// removed — the product is demonstrated with GIFs/videos, since an MCP +
+// skill flow can't be shown as a seeded dashboard). What remains here is the
+// read-only *account* guard: a seeded demo/test account (email
+// DEMO_USER_EMAIL) is still recognised so it can never mint writes, and
+// test-cohort.ts uses the same identity to exclude seed accounts from
+// cross-user aggregates.
 
-import { db, schema } from "@/db/client";
-import { eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import { requireUser, type CurrentUser } from "./current-user";
+import { requireUser } from "./current-user";
 
 export const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL ?? "demo@replen.dev").toLowerCase();
 
@@ -16,36 +16,13 @@ export function isDemoUser(user: { email: string }): boolean {
   return user.email.toLowerCase() === DEMO_USER_EMAIL;
 }
 
-// Resolves the seeded demo user from the DB. Used by every /demo/*
-// page in place of requireUser(). Calls notFound() (→ 404) if the
-// seed user is missing instead of throwing — a missing demo user is
-// an ops gap, not a user-facing error.
-export async function getDemoUser(): Promise<CurrentUser> {
-  const row = await db
-    .select()
-    .from(schema.users)
-    .where(eq(schema.users.email, DEMO_USER_EMAIL))
-    .get();
-  if (!row) notFound();
-  return {
-    id: row.id,
-    firebaseUid: row.firebaseUid,
-    email: row.email,
-    displayName: row.displayName ?? null,
-    role: row.role as "admin" | "user",
-    status: row.status as "active" | "pending" | "suspended",
-  };
-}
-
-// Used by every server action that mutates state. Returns the active
-// user when they're a normal account, throws when called from a demo
-// context. Defence-in-depth: /demo pages render visual-only components,
-// so this guard shouldn't normally fire, but it catches any path that
-// would otherwise let a demo render trigger a real write.
+// Used by every server action that mutates state. Returns the active user when
+// they're a normal account, throws for the seeded demo account. Defence-in-depth
+// so a demo/test account can never trigger a real write.
 export async function requireWritableUser() {
   const user = await requireUser();
   if (isDemoUser(user)) {
-    throw new Error("This is the read-only demo. Sign up at /login to use it on your own repos.");
+    throw new Error("This is the read-only demo account. Sign up at /login to use Replen on your own repos.");
   }
   return user;
 }

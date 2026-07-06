@@ -41,9 +41,6 @@ export default function SignedOutPage() {
           <a href="/login" style={primaryBtnStyle}>
             Sign back in &rarr;
           </a>
-          <a href="/demo" style={secondaryBtnStyle}>
-            Or try the demo
-          </a>
         </div>
 
         <p style={footerStyle}>
@@ -101,18 +98,6 @@ const primaryBtnStyle: React.CSSProperties = {
   borderRadius: 8,
   fontWeight: 600,
   fontSize: 15,
-};
-
-const secondaryBtnStyle: React.CSSProperties = {
-  display: "block",
-  padding: "10px 20px",
-  background: "transparent",
-  color: "var(--fg, #ece9e2)",
-  textDecoration: "none",
-  border: "1px solid var(--line-strong, rgba(255,255,255,0.13))",
-  borderRadius: 8,
-  fontWeight: 500,
-  fontSize: 14,
 };
 
 const footerStyle: React.CSSProperties = {

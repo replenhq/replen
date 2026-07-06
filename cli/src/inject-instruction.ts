@@ -278,7 +278,7 @@ function replaceSection(claudeMd: string): string {
 }
 
 async function promptYes(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY) return true; // non-interactive → assume yes
+  if (!process.stdin.isTTY) return false; // non-interactive + no --yes ⇒ refuse (mirrors uninstall)
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise<boolean>((resolve) => {
     rl.question(question, (answer) => {
@@ -304,13 +304,21 @@ export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: 
     console.log("  · no git repos with GitHub remotes found — skipping CLAUDE.md inject. Pass --root <path> if your code lives somewhere non-conventional.");
     return outcome;
   }
-  // First-run consent. Shows the count + an example path so the user
-  // knows the blast radius. --yes (or non-TTY) bypasses.
+  // First-run consent. Shows the count + an example path so the user knows the
+  // blast radius, and names every file we touch (three per repo, created if
+  // missing). --yes bypasses; non-interactive without --yes is a safe no-op.
   if (!opts.yes) {
+    if (!process.stdin.isTTY) {
+      outcome.declined = true;
+      console.log(`\n  · non-interactive shell — skipping CLAUDE.md/AGENTS.md/GEMINI.md inject.`);
+      console.log(`    Re-run with \`npx replen inject -y\` to apply without a prompt.`);
+      return outcome;
+    }
     console.log(`\n  Found ${repos.length} git repo(s) with GitHub remotes.`);
-    console.log(`  Append a "## Replen integration" section to each CLAUDE.md so Claude Code`);
-    console.log(`  surfaces today's matches at session start. Idempotent; edit freely above`);
-    console.log(`  the section. First 3:`);
+    console.log(`  Add a "## Replen integration" section to CLAUDE.md, AGENTS.md and GEMINI.md`);
+    console.log(`  in each (creating any that don't exist) so Claude Code / Codex / Gemini CLI`);
+    console.log(`  surface today's matches at session start. Idempotent; edit freely above the`);
+    console.log(`  section. First 3:`);
     for (const r of repos.slice(0, 3)) console.log(`    • ${r}`);
     if (repos.length > 3) console.log(`    … and ${repos.length - 3} more`);
     const ok = await promptYes(`  Proceed? [Y/n] `);

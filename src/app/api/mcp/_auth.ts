@@ -1,6 +1,7 @@
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { hashIngestToken } from "@/lib/crypto";
+import { isDemoUser } from "@/lib/auth/demo-mode";
 
 // Token auth shared by every /api/mcp/* endpoint. The MCP server passes the
 // user's personal token in either header - `x-digest-token` is preferred,
@@ -19,7 +20,7 @@ export async function authenticate(req: Request): Promise<McpAuth | null> {
   if (!token) return null;
   const hash = hashIngestToken(token);
   const row = await db
-    .select({ settings: schema.userSettings, status: schema.users.status })
+    .select({ settings: schema.userSettings, status: schema.users.status, email: schema.users.email })
     .from(schema.userSettings)
     .innerJoin(schema.users, eq(schema.users.id, schema.userSettings.userId))
     .where(eq(schema.userSettings.ingestTokenHash, hash))
@@ -31,6 +32,10 @@ export async function authenticate(req: Request): Promise<McpAuth | null> {
   // surface — they could keep writing candidates, reading matches, and
   // opening handoff PRs indefinitely.
   if (row.status !== "active") return null;
+  // Demo gate: the seeded demo account is read-only everywhere else (server
+  // actions go through requireWritableUser). A minted demo token must not be a
+  // back door into the token-authed write routes, so refuse it outright here.
+  if (isDemoUser({ email: row.email })) return null;
   // Expiry gate (audit H1). NULL expiry on legacy pre-0028 rows is treated
   // as non-expiring back-compat; new tokens from authorizeCli always carry
   // a 90-day stamp. Once a token is past its expiry the user must run the

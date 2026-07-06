@@ -566,54 +566,6 @@ td.path {
   border-color: var(--green-line);
 }
 
-/* Persistent demo banner. Renders above the app header on every
-   page when the visitor is the seeded demo user. Yellow stripe so
-   it's unmissable, but tight vertical footprint so it doesn't eat
-   the viewport on small screens. */
-.demo-banner {
-  background: var(--amber);
-  color: #1a1a1a;
-  padding: 8px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 13px;
-  line-height: 1.4;
-  flex-wrap: wrap;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
-}
-.demo-banner strong {
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-size: 11px;
-  background: rgba(0, 0, 0, 0.15);
-  padding: 2px 8px;
-  border-radius: 999px;
-  margin-right: 6px;
-}
-.demo-banner-ctas {
-  display: inline-flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.demo-banner-cta {
-  background: #1a1a1a;
-  color: var(--amber);
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 12.5px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.demo-banner-cta:hover {
-  background: #000;
-}
-@media (max-width: 640px) {
-  .demo-banner { padding: 8px 12px; font-size: 12px; }
-}
-
 /* Sparse-docs strip. Collapsed by default — a single amber-tinted
    row above InsightsStrip that the user can expand. Expanded view
    is a one-line-per-project list so even 10+ projects stay tight. */

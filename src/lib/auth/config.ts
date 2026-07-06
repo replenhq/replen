@@ -19,15 +19,26 @@ function normalizePrivateKey(): string {
 
 const isProd = process.env.NODE_ENV === "production";
 
+// Only the current secret is required; the previous one is optional (present
+// only during a rotation). Filter out any falsy/empty entry so an unset
+// COOKIE_SECRET_PREVIOUS can never become an empty HMAC verification key —
+// which would silently accept cookies signed with the empty string.
+const cookieSignatureKeys = [
+  process.env.COOKIE_SECRET_CURRENT,
+  process.env.COOKIE_SECRET_PREVIOUS,
+].filter((k): k is string => typeof k === "string" && k.length > 0);
+
+// NOTE: the boot-time COOKIE_SECRET assertion lives in src/db/client.ts, NOT
+// here. This module is imported by the Edge middleware, and the Edge runtime
+// forbids process.exit() — putting the hard-fail here breaks `next build`.
+// The edge-safe part (filtering empty keys out of cookieSignatureKeys) stays.
+
 export const authConfig = {
   // Same Firebase web API key as the client SDK uses; falling back to the
   // NEXT_PUBLIC_ one lets us keep a single source of truth in .env.
   apiKey: (process.env.FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY)!,
   cookieName: "__session",
-  cookieSignatureKeys: [
-    process.env.COOKIE_SECRET_CURRENT!,
-    process.env.COOKIE_SECRET_PREVIOUS!,
-  ],
+  cookieSignatureKeys,
   cookieSerializeOptions: {
     path: "/",
     httpOnly: true,

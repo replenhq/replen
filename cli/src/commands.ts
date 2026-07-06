@@ -625,7 +625,7 @@ async function fetchInventoryStatus(
 // (one source of truth) and writes them locally; you own and can open them.
 export async function runAtlas(argv: string[]): Promise<void> {
   const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
-  const { join, dirname } = await import("node:path");
+  const { join, dirname, resolve, sep } = await import("node:path");
   const { homedir } = await import("node:os");
   const cfg = await loadConfigOrExit();
   const dir = getFlag(argv, "--out") ?? join(homedir(), ".replen", "atlas");
@@ -638,8 +638,12 @@ export async function runAtlas(argv: string[]): Promise<void> {
   for (const sub of ["projects", "capabilities", "candidates", "themes"]) {
     try { rmSync(join(dir, sub), { recursive: true, force: true }); } catch { /* */ }
   }
+  // f.path is server-controlled: refuse any path that escapes the atlas dir
+  // (e.g. "../../.zshrc"). Mirrors the guard in mcp/src/atlas-sync.ts.
+  const root = resolve(dir);
   for (const f of data.files) {
-    const full = join(dir, f.path);
+    const full = resolve(dir, f.path);
+    if (full !== root && !full.startsWith(root + sep)) continue; // path traversal guard
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, f.content);
   }

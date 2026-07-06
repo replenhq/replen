@@ -17,12 +17,15 @@ function pickPort(): number {
 }
 
 function openBrowser(url: string): void {
-  const cmd =
-    platform() === "darwin" ? "open"
-    : platform() === "win32" ? "start"
-    : "xdg-open";
+  // On Windows `start` is a cmd.exe builtin, not an executable — spawning it
+  // directly fails, so route through `cmd /c start "" <url>` (the "" is the
+  // required title arg). darwin/linux have real `open`/`xdg-open` binaries.
+  const [cmd, args] =
+    platform() === "darwin" ? ["open", [url]] as [string, string[]]
+    : platform() === "win32" ? ["cmd", ["/c", "start", "", url]] as [string, string[]]
+    : ["xdg-open", [url]] as [string, string[]];
   // Detach. We don't care about its exit.
-  const proc = spawn(cmd, [url], { stdio: "ignore", detached: true });
+  const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
   proc.on("error", () => {
     // Fail silently. We print the URL anyway as fallback.
   });
@@ -132,11 +135,16 @@ export async function runInit(): Promise<void> {
   console.log("  (Waiting for browser callback on http://127.0.0.1:" + port + "…)");
   console.log("");
 
+  // Bind the loopback listener BEFORE opening the browser (waitForCallback's
+  // server.listen runs synchronously in the Promise executor). Otherwise a
+  // local port-squatter could grab the port between open and listen and
+  // capture the code+state from the callback, then exchange them for the token.
+  const cbPromise = waitForCallback(port, state);
   openBrowser(authUrl);
 
   let cb: CallbackResult;
   try {
-    cb = await waitForCallback(port, state);
+    cb = await cbPromise;
   } catch (e: unknown) {
     console.error("  ✗ " + ((e as Error)?.message ?? String(e)));
     process.exit(1);

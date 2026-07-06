@@ -41,9 +41,12 @@ export async function getSourceQualityWeights(userId: number): Promise<Map<strin
     if (!r.kind) continue;
     const g = Number(r.good ?? 0);
     const b = Number(r.bad ?? 0);
-    // Smoothed ratio: (g+1) / (b+1) centred around 1.0. Capped so we never
-    // delete a source from contention entirely on weak evidence.
-    const raw = (g + 1) / (b + 1);
+    // Smoothed ratio centred around 1.0, capped so weak evidence never deletes
+    // a source from contention. Prior of 2 (not 1) so a SINGLE 'good' lands at
+    // 3/2=1.5 rather than immediately pinning the 2.0 cap — the ratio should
+    // approach the cap gradually as evidence accumulates.
+    const PRIOR = 2;
+    const raw = (g + PRIOR) / (b + PRIOR);
     weights.set(r.kind, Math.max(0.25, Math.min(2.0, raw)));
   }
   return weights;

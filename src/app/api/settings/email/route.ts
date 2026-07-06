@@ -12,6 +12,22 @@ export const dynamic = "force-dynamic";
 const FREQS = ["off", "weekly", "twiceweekly", "biweekly", "monthly"];
 
 export async function POST(req: Request) {
+  // Defence-in-depth CSRF check. This cookie-authenticated form POST otherwise
+  // rests entirely on SameSite=lax; an explicit same-origin check costs nothing
+  // and holds even if AUTH_COOKIE_DOMAIN is later widened to a shared parent.
+  // Only enforced when Origin is present (browsers omit it on same-origin GETs
+  // but send it on cross-origin/unsafe POSTs); server-to-server callers without
+  // an Origin header are unaffected.
+  const origin = req.headers.get("origin");
+  if (origin) {
+    const expectedHost = req.headers.get("x-forwarded-host") ?? new URL(req.url).host;
+    let originHost = "";
+    try { originHost = new URL(origin).host; } catch { originHost = "\0"; }
+    if (originHost !== expectedHost) {
+      return new NextResponse("cross-origin request rejected", { status: 403 });
+    }
+  }
+
   const user = await requireUser();
   const form = await req.formData();
 

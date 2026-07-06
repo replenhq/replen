@@ -73,7 +73,10 @@ Match relevance: ${safeRelevance}${match.relevanceScore != null ? ` (${match.rel
       prBody,
     });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502, headers: corsHeaders });
+    // Don't echo the upstream GitHub API error verbatim to the client; log it
+    // server-side and return a generic, non-leaky message.
+    console.warn(`[/api/mcp/handoff] upstream failure user=${auth.userId}:`, (e as Error).message);
+    return NextResponse.json({ error: "handoff PR creation failed upstream; check your GitHub token + repo access" }, { status: 502, headers: corsHeaders });
   }
   if (result.skipped === "file_exists") {
     return NextResponse.json({ error: `${filePath} already exists on default branch - skipped` }, { status: 409, headers: corsHeaders });

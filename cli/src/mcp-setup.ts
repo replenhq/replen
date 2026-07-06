@@ -220,6 +220,15 @@ function setupCodex(token: string, base: string): HostSetupResult {
   const path = CODEX_CONFIG;
   try {
     backupIfExists(path);
+    // smol-toml preserves values but not comments, blank lines, or table order.
+    // If the user's config carries comments, warn (a .bak was already taken) so
+    // the loss isn't silent — the only faithful alternative is hand-editing.
+    if (existsSync(path)) {
+      const raw = readFileSync(path, "utf8");
+      if (/^\s*#/m.test(raw)) {
+        console.warn(`  ⚠ ${path}: comments/formatting in this TOML aren't preserved when Replen edits it (a .bak was saved next to it).`);
+      }
+    }
     const config = readToml(path);
     const mcpServers = (config.mcp_servers as Record<string, unknown> | undefined) ?? {};
     const existed = !!mcpServers[SERVER_NAME];
@@ -287,7 +296,9 @@ function backupIfExists(path: string): void {
   // previous backup. Each run preserves the prior state.
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const backup = `${path}.bak.${ts}`;
-  writeFileSync(backup, readFileSync(path));
+  // The backed-up config can carry the ingest token; keep it 0600 like the
+  // atomic write above, not the umask default (typically world-readable 0644).
+  writeFileSync(backup, readFileSync(path), { mode: 0o600 });
 }
 
 // ============================================================================

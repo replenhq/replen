@@ -3,7 +3,6 @@ import { db, schema } from "@/db/client";
 import { and, eq, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { computeLeaps } from "@/graph/leaps";
-import { deriveProductKey } from "@/projects/product-key";
 
 // Atlas §1 — Leaps. The non-obvious connection engine over the user's knowledge
 // graph. Scope to a repo (owner/name) to get leaps for that project (+ its
@@ -25,7 +24,13 @@ async function handle(repoArg: string | undefined, limit: number, userId: number
         .where(and(eq(schema.projectProfiles.userId, userId), sql`LOWER(substr(${schema.projectProfiles.githubFullName}, instr(${schema.projectProfiles.githubFullName}, '/') + 1)) = ${namePart}`)).get();
     }
     scopeProject = p?.slug;
-    if (repoArg && !scopeProject) deriveProductKey(repoArg); // touch (no-op) — keeps repoArg meaningful even when unscoped
+    // A caller who asked for leaps "for this repo" must not silently get the
+    // whole-portfolio result when the repo isn't registered — that reads as
+    // "these leaps are for your repo" when they aren't. Return an explicit
+    // empty, flagged result instead.
+    if (!scopeProject) {
+      return { scopedTo: null, count: 0, leaps: [], note: "repo not registered" as const };
+    }
   }
   const leaps = await computeLeaps(userId, { scopeProject, limit });
   return { scopedTo: scopeProject ?? null, count: leaps.length, leaps };

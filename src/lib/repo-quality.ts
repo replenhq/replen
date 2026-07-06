@@ -41,8 +41,13 @@ export function tallyLatestVerdicts(
   let adoptUsers = 0, portUsers = 0, skipUsers = 0, deferUsers = 0;
   let scoreSum = 0, scoreCount = 0, lastAt = 0;
   for (const v of latest.values()) {
-    if (v.verdict === "adopt") adoptUsers++;
-    else if (v.verdict === "port") portUsers++;
+    // All 7 accepted verdicts must fall into a bucket or totalUsers (=latest.size)
+    // no longer equals adopt+port+skip+defer, and genuinely-useful repos (ones
+    // users cherry-picked / clean-roomed / upgraded to) would show as un-adopted.
+    // upgrade = switched TO this repo (adopt-like); cherry-pick / clean-room =
+    // took or reimplemented its code (port-like).
+    if (v.verdict === "adopt" || v.verdict === "upgrade") adoptUsers++;
+    else if (v.verdict === "port" || v.verdict === "cherry-pick" || v.verdict === "clean-room") portUsers++;
     else if (v.verdict === "skip") skipUsers++;
     else if (v.verdict === "defer") deferUsers++;
     if (typeof v.score === "number") { scoreSum += v.score; scoreCount++; }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, eq, sql } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 import { capabilitiesFromDeps, mergeCapabilityTags } from "@/projects/capabilities";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
@@ -44,6 +45,10 @@ const MAX_REPORT_CHARS = 24_000;
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  // Triggers server-paid OpenAI facet embedding batches per call — rate limit it.
+  if (!allowAction(`capabilities:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
+  }
 
   let body: Body;
   try {
@@ -62,13 +67,17 @@ export async function POST(req: Request) {
   for (const c of body.capabilities) {
     // Everything the agent sends is GROUNDED — it read the actual source.
     if (typeof c === "string") {
-      const tag = c.trim();
-      if (tag) { agentTags.push(tag); agentSpecs.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "grounded" }); }
+      const tag = c.trim().slice(0, 100);
+      // Never let a file path / symbol / filename become a capability node —
+      // the Atlas graph models decision units, never code units. (Same guard
+      // applied to vault concepts below and in the graph re-check.)
+      if (tag && !looksLikeCodeUnit(tag)) { agentTags.push(tag); agentSpecs.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "grounded" }); }
     } else if (c && typeof c === "object" && typeof (c as Record<string, unknown>).tag === "string") {
       const cc = c as Record<string, unknown>;
-      const tag = (cc.tag as string).trim();
-      if (!tag) continue;
-      const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim() : "";
+      const tag = (cc.tag as string).trim().slice(0, 100);
+      if (!tag || looksLikeCodeUnit(tag)) continue;
+      // Per-field caps: these persist into project_profiles + the graph; bound them.
+      const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim().slice(0, 500) : "";
       const modality = coerceModalities(cc.modality);
       // Evidence anchors: file PATHS implementing this capability (≤5, paths
       // only — never code). They flow into the graph + leaps + dossier.

@@ -1,5 +1,5 @@
 import { db, schema } from "../db/client";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { runDiscoveredFetchers, runScoutedFetchers } from "../fetchers";
 import { runAnalysis } from "../analyzer/pipeline";
 import { discoverProjectsForUser, parseShapeJson, upsertProjects } from "../projects/loader";
@@ -74,6 +74,44 @@ function friendlyRegenReason(reason: string): string {
 // in-flight run on the very next render) and kicks off the actual pipeline
 // work fire-and-forget. Returns immediately. Callers (server actions, cron)
 // who want to *await* the full pipeline can call runPipelineForUser instead.
+// A run unfinished this long never finalised — the process died mid-run (crash,
+// OOM, deploy restart). Matches the run-now route's backstop. Without it a zombie
+// (finishedAt NULL) would block every future run forever.
+const STALE_RUN_MS = 45 * 60_000;
+
+// Atomically claim the single in-flight run slot for a user, shared by EVERY
+// entry point (cron, MCP run-now, the dashboard action, CLI). It (1) finalises a
+// stale dead-process run so it can't block forever, then (2) inserts a new
+// digest_runs row ONLY if no fresh unfinished run exists — as a single
+// conditional INSERT, so two concurrent callers can't both start a pipeline
+// (SQLite serialises the writes; the loser's WHERE NOT EXISTS sees the winner's
+// row and inserts nothing). Returns the new runId, or null if a run is already
+// in flight. This closes the TOCTOU that the read-then-act checks in the HTTP
+// callers left open, and covers the cron path that had no guard at all.
+async function claimRunSlot(userId: number): Promise<number | null> {
+  const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
+  await db
+    .update(schema.digestRuns)
+    .set({ finishedAt: new Date() })
+    .where(and(
+      eq(schema.digestRuns.userId, userId),
+      isNull(schema.digestRuns.finishedAt),
+      lt(schema.digestRuns.startedAt, staleCutoff),
+    ));
+  const nowSec = Math.floor(Date.now() / 1000); // drizzle 'timestamp' mode stores seconds
+  const res = await db.run(sql`
+    INSERT INTO digest_runs (user_id, started_at)
+    SELECT ${userId}, ${nowSec}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM digest_runs WHERE user_id = ${userId} AND finished_at IS NULL
+    )
+  `);
+  const affected = (res as { rowsAffected?: number }).rowsAffected ?? 0;
+  if (affected === 0) return null; // a fresh run is already in flight
+  const rowid = (res as { lastInsertRowid?: bigint | number }).lastInsertRowid;
+  return rowid != null ? Number(rowid) : null;
+}
+
 export async function startPipelineForUser(userId: number): Promise<{ runId: number } | { skipped: string }> {
   const cfg = await resolveUserConfig(userId);
   const settings = await db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, userId)).get();
@@ -99,16 +137,16 @@ export async function startPipelineForUser(userId: number): Promise<{ runId: num
     }
   }
 
-  const run = await db
-    .insert(schema.digestRuns)
-    .values({ userId, startedAt: new Date() })
-    .returning()
-    .get();
+  const runId = await claimRunSlot(userId);
+  if (runId === null) {
+    console.warn(`[pipeline] user=${userId} skipped: a run is already in flight`);
+    return { skipped: "in-flight" };
+  }
 
-  void executePipeline(run!.id, userId, cfg, settings).catch((e) =>
+  void executePipeline(runId, userId, cfg, settings).catch((e) =>
     console.error(`[pipeline] user=${userId} fire-and-forget execute crashed:`, e),
   );
-  return { runId: run!.id };
+  return { runId };
 }
 
 // Awaits the full pipeline. Used by the scheduler cron + the CLI scripts.
@@ -139,13 +177,13 @@ export async function runPipelineForUser(userId: number) {
     }
   }
 
-  const run = await db
-    .insert(schema.digestRuns)
-    .values({ userId, startedAt: new Date() })
-    .returning()
-    .get();
+  const runId = await claimRunSlot(userId);
+  if (runId === null) {
+    console.warn(`[pipeline] user=${userId} skipped: a run is already in flight`);
+    return;
+  }
 
-  await executePipeline(run!.id, userId, cfg, settings);
+  await executePipeline(runId, userId, cfg, settings);
 }
 
 async function executePipeline(
@@ -364,31 +402,37 @@ async function executePipeline(
     } else {
       console.error(`[pipeline] user=${userId} failed`, e);
     }
+  } finally {
+    // Finalize the run on EVERY exit path — including the skill-tier early
+    // `return` above (skill is the default tier) and any thrown error — so
+    // digest_runs always gets finishedAt + usage. Previously this sat after
+    // the try/catch and the skill-tier return skipped it entirely, leaving
+    // every default-tier run "in flight" forever and its spend uncounted.
+    const usage = endUsageTracking();
+    const cost = totalCostUsd(usage.calls);
+
+    await db
+      .update(schema.digestRuns)
+      .set({
+        finishedAt: new Date(),
+        candidatesFound,
+        reposAnalyzed,
+        matchesCreated,
+        emailSent,
+        errorLog,
+        deepseekInputTokens: usage.deepseekInputTokens,
+        deepseekOutputTokens: usage.deepseekOutputTokens,
+        anthropicInputTokens: usage.anthropicInputTokens,
+        anthropicOutputTokens: usage.anthropicOutputTokens,
+        costUsd: cost,
+        pausedReason,
+      })
+      .where(eq(schema.digestRuns.id, runId));
+
+    console.log(
+      `[pipeline] done: user=${userId} run=${runId} candidates=${candidatesFound} repos=${reposAnalyzed} matches=${matchesCreated} email=${emailSent} cost=$${cost.toFixed(4)}`
+    );
   }
-  const usage = endUsageTracking();
-  const cost = totalCostUsd(usage.calls);
-
-  await db
-    .update(schema.digestRuns)
-    .set({
-      finishedAt: new Date(),
-      candidatesFound,
-      reposAnalyzed,
-      matchesCreated,
-      emailSent,
-      errorLog,
-      deepseekInputTokens: usage.deepseekInputTokens,
-      deepseekOutputTokens: usage.deepseekOutputTokens,
-      anthropicInputTokens: usage.anthropicInputTokens,
-      anthropicOutputTokens: usage.anthropicOutputTokens,
-      costUsd: cost,
-      pausedReason,
-    })
-    .where(eq(schema.digestRuns.id, runId));
-
-  console.log(
-    `[pipeline] done: user=${userId} run=${runId} candidates=${candidatesFound} repos=${reposAnalyzed} matches=${matchesCreated} email=${emailSent} cost=$${cost.toFixed(4)}`
-  );
 }
 
 /**
@@ -884,7 +928,10 @@ async function refreshStaleProjectCodeFacets(
 // Nothing user-identifying is ever written to the catalogue tables (no user_id,
 // no repo names, no code) — only public OSS metadata + generic capability terms.
 async function refreshCatalogueStep(runId: number, userId: number): Promise<void> {
-  const K = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2);
+  // k-anonymity floor is 2, ALWAYS. This is the most privacy-critical site (a
+  // capability crossing K becomes a shared GitHub search), so clamp to >=2 even
+  // if REPLEN_CATALOGUE_MIN_USERS is misconfigured to 1 — matching build.ts.
+  const K = Math.max(2, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2);
 
   // One pass over ALL active projects: count DISTINCT users per capability
   // (k-anonymity), and collect this user's own capability labels.
@@ -916,8 +963,16 @@ async function refreshCatalogueStep(runId: number, userId: number): Promise<void
     }
   }
 
-  // Shareable user labels: seed OR ≥K distinct users. Everything else stays
-  // private to this user's own matching (their facets) and is NOT searched.
+  // Shareable user labels: seed OR ≥K distinct users (standard k-anonymity — the
+  // requester is one of the k, exactly as the k-anonymity definition intends).
+  // This deliberately COUNTS the requester: a label that is unique/proprietary
+  // to this user is shared by nobody else, never reaches K, and stays private —
+  // which is the property that matters. Excluding the requester would require
+  // K OTHER users, starving the shared catalogue in the low-user regime (the
+  // open-core "degrade gracefully to single-user" rule) for only a marginal,
+  // self-limiting privacy gain (you'd merely learn that generic capability
+  // vocabulary you already share is also used elsewhere). Everything below K
+  // stays private to this user's own matching (their facets) and is NOT searched.
   const shareableMine = myLabels.filter(
     (l) => isSeedCapability(l) || (usersByLabel.get(l.toLowerCase())?.size ?? 0) >= K,
   );

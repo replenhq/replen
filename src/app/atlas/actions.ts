@@ -329,7 +329,9 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     const sections: Dossier["sections"] = [];
     if (projectsIn.length) sections.push(navSection(`Your projects here (${projectsIn.length})`, projectsIn));
     if (relatedDomains.length) sections.push(navSection("Related domains", relatedDomains.slice().sort((a, b) => a.text.localeCompare(b.text)).slice(0, 12), false));
-    if (crossUsers) sections.push({ heading: "Across Replen", items: [`${crossUsers} distinct users work in this domain`] });
+    // crossUsers is bucketed to the nearest 5 at build time (never an exact
+    // near-threshold count), so render it as a floor ("5+ …").
+    if (crossUsers) sections.push({ heading: "Across Replen", items: [`${crossUsers}+ distinct users work in this domain`] });
     return {
       kind, title: node.label,
       subtitle: [data.themeName ? `theme: ${data.themeName}` : null, "domain / sector"].filter(Boolean).join(" · "),
@@ -383,20 +385,18 @@ export async function suggestionAction(fullName: string, action: "star" | "dismi
   }
   const status = action === "star" ? "starred" : "hidden";
   const now = new Date();
-  const existing = await db.select().from(schema.userMatchState)
-    .where(and(
-      eq(schema.userMatchState.userId, user.id),
-      eq(schema.userMatchState.repoId, repoId),
-      projectId === null ? sql`${schema.userMatchState.projectId} IS NULL` : eq(schema.userMatchState.projectId, projectId),
-    )).get();
-  if (existing) {
-    await db.update(schema.userMatchState).set({ status, actionAt: now })
-      .where(eq(schema.userMatchState.id, existing.id));
-  } else {
-    await db.insert(schema.userMatchState).values({
-      userId: user.id, repoId, projectId, status, actionAt: now, surfacedAt: now, surfacedCount: 1,
+  // Atomic upsert (same race/duplicate fix as /api/state): null-project rows
+  // conflict on the partial unique index, scoped rows on the full index.
+  await db
+    .insert(schema.userMatchState)
+    .values({ userId: user.id, repoId, projectId, status, actionAt: now, surfacedAt: now, surfacedCount: 1 })
+    .onConflictDoUpdate({
+      target: projectId === null
+        ? [schema.userMatchState.userId, schema.userMatchState.repoId]
+        : [schema.userMatchState.userId, schema.userMatchState.repoId, schema.userMatchState.projectId],
+      targetWhere: projectId === null ? sql`${schema.userMatchState.projectId} is null` : undefined,
+      set: { status, actionAt: now },
     });
-  }
   rebuildAndRevalidate(user.id);
   return { ok: true };
 }
@@ -466,6 +466,12 @@ export async function curateCapability(
   if (!key) return { ok: false, touched: 0 };
   const targetClean = target?.trim().slice(0, 120);
   if ((action === "rename" || action === "merge") && !targetClean) return { ok: false, touched: 0 };
+  // A rename/merge target becomes a capability label everywhere. Never let it be
+  // a file path / symbol / filename — the Atlas graph models decision units, not
+  // code units (mirrors looksLikeCodeUnit in the capabilities route + build.ts).
+  if (targetClean && (/[/\\]/.test(targetClean) || targetClean.includes("::") || targetClean.includes("#") || /\.(ts|tsx|js|jsx|py|go|rs|java|rb|c|cc|cpp|h|hpp|cs|php|swift|kt|scala|sh|sql|json|ya?ml|toml|md)$/i.test(targetClean))) {
+    return { ok: false, touched: 0 };
+  }
 
   // 1. Persist the rule (upsert by normalized label).
   await db.insert(schema.capabilityCurations)

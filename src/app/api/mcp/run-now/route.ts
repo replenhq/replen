@@ -8,8 +8,12 @@ const MIN_RUN_GAP_MS = 60_000;
 // A run that's been "in flight" this long never finalised — the process died
 // mid-run (crash, OOM, or a deploy restart). Without this, that zombie record
 // (finishedAt = NULL) blocks every future run, including the daily cron,
-// forever. Real runs finish in a couple of minutes; 10 is a safe backstop.
-const STALE_RUN_MS = 10 * 60_000;
+// forever. A COLD-START run (first onboarding sweep, many repos) can legitimately
+// take ~25 min, so 10 min would reap a live run and start a concurrent second
+// pipeline. 45 min sits comfortably past the slowest real run. (Skill-tier runs
+// now always finalise via the pipeline's finally block, so this only guards a
+// genuinely dead process.)
+const STALE_RUN_MS = 45 * 60_000;
 
 // Trigger a pipeline run for the authenticated user. Same rate-limit + in-
 // flight guards as the server action behind the dashboard refresh button, so

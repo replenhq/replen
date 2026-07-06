@@ -34,13 +34,11 @@ type Event =
       projectName: string | null;
     };
 
-export async function SkillHome({ user, demoMode = false }: {
+export async function SkillHome({ user }: {
   user: { id: number; email: string };
-  demoMode?: boolean;
 }) {
   const events = await fetchRecentEvents(user.id, 50);
-  // First-name greeting for signed-in users only. Demo gets neutral.
-  const firstName = !demoMode ? guessFirstName(user.email) : null;
+  const firstName = guessFirstName(user.email);
 
   return (
     <div style={pageStyle}>
@@ -50,23 +48,11 @@ export async function SkillHome({ user, demoMode = false }: {
           <span style={{ color: "var(--amber)" }}>?</span>
         </h1>
         <p style={subtitleStyle}>
-          {demoMode ? (
-            <>
-              This is a seeded snapshot of what your Replen looks like
-              after a few weeks of use. Below: a real timeline of
-              agent verdicts and user actions on candidates from the
-              wider ecosystem. <a href="/login" style={ctaStyle}>
-              Sign up to try it on your own repos &rarr;</a>
-            </>
-          ) : (
-            <>
-              {firstName ? `Hi ${firstName}. ` : ""}
-              Replen watches the wider ecosystem against your projects.
-              When something lands that&apos;s worth a look, your agent
-              mentions it the next time you open Claude Code.
-              Most days are quiet, by design.
-            </>
-          )}
+          {firstName ? `Hi ${firstName}. ` : ""}
+          Replen watches the wider ecosystem against your projects.
+          When something lands that&apos;s worth a look, your agent
+          mentions it the next time you open Claude Code.
+          Most days are quiet, by design.
         </p>
       </section>
 
@@ -405,12 +391,6 @@ const titleStyle: React.CSSProperties = {
   letterSpacing: -0.5,
   margin: "0 0 14px",
   lineHeight: 1.15,
-};
-
-const ctaStyle: React.CSSProperties = {
-  color: "var(--amber)",
-  textDecoration: "none",
-  whiteSpace: "nowrap",
 };
 
 const subtitleStyle: React.CSSProperties = {

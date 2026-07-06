@@ -222,24 +222,20 @@ const usageStore = new AsyncLocalStorage<{ calls: LlmCall[] }>();
 // Backwards-compat shape: the pipeline calls beginUsageTracking() and
 // expects endUsageTracking() to return what was tracked since. With ALS
 // we model the "since" window by enter()-ing a fresh store on begin and
-// returning the drained calls on end.
-let pendingUsage: { calls: LlmCall[] } | null = null;
-let usageExit: (() => void) | null = null;
-
+// returning THIS caller's drained calls on end.
 export function beginUsageTracking(): void {
-  pendingUsage = { calls: [] };
-  const store = pendingUsage;
-  // enterWith binds the store to this async context. Since the pipeline
-  // is single-rooted at runAnalysis() this matches the existing per-run
-  // shape exactly while preventing cross-run mixing.
-  usageStore.enterWith(store);
-  usageExit = () => { pendingUsage = null; };
+  // enterWith binds a fresh store to this async context and its descendants.
+  // Each concurrent executePipeline() runs in its own async branch, so each
+  // gets its own store — no cross-run mixing.
+  usageStore.enterWith({ calls: [] });
 }
 
 export function endUsageTracking(): UsageSummary {
-  const calls = pendingUsage?.calls ?? [];
-  if (usageExit) usageExit();
-  usageExit = null;
+  // Drain the CALLER's own ALS store (bound by beginUsageTracking in this same
+  // async context), NOT a module global. Reading a global here let a run that
+  // finished while another was mid-flight drain the other run's calls, then
+  // record $0 for itself — corrupting the 24h spend-cap accounting.
+  const calls = usageStore.getStore()?.calls ?? [];
   const summary: UsageSummary = {
     deepseekInputTokens: 0,
     deepseekOutputTokens: 0,

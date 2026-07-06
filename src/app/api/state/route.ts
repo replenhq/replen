@@ -60,6 +60,21 @@ export async function POST(req: Request) {
     );
   }
 
+  // Length / charset caps on the free-text + URL fields. These land in the
+  // GLOBAL repos table and are rendered back into the user's agent + dashboard
+  // (handoffPrUrl becomes a clickable href), so reject anything that isn't a
+  // GitHub-shaped owner/name, an https URL, or a bounded note.
+  if (body.repo !== undefined && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(body.repo)) {
+    return NextResponse.json({ error: "repo must be 'owner/name' with GitHub-valid characters" }, { status: 400, headers: corsHeaders });
+  }
+  if (body.handoffPrUrl !== undefined &&
+      (typeof body.handoffPrUrl !== "string" || body.handoffPrUrl.length > 500 || !/^https:\/\/[^\s]+$/i.test(body.handoffPrUrl))) {
+    return NextResponse.json({ error: "handoffPrUrl must be an https URL (max 500 chars)" }, { status: 400, headers: corsHeaders });
+  }
+  if (body.userNote !== undefined && (typeof body.userNote !== "string" || body.userNote.length > 2000)) {
+    return NextResponse.json({ error: "userNote must be a string (max 2000 chars)" }, { status: 400, headers: corsHeaders });
+  }
+
   // Resolve repo by id or owner/name. Per-user state is keyed by
   // global repo_id, not candidate_id, because the same repo can be
   // surfaced via different sources and we want one canonical state row.
@@ -98,44 +113,16 @@ export async function POST(req: Request) {
 
   const now = new Date();
 
-  // Upsert on (user_id, repo_id, project_id). SQLite's INSERT ... ON
-  // CONFLICT lets us bump action_at and update the status atomically.
-  // surfacedAt only sets on initial insert (the first time we ever
-  // saw this combo). Drizzle's onConflictDoUpdate is the idiomatic API.
-  const existing = await db
-    .select()
-    .from(schema.userMatchState)
-    .where(and(
-      eq(schema.userMatchState.userId, auth.userId),
-      eq(schema.userMatchState.repoId, repoId!),
-      // Treat projectId=null and projectId=number as distinct rows.
-      projectId === null
-        ? sql`${schema.userMatchState.projectId} IS NULL`
-        : eq(schema.userMatchState.projectId, projectId),
-    ))
-    .get();
-
+  // Atomic upsert — no select-then-insert race (two concurrent requests for the
+  // same repo could otherwise both miss and both insert, minting duplicate
+  // global rows). Global (null-project) rows conflict on the partial unique
+  // index; scoped rows on the full (user, repo, project) index. surfacedAt only
+  // sets on initial insert; a re-surface bumps recency + count; a terminal
+  // action (star/hide/handoff) stamps actionAt.
   const isSurfaced = body.status === "surfaced";
-  if (existing) {
-    await db
-      .update(schema.userMatchState)
-      .set({
-        status: body.status,
-        // 'surfaced' is a re-show, not a user action: bump the surfacing
-        // recency + count (drives the cool-off window) and leave actionAt
-        // untouched. Terminal statuses (star/hide/handoff) stamp actionAt.
-        ...(isSurfaced
-          ? {
-              surfacedAt: now,
-              surfacedCount: sql`${schema.userMatchState.surfacedCount} + 1`,
-            }
-          : { actionAt: now }),
-        ...(body.handoffPrUrl !== undefined ? { handoffPrUrl: body.handoffPrUrl } : {}),
-        ...(body.userNote !== undefined ? { userNote: body.userNote } : {}),
-      })
-      .where(eq(schema.userMatchState.id, existing.id));
-  } else {
-    await db.insert(schema.userMatchState).values({
+  await db
+    .insert(schema.userMatchState)
+    .values({
       userId: auth.userId,
       repoId: repoId!,
       projectId,
@@ -145,8 +132,21 @@ export async function POST(req: Request) {
       actionAt: isSurfaced ? null : now,
       handoffPrUrl: body.handoffPrUrl ?? null,
       userNote: body.userNote ?? null,
+    })
+    .onConflictDoUpdate({
+      target: projectId === null
+        ? [schema.userMatchState.userId, schema.userMatchState.repoId]
+        : [schema.userMatchState.userId, schema.userMatchState.repoId, schema.userMatchState.projectId],
+      targetWhere: projectId === null ? sql`${schema.userMatchState.projectId} is null` : undefined,
+      set: {
+        status: body.status,
+        ...(isSurfaced
+          ? { surfacedAt: now, surfacedCount: sql`${schema.userMatchState.surfacedCount} + 1` }
+          : { actionAt: now }),
+        ...(body.handoffPrUrl !== undefined ? { handoffPrUrl: body.handoffPrUrl } : {}),
+        ...(body.userNote !== undefined ? { userNote: body.userNote } : {}),
+      },
     });
-  }
 
   return NextResponse.json({ ok: true, repoId, projectId, status: body.status }, { headers: corsHeaders });
 }

@@ -1,6 +1,8 @@
 import cron from "node-cron";
 import { runPipeline } from "./run-once";
 import { archiveOldHiddenForAllUsers } from "./aging";
+import { prunePipelineEvents, pruneOldCandidates } from "./events";
+import { reapUnsharedCapabilities } from "../catalogue/builder";
 import { runPricingScrape } from "../pricing/scrape";
 import { runAnnouncementScrape } from "../announcements/scrape";
 import { runEolSync } from "../announcements/deadlines";
@@ -27,20 +29,38 @@ const briefSchedule = process.env.REPLEN_BRIEF_CRON ?? "0 7 * * 1,4";
 
 console.log(`[cron] scheduled: pipeline=${schedule}  aging=${agingSchedule}  pricing=${pricingSchedule}  announce=${announceSchedule}  brief=${briefSchedule}`);
 
-cron.schedule(schedule, async () => {
-  console.log("[cron] tick - running pipeline");
+// Reentrancy guard: a full sweep can outlast the cron interval (cold-start,
+// many users). Skip a tick — and the RUN_ON_BOOT call — if one is still in
+// flight rather than stacking concurrent sweeps on the same DB.
+let pipelineRunning = false;
+async function runPipelineGuarded(trigger: string): Promise<void> {
+  if (pipelineRunning) {
+    console.warn(`[cron] pipeline still running; skipping ${trigger}`);
+    return;
+  }
+  pipelineRunning = true;
   try {
     await runPipeline();
   } catch (e) {
-    console.error("[cron] pipeline error", e);
+    console.error(`[cron] pipeline error (${trigger})`, e);
+  } finally {
+    pipelineRunning = false;
   }
+}
+
+cron.schedule(schedule, async () => {
+  console.log("[cron] tick - running pipeline");
+  await runPipelineGuarded("cron tick");
 });
 
 cron.schedule(agingSchedule, async () => {
   console.log("[cron] tick - archive aging hidden matches");
   try {
     const result = await archiveOldHiddenForAllUsers(90);
-    console.log(`[cron] aging done: ${result.archived} archived across ${result.users} users`);
+    const prunedEvents = await prunePipelineEvents(30);
+    const prunedCandidates = await pruneOldCandidates();
+    const reapedCaps = await reapUnsharedCapabilities();
+    console.log(`[cron] aging done: ${result.archived} archived across ${result.users} users; pruned ${prunedEvents} old pipeline events, ${prunedCandidates} old candidates, reaped ${reapedCaps} unshared capabilities`);
   } catch (e) {
     console.error("[cron] aging error", e);
   }
@@ -87,9 +107,10 @@ cron.schedule(briefSchedule, async () => {
   }
 });
 
-// Optional: run once on boot if RUN_ON_BOOT=1
+// Optional: run once on boot if RUN_ON_BOOT=1 (shares the reentrancy guard so
+// it can't stack on top of the first scheduled tick).
 if (process.env.RUN_ON_BOOT === "1") {
-  runPipeline().catch((e) => console.error("[boot] pipeline error", e));
+  void runPipelineGuarded("boot");
 }
 
 // keep process alive

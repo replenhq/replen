@@ -10,11 +10,32 @@ import {
   generateDek,
   unwrapDek,
 } from "../lib/crypto";
-
 // Refuse to boot in production without ENCRYPTION_KEY. There is no silent
 // plaintext fallback - misconfigured deploys must fail loud, not corrupt
 // the secrets store.
 assertEncryptionKeyForBoot();
+
+// Likewise refuse to boot a public deploy without a strong session-cookie
+// signing secret — a missing/empty COOKIE_SECRET_CURRENT would silently accept
+// forged cookies. This lives here (node-only boot module), NOT in auth/config.ts,
+// because that module is bundled into the Edge middleware where process.exit is
+// forbidden. SECURITY.md documents the ≥32-char requirement. A headless self-host
+// (no authenticated webapp) only warns so it isn't bricked.
+function assertCookieSecretForBoot(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const current = process.env.COOKIE_SECRET_CURRENT;
+  if (current && current.length >= 32) return;
+  const selfHostEnv = (process.env.REPLEN_SELF_HOST ?? "").trim().toLowerCase();
+  const isSelfHost = selfHostEnv === "1" || selfHostEnv === "true" || selfHostEnv === "yes" || selfHostEnv === "on";
+  if (isSelfHost) {
+    console.warn(`[auth] COOKIE_SECRET_CURRENT unset or <32 chars — the authenticated webapp won't have valid session signing. Set it if you serve the dashboard. (self-host: not fatal)`);
+    return;
+  }
+  console.error(`[auth] FATAL: COOKIE_SECRET_CURRENT is unset or shorter than 32 chars.`);
+  console.error(`[auth] Refusing to boot a public deploy without a strong cookie signing secret (see SECURITY.md).`);
+  process.exit(1);
+}
+assertCookieSecretForBoot();
 
 const dbPath = process.env.DIGEST_DB_PATH ?? "./data/digest.sqlite";
 const absPath = resolve(dbPath);

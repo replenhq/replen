@@ -13,11 +13,12 @@ Usage:
   npx replen mcp setup       Re-wire MCP using saved auth
   npx replen project-init    Print a prompt your AI coding tool uses to draft
                              a CLAUDE.md tuned for replen
-  npx replen inject [-y]     Append the "## Replen integration" section to
-                             every CLAUDE.md + AGENTS.md (Claude Code +
-                             Codex) under ~/github/, ~/code/, ~/projects/
-                             so the agent auto-surfaces matches on session
-                             start. Idempotent. Asks for consent unless -y.
+  npx replen inject [-y]     Add the "## Replen integration" section to
+                             CLAUDE.md + AGENTS.md + GEMINI.md (Claude Code +
+                             Codex + Gemini CLI), creating any that are
+                             missing, in every repo under ~/github/, ~/code/,
+                             ~/projects/ so the agent auto-surfaces matches on
+                             session start. Idempotent. Consent unless -y.
   npx replen sync-projects   Re-scan local repos for new GitHub remotes
        [--root PATH ...]     and register them with Replen. Run after
                              cloning a new repo, or pass --root to point

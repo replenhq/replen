@@ -24,6 +24,11 @@ export async function GET(req: Request) {
   const MAX_SINCE_MS = 90 * 24 * 3600 * 1000;
   const floor = new Date(Date.now() - MAX_SINCE_MS);
   const requested = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  // A malformed ?since (e.g. "since=garbage") yields an Invalid Date that
+  // silently poisons the < comparison; reject it explicitly instead of 500ing.
+  if (sinceParam && Number.isNaN(requested.getTime())) {
+    return new NextResponse("invalid 'since' parameter (expected ISO 8601)", { status: 400 });
+  }
   const since = requested < floor ? floor : requested;
 
   const matches = await db

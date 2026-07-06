@@ -10,7 +10,8 @@
 // gradually rather than hammering the API.
 
 import { db, schema } from "../db/client";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
+import { isSeedCapability } from "./seed-capabilities";
 import { embed, embedBatch, candidateEmbeddingText, cleanReadmeHead, serialiseEmbedding, facetEmbeddingText } from "../lib/embeddings";
 import { inferRepoShape } from "../fetchers/repo-shape";
 import { looksLikeHype } from "./derive-capabilities";
@@ -132,6 +133,48 @@ export async function refreshCatalogue(labels: string[]): Promise<{ searched: nu
   }
   console.log(`[catalogue] refreshed ${toRefresh.length} capabilit${toRefresh.length === 1 ? "y" : "ies"} → ${upserted} repos upserted`);
   return { searched: toRefresh.length, upserted };
+}
+
+// Un-share reaper (k-anonymity is checked at share time; this closes the loop).
+// A non-seed capability label enters catalogue_capabilities once ≥K distinct
+// users have it, and is then refreshed/surfaced (adjacency) indefinitely. If the
+// users who made it k-anonymous later delete their projects or accounts, the
+// count silently falls below K but the label lingers forever. This recomputes
+// distinct-user counts per label across active projects (test cohort excluded,
+// matching the share-time gate) and retires non-seed labels that dropped below K.
+// Runs in the nightly cron. Seed vocabulary is always kept.
+export async function reapUnsharedCapabilities(
+  K = Math.max(2, parseInt(process.env.REPLEN_CATALOGUE_MIN_USERS ?? "2", 10) || 2),
+): Promise<number> {
+  const testUids = await testUserIds();
+  const rows = await db
+    .select({ uid: schema.projectProfiles.userId, summaryJson: schema.projectProfiles.summaryJson })
+    .from(schema.projectProfiles)
+    .where(and(eq(schema.projectProfiles.active, true), eq(schema.projectProfiles.included, true)));
+  const usersByLabel = new Map<string, Set<number>>();
+  for (const p of rows) {
+    if (!p.summaryJson || p.uid == null || testUids.has(p.uid)) continue;
+    let caps: string[] = [];
+    try { caps = (JSON.parse(p.summaryJson) as { capabilityTags?: string[] }).capabilityTags ?? []; } catch { continue; }
+    for (const c of caps) {
+      if (typeof c !== "string") continue;
+      const k = c.toLowerCase();
+      let s = usersByLabel.get(k);
+      if (!s) { s = new Set(); usersByLabel.set(k, s); }
+      s.add(p.uid);
+    }
+  }
+  const cats = await db.select({ label: schema.catalogueCapabilities.label }).from(schema.catalogueCapabilities);
+  let reaped = 0;
+  for (const { label } of cats) {
+    if (isSeedCapability(label)) continue; // seed vocabulary is baseline, never reaped
+    if ((usersByLabel.get(label.toLowerCase())?.size ?? 0) < K) {
+      await db.delete(schema.catalogueCapabilities).where(eq(schema.catalogueCapabilities.label, label));
+      reaped++;
+    }
+  }
+  if (reaped) console.log(`[catalogue] reaped ${reaped} shared capabilit${reaped === 1 ? "y" : "ies"} that fell below k=${K}`);
+  return reaped;
 }
 
 async function upsertRepo(h: RepoHit, label: string, vector: number[] | null, kind: RepoKind, modality: Modality[], readmeHead: string | null): Promise<void> {
@@ -290,7 +333,17 @@ async function searchGithub(label: string, token: string | undefined): Promise<R
     "x-github-api-version": "2022-11-28",
   };
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
+  // Bounded like fetchReadmeHead — this runs INSIDE the awaited catalogue phase,
+  // outside the per-fetcher timeout umbrella, so a hung GitHub search would
+  // otherwise stall the whole pipeline.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = (await res.json()) as { items?: Array<Record<string, unknown>> };
   const out: RepoHit[] = [];

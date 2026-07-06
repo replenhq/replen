@@ -18,6 +18,7 @@
 
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
+import { sanitizeForMarkdown } from "../lib/handoff-template";
 
 const EOL_HORIZON_DAYS = Math.max(7, parseInt(process.env.REPLEN_EOL_HORIZON_DAYS ?? "180", 10) || 180);
 const EOL_GRACE_DAYS = Math.max(0, parseInt(process.env.REPLEN_EOL_GRACE_DAYS ?? "30", 10) || 30);
@@ -257,5 +258,6 @@ export async function deadlinePs(userId: number, userTokens: Set<string>): Promi
   } else {
     line = `${what} on ${when} — ${affectedStr ?? "you use this; worth checking whether any project still pins it"}.`;
   }
-  return { deadlineId: e.id, phase, line, urgent: phase === "t7", token };
+  // e.title / e.product are untrusted scraped text; the line is relayed verbatim — sanitize.
+  return { deadlineId: e.id, phase, line: sanitizeForMarkdown(line), urgent: phase === "t7", token };
 }

@@ -7,6 +7,7 @@
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { userToolTokens } from "../lib/detect-tokens";
+import { sanitizeForMarkdown } from "../lib/handoff-template";
 
 const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_PRICING_SURFACE_DAYS ?? "14", 10) || 14);
 
@@ -94,5 +95,6 @@ export async function pricingPs(userId: number, userTokens: Set<string>): Promis
     : `${name}'s pricing page changed — worth a look.`;
   let cToks: string[] = [];
   try { cToks = JSON.parse(c.detectTokens ?? "[]"); } catch { /* */ }
-  return { changeId: c.id, line, token: cToks.find((t) => userTokens.has(t)) ?? null };
+  // Untrusted scraped vendor/summary text, relayed verbatim into the agent — sanitize.
+  return { changeId: c.id, line: sanitizeForMarkdown(line), token: cToks.find((t) => userTokens.has(t)) ?? null };
 }

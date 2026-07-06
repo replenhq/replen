@@ -5,10 +5,11 @@
 // writeups we already store) + the graph, matched both semantically (embed the
 // query) and by keyword.
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { embed, parseStoredEmbedding, parseStoredFacetEmbeddings, cosineSimilarity } from "../lib/embeddings";
 import { isCodeFacet } from "../projects/immersion";
+import { loadCurationMap, applyCuration } from "./curation";
 
 const norm = (s: string) => s.toLowerCase();
 const STOP = new Set(["the", "a", "an", "for", "to", "of", "in", "on", "we", "have", "has", "what", "did", "do", "does", "our", "my", "is", "are", "with", "and", "or", "about", "any", "use", "used", "using"]);
@@ -50,22 +51,30 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
   const slugById = new Map(projects.map((p) => [p.id, p.slug]));
 
   // ── capabilities: which the user has that match the query, and where ──
+  // Apply the user's curation rules (delete/rename/merge/confirm) so a
+  // capability they deleted or renamed can't resurrect here after facets
+  // regenerate — same mapping build.ts applies to the graph.
+  const curations = await loadCurationMap(userId);
   const capAgg = new Map<string, { projects: Set<string>; best: number; provenance: string; paths: string[] }>();
   for (const p of projects) {
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
       if (isCodeFacet(f)) continue; // code-content facets are matching-only; the
       // descriptor facet for the same capability already carries its paths.
-      const kw = keywordHits(f.label, toks);
+      const curated = applyCuration(f.label, f.provenance ?? "inferred", curations);
+      if (!curated) continue; // deleted capability — don't surface it
+      const effLabel = curated.label;
+      const effProv = curated.provenance;
+      const kw = keywordHits(effLabel, toks);
       const sem = qvec ? cosineSimilarity(qvec, f.vec) : 0;
       const score = kw * 0.5 + (Number.isFinite(sem) ? Math.max(0, sem) : 0);
       if (kw === 0 && sem < 0.45) continue; // not relevant
-      const key = norm(f.label);
-      const cur = capAgg.get(key) ?? { projects: new Set<string>(), best: 0, provenance: f.provenance ?? "inferred", paths: [] };
+      const key = norm(effLabel);
+      const cur = capAgg.get(key) ?? { projects: new Set<string>(), best: 0, provenance: effProv, paths: [] };
       cur.projects.add(p.slug);
       cur.best = Math.max(cur.best, score);
       // prefer the strongest provenance seen
       const order: Record<string, number> = { grounded: 3, extracted: 2, inferred: 1, ambiguous: 0 };
-      if ((order[f.provenance ?? "inferred"] ?? 1) > (order[cur.provenance] ?? 1)) cur.provenance = f.provenance ?? "inferred";
+      if ((order[effProv] ?? 1) > (order[cur.provenance] ?? 1)) cur.provenance = effProv;
       // evidence anchors, attributed per project, capped to stay scannable
       for (const path of f.paths ?? []) {
         const entry = `${p.slug}: ${path}`;
@@ -121,8 +130,33 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
     const prev = latest.get(k);
     if (!prev || (e.createdAt?.getTime() ?? 0) > (prev.createdAt?.getTime() ?? 0)) latest.set(k, e);
   }
-  const repoRows = repoIds.size ? await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name }).from(schema.repos) : [];
-  const repoById = new Map(repoRows.filter((r) => repoIds.has(r.id)).map((r) => [r.id, r]));
+  // Resolve only the triaged repos (chunked inArray) — never the whole
+  // cross-user repos table.
+  const repoIdList = [...repoIds];
+  const repoRows: Array<{ id: number; owner: string; name: string }> = [];
+  for (let i = 0; i < repoIdList.length; i += 500) {
+    const chunk = repoIdList.slice(i, i + 500);
+    if (!chunk.length) continue;
+    repoRows.push(...await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name })
+      .from(schema.repos).where(inArray(schema.repos.id, chunk)));
+  }
+  const repoById = new Map(repoRows.map((r) => [r.id, r]));
+
+  // Batch every catalogue-embedding lookup up front (one chunked query) instead
+  // of one query per decision inside the loop (the old N+1).
+  const embByFullName = new Map<string, number[]>();
+  if (qvec) {
+    const fullNames = [...latest.values()]
+      .map((e) => { const r = repoById.get(e.repoId); return r ? `${r.owner}/${r.name}` : null; })
+      .filter((x): x is string => x !== null);
+    for (let i = 0; i < fullNames.length; i += 500) {
+      const chunk = fullNames.slice(i, i + 500);
+      if (!chunk.length) continue;
+      const rows = await db.select({ fullName: schema.catalogueRepos.fullName, embedding: schema.catalogueRepos.embedding })
+        .from(schema.catalogueRepos).where(inArray(schema.catalogueRepos.fullName, chunk));
+      for (const c of rows) { const emb = parseStoredEmbedding(c.embedding ?? null); if (emb) embByFullName.set(c.fullName, emb); }
+    }
+  }
 
   const decisions: RecallDecision[] = [];
   for (const e of latest.values()) {
@@ -131,8 +165,7 @@ export async function recall(userId: number, opts: { query: string; verdict?: st
     const fullName = `${repo.owner}/${repo.name}`;
     let rel = keywordHits(fullName, toks) + keywordHits(e.matchedFacet, toks) + keywordHits(e.oneLine, toks) * 0.5 + keywordHits(e.writeup, toks) * 0.25;
     if (qvec) {
-      const cat = await db.select({ embedding: schema.catalogueRepos.embedding }).from(schema.catalogueRepos).where(eq(schema.catalogueRepos.fullName, fullName)).get();
-      const emb = parseStoredEmbedding(cat?.embedding ?? null);
+      const emb = embByFullName.get(fullName) ?? null;
       if (emb) { const c = cosineSimilarity(qvec, emb); if (Number.isFinite(c)) rel += Math.max(0, c); }
     }
     // a bare verdict filter (e.g. "what have we ported") with no topical terms still returns all matching verdicts

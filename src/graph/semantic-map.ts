@@ -10,6 +10,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { parseStoredEmbedding, parseStoredFacetEmbeddings } from "../lib/embeddings";
 import { isCodeFacet } from "../projects/immersion";
+import { loadCurationMap, applyCuration } from "./curation";
 
 export type MapPoint = { nodeKey: string; kind: string; x: number; y: number; z: number };
 
@@ -47,6 +48,9 @@ export async function computeSemanticMap(userId: number): Promise<MapPoint[]> {
 
   const projects = await db.select().from(schema.projectProfiles)
     .where(eq(schema.projectProfiles.userId, userId));
+  // Apply curation rules so deleted/renamed capabilities don't reappear on the
+  // map after facets regenerate (same mapping build.ts + recall use).
+  const curations = await loadCurationMap(userId);
   const capSums = new Map<string, { sum: number[]; n: number; label: string }>();
   for (const p of projects) {
     if (!p.active || !p.included) continue;
@@ -54,9 +58,11 @@ export async function computeSemanticMap(userId: number): Promise<MapPoint[]> {
     if (centroid) entries.push({ nodeKey: p.slug, kind: "project", vec: centroid });
     for (const f of parseStoredFacetEmbeddings(p.facetEmbeddings ?? null)) {
       if (isCodeFacet(f)) continue; // matching-only; not a point on the capability map
-      const key = f.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const curated = applyCuration(f.label, f.provenance ?? "inferred", curations);
+      if (!curated) continue; // deleted capability
+      const key = curated.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       if (!key) continue;
-      const acc = capSums.get(key) ?? { sum: new Array(f.vec.length).fill(0), n: 0, label: f.label };
+      const acc = capSums.get(key) ?? { sum: new Array(f.vec.length).fill(0), n: 0, label: curated.label };
       for (let i = 0; i < f.vec.length; i++) acc.sum[i] += f.vec[i];
       acc.n++;
       capSums.set(key, acc);

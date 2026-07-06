@@ -2,7 +2,7 @@
 
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth/current-user";
+import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { randomBytes } from "crypto";
 import { hashIngestToken } from "@/lib/crypto";
 import { issueCliAuthCode } from "@/lib/cli-auth-codes";
@@ -21,7 +21,10 @@ export type AuthorizeResult =
 // carries only the code; the CLI redeems it server-to-server against
 // /api/cli-auth/exchange.
 export async function authorizeCli(port: number, state: string): Promise<AuthorizeResult> {
-  const u = await requireUser();
+  // requireWritableUser (not requireUser): the read-only demo account must not
+  // be able to mint an ingest token, which would otherwise be a write-capable
+  // credential that bypasses demo enforcement on the token-authed routes.
+  const u = await requireWritableUser();
 
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     return { ok: false, error: "Invalid port" };

@@ -15,6 +15,7 @@ import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "../db/client";
 import { EVENT_LABELS, SEVERITY_ORDER, type Severity } from "./classify";
 import { loadUserVersions } from "./deadlines";
+import { sanitizeForMarkdown } from "../lib/handoff-template";
 
 const SURFACE_WINDOW_DAYS = Math.max(1, parseInt(process.env.REPLEN_ANNOUNCE_SURFACE_DAYS ?? "10", 10) || 10);
 
@@ -128,5 +129,9 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
   let eToks: string[] = [];
   try { eToks = JSON.parse(e.detectTokens ?? "[]"); } catch { /* */ }
   const token = AGGREGATOR_CATEGORY.test(e.category ?? "") ? null : eToks.find((t) => userTokens.has(t)) ?? null;
-  return { eventId: e.id, line, severity, critical, token };
+  // The headline (e.title / vendor / product) is untrusted scraped text and the
+  // line is relayed VERBATIM into the user's coding agent as Replen's voice.
+  // Sanitize to the same bar as candidate descriptions (strip HTML/control/
+  // zero-width/bidi, defang script schemes) so a crafted feed title can't inject.
+  return { eventId: e.id, line: sanitizeForMarkdown(line), severity, critical, token };
 }

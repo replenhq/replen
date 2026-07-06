@@ -1,13 +1,11 @@
 import "./globals.css";
 import type { ReactNode } from "react";
-import { headers } from "next/headers";
 import { db, schema } from "@/db/client";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { IconSprite, Icon } from "@/components/Icons";
 import { UserMenu } from "@/components/UserMenu";
-import { getDemoUser, isDemoUser } from "@/lib/auth/demo-mode";
 
 export const metadata = { title: "Replen" };
 export const viewport = { width: "device-width", initialScale: 1 };
@@ -61,15 +59,7 @@ function Wordmark() {
 }
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  // /demo/* routes get tagged with x-replen-on-demo by middleware. When set,
-  // we render the demo user's chrome regardless of who's logged in — a real
-  // signed-in user visiting /demo should still see the demo header + banner,
-  // not their own account.
-  const hdrs = await headers();
-  const onDemo = hdrs.get("x-replen-on-demo") === "1";
-  const user = onDemo
-    ? await getDemoUser().catch(() => null)
-    : await getCurrentUser().catch(() => null);
+  const user = await getCurrentUser().catch(() => null);
   const isActive = user?.status === "active";
 
   // Header counter: starred entries from user_match_state (the skill-tier
@@ -93,46 +83,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     starredAwaitingHandoff = Number(counts?.awaiting ?? 0);
   }
 
-  // demoMode tracks the URL (via the middleware header), not the resolved
-  // user identity — that way logged-in real users on /demo still get the
-  // demo experience.
-  const demoMode = onDemo;
-  // Prefix every nav href so in-demo links stay inside /demo/*. The non-demo
-  // paths are kept literal everywhere else.
-  const navPrefix = demoMode ? "/demo" : "";
-  const homeHref = demoMode ? "/demo" : "/";
-  void isDemoUser; // kept exported for action guards even though layout no longer reads it
-
   return (
     <html lang="en">
       <body>
         <IconSprite />
-        {demoMode && (
-          // Persistent demo banner. Sits above the app header so it's
-          // visible on every page (feed, projects, settings, etc.).
-          // Amber stripe; signup CTA on the right; copy makes the
-          // read-only nature clear without overstating it.
-          <div role="status" className="demo-banner">
-            <span>
-              <strong>Demo</strong> &middot; You&rsquo;re browsing a seeded read-only snapshot. Star / hide / refresh are visual-only.
-            </span>
-            <span className="demo-banner-ctas">
-              <a href="/" className="demo-banner-cta">
-                &larr; Back to main site
-              </a>
-              <a href="/login" className="demo-banner-cta">
-                Sign up to use on your repos &rarr;
-              </a>
-            </span>
-          </div>
-        )}
         {user && isActive && (
           <header>
-            <a href={homeHref} style={{ background: "transparent", marginRight: 14, padding: 0 }}>
+            <a href="/" style={{ background: "transparent", marginRight: 14, padding: 0 }}>
               <Wordmark />
             </a>
             {starredCount > 0 && (
-              <a className="counter" href={`${navPrefix}/starred`} title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
+              <a className="counter" href="/starred" title={`${starredCount} starred · ${starredAwaitingHandoff} awaiting handoff`}>
                 <Icon name="star-fill" size={13} />
                 {starredCount}
                 {starredAwaitingHandoff > 0 && (
@@ -144,15 +105,15 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 )}
               </a>
             )}
-            <a className="counter" href={`${navPrefix}/atlas`} title="Your Atlas — the graph of your dev world">
+            <a className="counter" href="/atlas" title="Your Atlas — the graph of your dev world">
               <Icon name="graph" size={13} />
               Atlas
             </a>
-            <a className="counter" href={`${navPrefix}/queue`} title="Queued work — items waiting for a coding session">
+            <a className="counter" href="/queue" title="Queued work — items waiting for a coding session">
               Queue
             </a>
             <div className="spacer" />
-            <UserMenu email={user.email} isAdmin={user.role === "admin"} demoMode={isDemoUser(user)} />
+            <UserMenu email={user.email} isAdmin={user.role === "admin"} />
           </header>
         )}
         {user && !isActive && (
@@ -161,7 +122,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Wordmark />
             </span>
             <div className="spacer" />
-            <UserMenu email={user.email} isAdmin={false} demoMode={isDemoUser(user)} />
+            <UserMenu email={user.email} isAdmin={false} />
           </header>
         )}
         <main>{children}</main>

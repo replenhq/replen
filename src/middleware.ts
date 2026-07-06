@@ -3,10 +3,15 @@ import type { NextRequest } from "next/server";
 import { authMiddleware, redirectToLogin } from "next-firebase-auth-edge";
 import { authConfig } from "@/lib/auth/config";
 
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/signed-out", "/demo"];
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/signed-out"];
 
+// Static assets only: match a real asset extension, not any path containing a
+// dot (the old `.includes(".")` let a dot-bearing app route skip the auth
+// middleware's token refresh/redirect entirely). Downstream server components +
+// API handlers still re-enforce auth, so this is defence-in-depth.
+const STATIC_ASSET = /\.(css|js|mjs|map|json|txt|xml|ico|svg|png|jpe?g|gif|webp|avif|woff2?|ttf|otf|eot)$/i;
 function isPublic(pathname: string) {
-  if (pathname.startsWith("/_next/") || pathname.includes(".")) return true;
+  if (pathname.startsWith("/_next/") || STATIC_ASSET.test(pathname)) return true;
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
@@ -119,24 +124,6 @@ export async function middleware(request: NextRequest) {
   // can pick it up via headers().get("x-nonce").
   const forwardedHeaders = new Headers(request.headers);
   forwardedHeaders.set("x-nonce", nonce);
-  // Always strip the incoming x-replen-on-demo header before we conditionally
-  // re-set it. Without this, a client could send x-replen-on-demo: 1 on a
-  // non-demo URL and the root layout would render the demo banner + chrome
-  // over their real account (phishing / UI-spoof).
-  forwardedHeaders.delete("x-replen-on-demo");
-
-  // /demo and /demo/* are real, public Next.js routes — no auth gate,
-  // no cookie, no rewrite. They render the seeded demo user's data
-  // directly. authMiddleware below treats them as public via PUBLIC_PATHS.
-  //
-  // Tag /demo/* requests with x-replen-on-demo so the root layout knows
-  // to render the demo header chrome + banner regardless of whether a
-  // real user is also logged in. handleValidToken / handleInvalidToken
-  // below forward this header through to RSC.
-  const isDemoPath = request.nextUrl.pathname === "/demo" || request.nextUrl.pathname.startsWith("/demo/");
-  if (isDemoPath) {
-    forwardedHeaders.set("x-replen-on-demo", "1");
-  }
 
   // /api/sync still uses x-sync-token; keep public (the route checks its own auth).
   if (request.nextUrl.pathname.startsWith("/api/sync")) {
@@ -213,10 +200,6 @@ export async function middleware(request: NextRequest) {
     handleValidToken: async (_tokens, headers) => {
       const merged = new Headers(headers);
       merged.set("x-nonce", nonce);
-      // Strip client-supplied x-replen-on-demo before conditionally setting it,
-      // same as the forwardedHeaders path above.
-      merged.delete("x-replen-on-demo");
-      if (isDemoPath) merged.set("x-replen-on-demo", "1");
       return applySecurityHeaders(NextResponse.next({ request: { headers: merged } }), nonce);
     },
     handleInvalidToken: async () => {

@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // Phase 2: users + per-user settings
 
@@ -242,6 +243,10 @@ export const candidates = sqliteTable(
     uniqSourceItem: uniqueIndex("uniq_source_item_user").on(t.userId, t.source, t.sourceItemId),
     idxGithub: index("idx_candidates_github").on(t.githubUrl),
     idxUser: index("idx_candidates_user").on(t.userId),
+    // The hot per-session inventory pull is WHERE user_id = ? AND fetched_at >= ?
+    // ORDER BY ... fetched_at DESC. idx_candidates_user (user_id only) can't serve
+    // the fetched_at range/sort, so it scanned the user's entire candidate history.
+    idxUserFetched: index("idx_candidates_user_fetched").on(t.userId, t.fetchedAt),
   })
 );
 
@@ -469,6 +474,12 @@ export const userMatchState = sqliteTable(
   },
   (t) => ({
     uniqUserRepoProject: uniqueIndex("uniq_user_match_state_repo_project").on(t.userId, t.repoId, t.projectId),
+    // The full index above can't enforce uniqueness for global (project_id IS
+    // NULL) rows — SQLite treats NULLs as distinct — so concurrent writes could
+    // mint duplicate (user, repo, NULL) rows. This partial unique index closes
+    // that: at most one global row per (user, repo). The upsert paths target it
+    // with a matching `WHERE project_id IS NULL`.
+    uniqUserRepoNullProject: uniqueIndex("uniq_user_match_state_repo_null_project").on(t.userId, t.repoId).where(sql`${t.projectId} is null`),
     idxUserStatus: index("idx_user_match_state_user_status").on(t.userId, t.status),
     idxUserSurfaced: index("idx_user_match_state_surfaced").on(t.userId, t.surfacedAt),
   })
@@ -841,8 +852,14 @@ export const secretAccessLog = sqliteTable(
 // Append-only activity log for a pipeline run. Each significant decision
 // (fetch start/done, scan, triage skip, match, etc.) is written here so the
 // dashboard can render a live, line-by-line progress feed during an
-// in-flight run. Reads are cheap (indexed by run_id) and the table is
-// purged with the run itself via FK cascade.
+// in-flight run. Reads are cheap (indexed by run_id).
+//
+// Retention: run_id is NOT a foreign key (it references a digest_runs row but
+// carries no FK constraint), so there is no run-cascade purge. Cleanup is two
+// paths instead: (1) user_id has ON DELETE CASCADE, so account deletion reaps a
+// user's events; (2) prunePipelineEvents() in the nightly cron deletes events
+// older than the retention window. Don't rely on a run cascade that doesn't
+// exist.
 export const pipelineEvents = sqliteTable(
   "pipeline_events",
   {

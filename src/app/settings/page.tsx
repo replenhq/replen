@@ -125,13 +125,27 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       <section style={dangerCardStyle}>
         <h2 style={dangerTitleStyle}>Danger zone</h2>
         <p style={dangerCopyStyle}>
-          Deleting your account removes your registered projects and
-          match history from Replen. Your local repos, CLAUDE.md / AGENTS.md
-          files, and the <code style={codeStyle}>/replen-match</code> skill
-          in <code style={codeStyle}>~/.claude/skills/</code> are not touched
-          — you can remove those manually if you want a clean slate.
+          Deleting your account permanently erases everything Replen holds for
+          you: your registered projects, capabilities, match + triage history,
+          knowledge graph, carts, and settings. This cannot be undone. Your
+          local repos, CLAUDE.md / AGENTS.md files, and the{" "}
+          <code style={codeStyle}>/replen-match</code> skill in{" "}
+          <code style={codeStyle}>~/.claude/skills/</code> are not touched —
+          you can remove those manually if you want a clean slate.
         </p>
-        <form action="/api/account/delete" method="post">
+        <form action="/api/account/delete" method="post" style={dangerFormStyle}>
+          <label style={dangerLabelStyle}>
+            Type <strong>DELETE</strong> to confirm
+          </label>
+          <input
+            name="confirm"
+            required
+            pattern="DELETE"
+            autoComplete="off"
+            placeholder="DELETE"
+            aria-label="Type DELETE to confirm account deletion"
+            style={dangerInputStyle}
+          />
           <button type="submit" style={dangerBtnStyle}>
             Delete my account
           </button>
@@ -233,6 +247,29 @@ const dangerBtnStyle: React.CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontSize: 13,
+};
+
+const dangerFormStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 10,
+};
+
+const dangerLabelStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "var(--text-2, #9aa)",
+};
+
+const dangerInputStyle: React.CSSProperties = {
+  background: "var(--surface-2)",
+  color: "inherit",
+  border: "1px solid rgba(255, 99, 99, 0.4)",
+  padding: "8px 12px",
+  borderRadius: 6,
+  fontSize: 13,
+  width: 140,
+  fontFamily: "ui-monospace, monospace",
 };
 
 const codeStyle: React.CSSProperties = {

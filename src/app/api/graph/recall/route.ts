@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 import { recall } from "@/graph/recall";
 
 // Atlas §2 — Recall. In-session memory across the user's whole portfolio + their
@@ -10,6 +11,10 @@ const VALID_VERDICTS = new Set(["adopt", "port", "cherry-pick", "clean-room", "u
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  // recall() runs a server-paid embedding query per request — rate limit it.
+  if (!allowAction(`recall:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
+  }
   let body: { query?: string; verdict?: string; limit?: number } = {};
   try { body = (await req.json()) as typeof body; } catch { /* empty */ }
   const query = typeof body.query === "string" ? body.query.trim() : "";

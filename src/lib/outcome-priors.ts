@@ -7,7 +7,7 @@
 // Per-user by design: facet labels are the user's vocabulary and never
 // aggregate across tenants.
 
-import { eq } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db, schema } from "../db/client";
 
 const PRIOR_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_PRIOR_WEIGHT ?? "0.06"));
@@ -42,12 +42,40 @@ export async function loadOutcomePriors(userId: number): Promise<OutcomePriors> 
   // Source attribution: the latest candidate row for each triaged repo.
   const candRows = await db.select({ githubUrl: schema.candidates.githubUrl, source: schema.candidates.source, id: schema.candidates.id })
     .from(schema.candidates).where(eq(schema.candidates.userId, userId));
-  const repoRows = await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name }).from(schema.repos);
-  const fullNameById = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`.toLowerCase()]));
+  // Only resolve the handful of repos this user actually triaged — never
+  // materialise the whole cross-user repos table (it grows without bound).
+  const triagedRepoIds = [...new Set([...latest.values()].map((e) => e.repoId))];
+  const fullNameById = new Map<number, string>();
+  for (let i = 0; i < triagedRepoIds.length; i += 500) {
+    const chunk = triagedRepoIds.slice(i, i + 500);
+    const repoRows = await db.select({ id: schema.repos.id, owner: schema.repos.owner, name: schema.repos.name })
+      .from(schema.repos).where(inArray(schema.repos.id, chunk));
+    for (const r of repoRows) fullNameById.set(r.id, `${r.owner}/${r.name}`.toLowerCase());
+  }
   const sourceByFullName = new Map<string, string>();
   for (const c of candRows) {
     const m = c.githubUrl?.match(/github\.com\/([^/]+)\/([^/?#]+?)(?:\.git)?(?:[/?#]|$)/i);
     if (m) sourceByFullName.set(`${m[1]}/${m[2]}`.toLowerCase(), c.source); // later rows overwrite → latest wins
+  }
+
+  // Fallback attribution for catalogue-surfaced suggestions: they have no
+  // candidates row (candidateId null), so the candidates-derived map above can
+  // never credit the 'catalogue' source arm. The surfacing source IS recorded in
+  // match_features, keyed by (user, fullName) — use it when candidates miss.
+  const triagedFullNames = [...fullNameById.values()];
+  const mfSourceByFullName = new Map<string, string>();
+  const mfLatestAt = new Map<string, number>();
+  for (let i = 0; i < triagedFullNames.length; i += 500) {
+    const chunk = triagedFullNames.slice(i, i + 500);
+    if (!chunk.length) continue;
+    const mfRows = await db.select({ fullName: schema.matchFeatures.fullName, source: schema.matchFeatures.source, surfacedAt: schema.matchFeatures.surfacedAt })
+      .from(schema.matchFeatures).where(and(eq(schema.matchFeatures.userId, userId), inArray(schema.matchFeatures.fullName, chunk)));
+    for (const r of mfRows) {
+      if (!r.source) continue;
+      const k = r.fullName.toLowerCase();
+      const at = r.surfacedAt?.getTime() ?? 0;
+      if (at >= (mfLatestAt.get(k) ?? -1)) { mfLatestAt.set(k, at); mfSourceByFullName.set(k, r.source); }
+    }
   }
 
   for (const e of latest.values()) {
@@ -61,7 +89,7 @@ export async function loadOutcomePriors(userId: number): Promise<OutcomePriors> 
       facet.set(k, t);
     }
     const fn = fullNameById.get(e.repoId);
-    const src = fn ? sourceByFullName.get(fn) : undefined;
+    const src = fn ? (sourceByFullName.get(fn) ?? mfSourceByFullName.get(fn)) : undefined;
     if (src) {
       const k = sourcePrefix(src);
       const t = source.get(k) ?? { a: 0, s: 0 };

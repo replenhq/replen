@@ -5,6 +5,7 @@ import { authenticate, corsHeaders } from "../mcp/_auth";
 import { recomputeRepoQuality } from "@/lib/repo-quality";
 import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
 import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
+import { sanitizeForMarkdown } from "@/lib/handoff-template";
 
 // Append-only triage-decision log. The /replen-match skill posts here
 // after each per-candidate verdict so the Activity feed on / can show
@@ -122,10 +123,11 @@ export async function POST(req: Request) {
     const r = await db.select().from(schema.repos).where(eq(schema.repos.id, body.repoId)).get();
     if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404, headers: corsHeaders });
     repoId = r.id;
-  } else if (typeof body.repo === "string" && /^[^/]+\/[^/]+$/.test(body.repo)) {
+  } else if (typeof body.repo === "string" && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(body.repo)) {
     const [owner, name] = body.repo.split("/");
     // Resolve-or-create: most candidates are catalogue entries (repoId: null),
-    // not persisted repo rows. See src/lib/resolve-repo.ts.
+    // not persisted repo rows. See src/lib/resolve-repo.ts. Owner/name are
+    // charset+length bounded above before they mint a row in the global repos table.
     repoId = await resolveOrCreateRepoId(owner, name);
   } else {
     return NextResponse.json(
@@ -164,9 +166,12 @@ export async function POST(req: Request) {
       verdict: body.verdict,
       score: typeof body.score === "number" ? Math.round(body.score) : null,
       effortBand: body.effortBand ?? null,
-      oneLine: body.oneLine ?? null,
-      writeup: body.writeup ?? null,
-      sessionId: body.sessionId ?? null,
+      oneLine: typeof body.oneLine === "string" ? body.oneLine.slice(0, 500) : null,
+      // Writeup is embedded raw into Atlas Tiles (markdown the user opens in
+      // Obsidian); sanitize to strip HTML/scheme/control injection like every
+      // other user-facing writeup, and bound its size.
+      writeup: typeof body.writeup === "string" ? sanitizeForMarkdown(body.writeup).slice(0, 20000) : null,
+      sessionId: typeof body.sessionId === "string" ? body.sessionId.slice(0, 200) : null,
       matchedFacet: typeof body.matchedFacet === "string" ? body.matchedFacet.slice(0, 120) : null,
       facetModality: typeof body.facetModality === "string" ? body.facetModality.slice(0, 120) : null,
       reasonCode: body.reasonCode ?? null,

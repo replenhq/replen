@@ -141,15 +141,30 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         console.warn(`[auth] refusing self-serve signup for ${email}: email not yet verified`);
         return null;
       }
-      const cap = parseInt(process.env.REPLEN_DAILY_SIGNUP_CAP ?? "50", 10);
+      // Two-tier signup cap. The global count is a high catastrophic backstop
+      // (raised so a legitimate launch spike never trips it), and the real
+      // abuse gate is per-email-domain: a flood of throwaway accounts from one
+      // disposable domain trips the per-domain cap and blocks ONLY that domain,
+      // so unrelated legitimate users on other domains still get in. This stops
+      // the old single global counter from being a registration DoS for everyone.
+      const cap = parseInt(process.env.REPLEN_DAILY_SIGNUP_CAP ?? "500", 10);
+      const perDomainCap = parseInt(process.env.REPLEN_DAILY_SIGNUP_CAP_PER_DOMAIN ?? "50", 10);
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const recent = await db
-        .select({ id: schema.users.id })
+        .select({ email: schema.users.email })
         .from(schema.users)
         .where(gte(schema.users.createdAt, oneDayAgo));
       if (recent.length >= cap) {
-        console.warn(`[auth] daily signup cap (${cap}) hit; refusing ${email}`);
+        console.warn(`[auth] global daily signup backstop (${cap}) hit; refusing ${email}`);
         return null;
+      }
+      const domain = email.split("@")[1] ?? "";
+      if (domain) {
+        const sameDomain = recent.filter((r) => (r.email.split("@")[1] ?? "").toLowerCase() === domain).length;
+        if (sameDomain >= perDomainCap) {
+          console.warn(`[auth] per-domain daily signup cap (${perDomainCap}) hit for @${domain}; refusing ${email}`);
+          return null;
+        }
       }
     }
     await db

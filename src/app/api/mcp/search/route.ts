@@ -11,6 +11,9 @@ export async function GET(req: Request) {
   const q = (url.searchParams.get("q") ?? "").trim();
   if (q.length < 2) return NextResponse.json({ count: 0, matches: [] }, { headers: corsHeaders });
   const needle = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+  // SQLite ignores the `\%` / `\_` escapes above unless the LIKE carries an
+  // ESCAPE clause, so wrap every LIKE with `ESCAPE '\'` (drizzle's like() emits none).
+  const likeEsc = (col: Parameters<typeof like>[0]) => sql`${col} like ${needle} escape '\\'`;
 
   // ?repo=owner/name scopes results to matches whose project's githubFullName
   // matches — used by the MCP to default-filter when spawned in a specific repo.
@@ -36,15 +39,15 @@ export async function GET(req: Request) {
   const matchConds = [
     eq(schema.matches.userId, auth.userId),
     or(
-      like(schema.matches.summary, needle),
-      like(schema.matches.whyUseful, needle),
-      like(schema.matches.suggestedUse, needle),
-      like(schema.matches.writeupMd, needle),
-      like(schema.matches.personalNote, needle),
-      like(schema.repos.owner, needle),
-      like(schema.repos.name, needle),
-      like(schema.repos.description, needle),
-      sql`lower(${schema.repos.owner}) || '/' || lower(${schema.repos.name}) like ${needle.toLowerCase()}`,
+      likeEsc(schema.matches.summary),
+      likeEsc(schema.matches.whyUseful),
+      likeEsc(schema.matches.suggestedUse),
+      likeEsc(schema.matches.writeupMd),
+      likeEsc(schema.matches.personalNote),
+      likeEsc(schema.repos.owner),
+      likeEsc(schema.repos.name),
+      likeEsc(schema.repos.description),
+      sql`lower(${schema.repos.owner}) || '/' || lower(${schema.repos.name}) like ${needle.toLowerCase()} escape '\\'`,
     )!,
   ];
   if (scopedProjectIds) matchConds.push(inArray(schema.matches.projectId, scopedProjectIds));

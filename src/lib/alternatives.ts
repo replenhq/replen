@@ -40,7 +40,10 @@ export async function alternativesFor(fullName: string, limit = 3): Promise<Alte
     .select({ owner: schema.repos.owner, name: schema.repos.name, adopt: schema.repoQuality.adoptUsers, port: schema.repoQuality.portUsers })
     .from(schema.repoQuality)
     .innerJoin(schema.repos, eq(schema.repoQuality.repoId, schema.repos.id))
-    .where(gte(schema.repoQuality.totalUsers, 1));
+    // k-gate: only surface cross-user adoption once >=2 distinct users have
+    // acted, matching the leaps/catalogue k-anonymity floor. n=1 would expose a
+    // single tenant's adoption.
+    .where(gte(schema.repoQuality.totalUsers, 2));
   const adoptedBy = new Map<string, number>();
   for (const q of quality) adoptedBy.set(`${q.owner}/${q.name}`.toLowerCase(), q.adopt + q.port);
 

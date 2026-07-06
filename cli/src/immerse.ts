@@ -16,7 +16,7 @@
 // the pipeline reads local disk directly.
 
 import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { resolve, sep } from "node:path";
 import { loadConfigOrExit, apiGet, apiPost } from "./api.js";
 import { resolveAndWalk } from "./sync-projects.js";
 import type { Config } from "./config.js";
@@ -86,10 +86,18 @@ async function send(cfg: Config): Promise<void> {
     withPaths++;
 
     // Read exactly the grounded files the server asked for (size-capped).
+    // The server sanitizes its manifest paths, but the client must not trust a
+    // server-supplied path either: reject `..` traversal and anything that
+    // resolves outside this repo so a compromised/hostile manifest can't make
+    // `immerse` read files elsewhere on disk. "Your code never leaves except
+    // these exact repo files" is only true if we enforce it here too.
+    const root = resolve(repo.localPath);
     const files: Array<{ rel: string; content: string }> = [];
     for (const rel of manifest.paths) {
       try {
-        const abs = join(repo.localPath, rel);
+        if (typeof rel !== "string" || rel.split(/[\\/]/).includes("..")) continue;
+        const abs = resolve(root, rel);
+        if (abs !== root && !abs.startsWith(root + sep)) continue;
         const st = statSync(abs);
         if (!st.isFile() || st.size > MAX_FILE_BYTES) continue;
         const content = readFileSync(abs, "utf8");

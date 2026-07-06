@@ -21,6 +21,16 @@ const ghHeaders = (): Record<string, string> => {
   return h;
 };
 
+// Repo-identity resolution from a caption uses a chat model — a THIRD server-side
+// LLM call beyond the two the cost model sanctions (embeddings + the catalogue
+// classifier). Off by default so the "only cheap embeddings + classifier server
+// side" contract holds; an operator who wants richer Threads/TikTok resolution
+// opts in with REPLEN_SOCIAL_LLM_RESOLVE=1. A per-process cap bounds the spend
+// even when enabled (a viral day can't run thousands of resolutions).
+const SOCIAL_RESOLVE_ENABLED = /^(1|true|yes|on)$/i.test((process.env.REPLEN_SOCIAL_LLM_RESOLVE ?? "").trim());
+const SOCIAL_RESOLVE_CAP = Math.max(0, parseInt(process.env.REPLEN_SOCIAL_LLM_RESOLVE_CAP ?? "50", 10) || 50);
+let socialResolveCount = 0;
+
 export function stripHtml(s: string): string {
   return s
     .replace(/<br\s*\/?>/gi, "\n")
@@ -38,10 +48,14 @@ export function stripHtml(s: string): string {
 }
 
 export async function resolveGithubFromText(text: string): Promise<Resolution | null> {
+  // Opt-in + capped (see SOCIAL_RESOLVE_ENABLED). When off, posts without a
+  // direct github.com link simply aren't resolved — no LLM call is made.
+  if (!SOCIAL_RESOLVE_ENABLED || socialResolveCount >= SOCIAL_RESOLVE_CAP) return null;
   const clean = stripHtml(text).slice(0, 1500);
   if (!/open[- ]source|github|repo|library|tool|model|framework|cli|sdk/i.test(clean)) {
     return null; // looks like an off-topic post (e.g. a viral science clip)
   }
+  socialResolveCount++;
 
   let extracted: { name: string | null; owner_guess: string | null; repo_guess: string | null; search_query: string | null };
   try {

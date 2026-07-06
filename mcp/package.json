@@ -1,6 +1,6 @@
 {
   "name": "@replen/mcp",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "mcpName": "io.github.replenhq/replen",
   "description": "Replen MCP server: a local intelligence layer for AI coding agents. Surfaces libraries, algorithms and techniques matched to your repos, as tools your AI host (Claude Code, Codex, Cursor) can call. Pairs with the /replen skill.",
   "type": "module",

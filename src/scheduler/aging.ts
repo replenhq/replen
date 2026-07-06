@@ -20,7 +20,10 @@ export async function archiveOldHiddenForAllUsers(days: number = 90): Promise<{ 
         lt(schema.matches.createdAt, cutoff),
         isNull(schema.matches.archivedAt),
       ));
-    total += (res as { changes?: number }).changes ?? 0;
+    // libsql exposes the affected-row count as `rowsAffected`; `changes` is
+    // always undefined here, so the archived tally was silently stuck at 0.
+    const r = res as { rowsAffected?: number; changes?: number };
+    total += r.rowsAffected ?? r.changes ?? 0;
   }
   return { archived: total, users: users.length };
 }

@@ -172,6 +172,11 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       }
       const key = norm(label);
       if (!key) continue;
+      // Defence-in-depth: even after a curation rename, the label must never be
+      // a code unit (path/symbol/filename). isCodeFacet above checks the facet's
+      // own shape; this re-checks the final label so a rename target or a stale
+      // rule can't smuggle a file path in as a capability node.
+      if (looksLikeCodeUnit(label)) continue;
       if (isNoiseFacetLabel(label) || dropNames.has(key)) continue;
       // Ambiguous facets (raw doc-section headings, low-confidence inference)
       // never become graph nodes — they pollute themes, waypoints, blind-spot
@@ -406,6 +411,23 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       if (capKeys[i] < k) { edges.push({ kind: "ADJACENT_TO", srcKey: nk("capability", capKeys[i]), dstKey: nk("capability", k), weight: cos, data: {} }); capEdges.push({ a: capKeys[i], b: k, w: cos }); }
     }
   }
+  // Near-duplicate band (ADJ_HI, MERGE_MIN): pairs too similar to be an
+  // "adjacency" yet not similar enough to have merged into one node. Without an
+  // edge here they're invisible to leaps' synonym detection, so cross-project
+  // transfer proposes a capability the target project effectively ALREADY has.
+  // Emit ADJACENT_TO for them too (they carry a real cosine weight, so leaps'
+  // `w > LEAP_ADJ_MAX` catches them), as a separate pass so they don't consume
+  // the top-K neighbour budget above and crowd out genuine adjacencies.
+  for (let i = 0; i < capKeys.length; i++) {
+    const a = capCentroid.get(capKeys[i])!;
+    for (let j = i + 1; j < capKeys.length; j++) {
+      const cos = cosineSimilarity(a, capCentroid.get(capKeys[j])!);
+      if (Number.isFinite(cos) && cos > ADJ_HI && cos < MERGE_MIN) {
+        edges.push({ kind: "ADJACENT_TO", srcKey: nk("capability", capKeys[i]), dstKey: nk("capability", capKeys[j]), weight: cos, data: { nearDup: true } });
+        capEdges.push({ a: capKeys[i], b: capKeys[j], w: cos });
+      }
+    }
+  }
 
   // ── §5: themes (Louvain communities) + waypoint capabilities ──
   // Community edges = semantic adjacency + co-occurrence (capabilities used in
@@ -519,8 +541,24 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
       });
     }
     if (e.matchedFacet) {
-      const capKey = norm(e.matchedFacet);
-      if (capKey && nodes.has(nk("capability", capKey))) edges.push({ kind: "FILLS", srcKey: nk("candidate", candKey), dstKey: nk("capability", capKey), weight: null, data: {} });
+      // matchedFacet is the facet label AT TRIAGE TIME. Resolve it the same way
+      // the capability nodes were: apply the curation rule (delete → no edge,
+      // rename/merge → follow to the target) then the capCanon merge map. Without
+      // this, a facet that was later merged/renamed no longer matches any emitted
+      // node key, the FILLS edge silently vanishes, and the capability shows up as
+      // a false blind spot even though a candidate did fill it.
+      let facetLabel = e.matchedFacet;
+      const rule = curationByKey.get(norm(facetLabel));
+      let dropped = false;
+      if (rule) {
+        if (rule.action === "delete") dropped = true;
+        else if ((rule.action === "rename" || rule.action === "merge") && rule.target) facetLabel = rule.target;
+      }
+      if (!dropped) {
+        const rawKey = norm(facetLabel);
+        const capKey = capCanon.get(rawKey) ?? rawKey;
+        if (capKey && nodes.has(nk("capability", capKey))) edges.push({ kind: "FILLS", srcKey: nk("candidate", candKey), dstKey: nk("capability", capKey), weight: null, data: {} });
+      }
     }
   }
 
@@ -671,9 +709,17 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     .filter(([tag, slugs]) => slugs.size >= 2 || crossUserDomain.has(tag))
     .sort((a, b) => (b[1].size - a[1].size) || ((crossUserDomain.get(b[0]) ?? 0) - (crossUserDomain.get(a[0]) ?? 0)))
     .slice(0, DOMAIN_NODE_CAP);
+  // The tag becomes a node at MIN_DOMAIN_USERS (the k-anon existence gate), but
+  // the DISPLAYED distinct-user count is only attached once it's comfortably
+  // above K and is bucketed down to the nearest 5. Showing the exact count near
+  // the threshold (e.g. "2 distinct users") confirms a single other user shares
+  // a niche tag — a membership-inference oracle. Below the display floor the
+  // node still exists; it just carries no count.
+  const DOMAIN_DISPLAY_MIN = Math.max(5, MIN_DOMAIN_USERS + 3);
   for (const [tag, slugs] of domainNodes) {
     const crossUsers = crossUserDomain.get(tag);
-    addNode({ kind: "domain", nodeKey: tag, label: tag, data: { tag, projectCount: slugs.size, ...(crossUsers ? { crossUserUsers: crossUsers } : {}) } });
+    const displayCount = crossUsers && crossUsers >= DOMAIN_DISPLAY_MIN ? Math.floor(crossUsers / 5) * 5 : undefined;
+    addNode({ kind: "domain", nodeKey: tag, label: tag, data: { tag, projectCount: slugs.size, ...(displayCount ? { crossUserUsers: displayCount } : {}) } });
     for (const slug of slugs) edges.push({ kind: "IN_DOMAIN", srcKey: nk("project", slug), dstKey: nk("domain", tag), weight: null, data: {} });
   }
 
@@ -766,30 +812,34 @@ export async function buildUserGraph(userId: number, opts: { force?: boolean } =
     }
   }
 
-  // ── persist atomically: wipe + reinsert ──
+  // ── persist atomically: wipe + reinsert inside ONE transaction ──
+  // Previously these ran as separate autocommitted statements, so a concurrent
+  // reader could observe an empty/partial graph mid-rebuild and a crash between
+  // the wipe and the reinsert stranded the graph until the next build.
   const now = new Date();
-  await db.delete(schema.graphEdges).where(eq(schema.graphEdges.userId, userId));
-  await db.delete(schema.graphNodes).where(eq(schema.graphNodes.userId, userId));
+  const { nodeCount, edgeCount } = await db.transaction(async (tx) => {
+    await tx.delete(schema.graphEdges).where(eq(schema.graphEdges.userId, userId));
+    await tx.delete(schema.graphNodes).where(eq(schema.graphNodes.userId, userId));
 
-  const keyToId = new Map<string, number>();
-  for (const n of nodes.values()) {
-    const ins = await db.insert(schema.graphNodes)
-      .values({ userId, kind: n.kind, nodeKey: n.nodeKey, label: n.label, data: JSON.stringify(n.data), updatedAt: now })
-      .returning({ id: schema.graphNodes.id }).get();
-    keyToId.set(nk(n.kind, n.nodeKey), ins.id);
-  }
-  let edgeCount = 0;
-  for (const e of edges) {
-    const src = keyToId.get(e.srcKey); const dst = keyToId.get(e.dstKey);
-    if (src == null || dst == null) continue;
-    await db.insert(schema.graphEdges).values({ userId, kind: e.kind, srcId: src, dstId: dst, weight: e.weight, data: JSON.stringify(e.data), updatedAt: now });
-    edgeCount++;
-  }
-
-  const nodeCount = keyToId.size;
-  await db.insert(schema.userGraphMeta)
-    .values({ userId, contentHash: hash, nodeCount, edgeCount, builtAt: now })
-    .onConflictDoUpdate({ target: schema.userGraphMeta.userId, set: { contentHash: hash, nodeCount, edgeCount, builtAt: now } });
+    const keyToId = new Map<string, number>();
+    for (const n of nodes.values()) {
+      const ins = await tx.insert(schema.graphNodes)
+        .values({ userId, kind: n.kind, nodeKey: n.nodeKey, label: n.label, data: JSON.stringify(n.data), updatedAt: now })
+        .returning({ id: schema.graphNodes.id }).get();
+      keyToId.set(nk(n.kind, n.nodeKey), ins.id);
+    }
+    let ec = 0;
+    for (const e of edges) {
+      const src = keyToId.get(e.srcKey); const dst = keyToId.get(e.dstKey);
+      if (src == null || dst == null) continue;
+      await tx.insert(schema.graphEdges).values({ userId, kind: e.kind, srcId: src, dstId: dst, weight: e.weight, data: JSON.stringify(e.data), updatedAt: now });
+      ec++;
+    }
+    await tx.insert(schema.userGraphMeta)
+      .values({ userId, contentHash: hash, nodeCount: keyToId.size, edgeCount: ec, builtAt: now })
+      .onConflictDoUpdate({ target: schema.userGraphMeta.userId, set: { contentHash: hash, nodeCount: keyToId.size, edgeCount: ec, builtAt: now } });
+    return { nodeCount: keyToId.size, edgeCount: ec };
+  });
 
   return { built: true, nodeCount, edgeCount, hash, reason: opts.force ? "forced" : "changed" };
 }

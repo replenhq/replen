@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { eq } from "drizzle-orm";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
+import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 
 // POST /api/projects/bulk
 //
@@ -77,6 +78,9 @@ const isGenericName = (n: string) => GENERIC_NAMES.has(n.trim().toLowerCase());
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  if (!allowAction(`bulk:${auth.userId}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
+    return NextResponse.json({ error: "rate limit exceeded, slow down" }, { status: 429, headers: corsHeaders });
+  }
 
   let body: { projects?: BulkProjectInput[] };
   try {

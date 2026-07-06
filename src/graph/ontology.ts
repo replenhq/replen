@@ -206,7 +206,7 @@ export const NODE_TYPES: Record<NodeKind, NodeType> = {
     [
       { name: "tag", type: "string", required: true, doc: "the domain tag, same as nodeKey" },
       { name: "projectCount", type: "number", required: true, doc: "count of THIS user's projects carrying it" },
-      { name: "crossUserUsers", type: "number", doc: "OPTIONAL k-anon distinct-user count; present only when >=K; EXCLUDED from the rebuild hash" },
+      { name: "crossUserUsers", type: "number", doc: "OPTIONAL k-anon distinct-user count, BUCKETED down to the nearest 5 and shown only above a display floor (never an exact near-threshold count); EXCLUDED from the rebuild hash" },
       { name: "theme", type: "string", doc: "OPTIONAL Louvain domain-community id" },
       { name: "themeName", type: "string|null", doc: "OPTIONAL two top members ' / ' joined" },
     ],

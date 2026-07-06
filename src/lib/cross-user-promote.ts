@@ -46,6 +46,10 @@ export function promoteConfig() {
     maxPromotions: Math.max(0, parseInt(process.env.REPLEN_PROMOTE_MAX ?? "3", 10) || 3),
     // Bound on how many recent positive triages we scan per request.
     scanLimit: Math.max(100, parseInt(process.env.REPLEN_PROMOTE_SCAN ?? "2000", 10) || 2000),
+    // k-anonymity: require >=2 DISTINCT other users to have endorsed a repo
+    // before it can be promoted, so a single tenant's verdict + their project
+    // similarity never crosses over. Floored at 2, matching the catalogue K.
+    minEndorsers: Math.max(2, parseInt(process.env.REPLEN_PROMOTE_MIN_USERS ?? "2", 10) || 2),
   };
 }
 
@@ -58,13 +62,14 @@ export async function findSimilarProjectPromotions(opts: {
   excludeRepoIds: Set<number>;
 }): Promise<PromotedCandidate[]> {
   const { userId, projectEmbedding, excludeRepoIds } = opts;
-  const { similarCosine, maxPromotions, scanLimit } = promoteConfig();
+  const { similarCosine, maxPromotions, scanLimit, minEndorsers } = promoteConfig();
   if (maxPromotions === 0) return [];
 
   // Positive verdicts from OTHER users, with the endorsing project's embedding.
   const rows = await db
     .select({
       repoId: schema.triageEvents.repoId,
+      uid: schema.triageEvents.userId,
       projEmbedding: schema.projectProfiles.embedding,
     })
     .from(schema.triageEvents)
@@ -83,6 +88,7 @@ export async function findSimilarProjectPromotions(opts: {
 
   // Best (max) project-similarity per repo across its endorsing projects.
   const bestSimByRepo = new Map<number, number>();
+  const endorsersByRepo = new Map<number, Set<number>>();
   for (const r of rows) {
     if (excludeRepoIds.has(r.repoId)) continue;
     const emb = parseStoredEmbedding(r.projEmbedding ?? null);
@@ -91,6 +97,15 @@ export async function findSimilarProjectPromotions(opts: {
     if (!Number.isFinite(sim) || sim < similarCosine) continue;
     const prev = bestSimByRepo.get(r.repoId);
     if (prev === undefined || sim > prev) bestSimByRepo.set(r.repoId, sim);
+    let us = endorsersByRepo.get(r.repoId);
+    if (!us) { us = new Set(); endorsersByRepo.set(r.repoId, us); }
+    us.add(r.uid);
+  }
+  // k-anonymity: drop any repo endorsed by fewer than `minEndorsers` DISTINCT
+  // other users, so a single tenant's verdict + project cosine can't be
+  // reconstructed from a promotion. Degrades silently to nothing.
+  for (const [repoId, users] of endorsersByRepo) {
+    if (users.size < minEndorsers) bestSimByRepo.delete(repoId);
   }
   if (bestSimByRepo.size === 0) return [];
 
@@ -111,7 +126,9 @@ export async function findSimilarProjectPromotions(opts: {
   for (const [repoId, sim] of top) {
     const r = repoById.get(repoId);
     if (!r) continue;
-    const pct = (sim * 100).toFixed(0);
+    // Bucket to the nearest 5% so the reason line isn't a precise cross-user
+    // project-similarity oracle over repeated queries.
+    const pct = (Math.round((sim * 100) / 5) * 5).toString();
     out.push({
       candidateId: null,
       repoId,

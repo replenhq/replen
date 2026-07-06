@@ -863,13 +863,21 @@ export async function GET(req: Request) {
     let matchedProvenance: Provenance | null = null;
     let facetLeadsCentroid = false; // a capability beats the whole-project match by a margin
     let candVec: number[] | null = null; // kept for the taste boost below
-    if (projectEmbedding) {
+    // Run semantic scoring whenever we have EITHER a project centroid OR facets
+    // to probe with. A project profiled in-session (capabilities route) has
+    // facetEmbeddings immediately but no centroid until the next cron vector
+    // pass — gating the whole block on the centroid silently dropped it to
+    // bag-of-tags ranking. A missing centroid is treated as cVal = -Infinity
+    // (exactly as catalogue/reader.ts does), so facets lead on their own.
+    if (projectEmbedding || probeFacets.length > 0) {
       const candEmbedding = parseStoredEmbedding(c.embedding ?? null);
       candVec = candEmbedding;
       if (candEmbedding && candOn) vecByRepo.set(`${candOn.owner}/${candOn.name}`.toLowerCase(), candEmbedding);
       if (candEmbedding) {
-        const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
-        if (Number.isFinite(cSim)) centroidCos = cSim;
+        if (projectEmbedding) {
+          const cSim = cosineSimilarity(projectEmbedding, candEmbedding);
+          if (Number.isFinite(cSim)) centroidCos = cSim;
+        }
         if (projectDomainAnchor) { const aSim = cosineSimilarity(projectDomainAnchor, candEmbedding); if (Number.isFinite(aSim)) domainAnchorCos = aSim; }
 
         // The candidate's own data modality (deterministic topic→modality, set on
@@ -1354,7 +1362,11 @@ export async function GET(req: Request) {
       });
       const pushed = catalogueOut[catalogueOut.length - 1];
       if (isCopyleft(m.license)) pushed.whyShortlisted += copyleftNote;
-      let cRank = m.cosine + (m.tasteAdj ?? 0) + priorBoost(outcomePriors.source, "catalogue");
+      // Rank base is the reader's penalized rank (rankCosine − value penalties),
+      // not raw cosine — otherwise a commodity/infra catalogue match leapfrogs
+      // the own-pool entries and headlines. The reader's rankPenalty excludes
+      // covered + taste, which we apply here, so nothing is double-counted.
+      let cRank = ((m.rankCosine ?? m.cosine) - (m.rankPenalty ?? 0)) + (m.tasteAdj ?? 0) + priorBoost(outcomePriors.source, "catalogue");
       if (isCovered(m.matchedFacet)) cRank -= COVERED_PENALTY; // already filled by a dep
       if (m.matchedFacet) {
         cRank += priorBoost(outcomePriors.facet, m.matchedFacet);
