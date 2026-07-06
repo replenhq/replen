@@ -28,6 +28,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+import { repoCiMatch } from "../lib/resolve-repo";
 import { scanRepo } from "../scanner/safety";
 import { scoreTargetedCandidate } from "../analyzer/score-targeted";
 import { withRunConfig } from "../analyzer/run-context";
@@ -82,7 +83,7 @@ async function getOrCreateRepoId(owner: string, name: string): Promise<number> {
   const existing = await db
     .select({ id: schema.repos.id })
     .from(schema.repos)
-    .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+    .where(repoCiMatch(owner, name))
     .get();
   if (existing) return existing.id;
   const now = new Date();
@@ -95,10 +96,17 @@ async function getOrCreateRepoId(owner: string, name: string): Promise<number> {
       firstSeenAt: now,
       lastSeenAt: now,
     })
+    .onConflictDoNothing()
     .returning({ id: schema.repos.id })
     .get();
-  if (!ins) throw new Error("failed to insert repos row");
-  return ins.id;
+  if (ins?.id) return ins.id;
+  const row = await db
+    .select({ id: schema.repos.id })
+    .from(schema.repos)
+    .where(repoCiMatch(owner, name))
+    .get();
+  if (!row) throw new Error("failed to insert repos row");
+  return row.id;
 }
 
 async function main() {

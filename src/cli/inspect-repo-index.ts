@@ -15,6 +15,7 @@
 import { basename, resolve } from "node:path";
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+import { repoCiMatch } from "../lib/resolve-repo";
 import {
   buildIndex,
   findFreshIndex,
@@ -46,7 +47,7 @@ async function getOrCreateRepoId(absolutePath: string): Promise<number> {
   const existing = await db
     .select({ id: schema.repos.id })
     .from(schema.repos)
-    .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+    .where(repoCiMatch(owner, name))
     .get();
   if (existing) return existing.id;
   const now = new Date();
@@ -59,10 +60,17 @@ async function getOrCreateRepoId(absolutePath: string): Promise<number> {
       firstSeenAt: now,
       lastSeenAt: now,
     })
+    .onConflictDoNothing()
     .returning({ id: schema.repos.id })
     .get();
-  if (!inserted) throw new Error("failed to insert synthetic repos row");
-  return inserted.id;
+  if (inserted?.id) return inserted.id;
+  const row = await db
+    .select({ id: schema.repos.id })
+    .from(schema.repos)
+    .where(repoCiMatch(owner, name))
+    .get();
+  if (!row) throw new Error("failed to insert synthetic repos row");
+  return row.id;
 }
 
 function fmtBytes(n: number): string {

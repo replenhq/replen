@@ -1,5 +1,6 @@
 import { db, schema } from "../db/client";
 import { and, desc, eq, gte, isNotNull, isNull } from "drizzle-orm";
+import { repoCiMatch } from "../lib/resolve-repo";
 import { scanRepo, type SafetyReport } from "../scanner/safety";
 import { triage } from "./triage";
 import { reasonAboutRepo, renderWriteup } from "./reason";
@@ -314,7 +315,7 @@ async function runAnalysisInner(runId: number, userId: number) {
     const existing = await db
       .select()
       .from(schema.repos)
-      .where(and(eq(schema.repos.owner, t.owner), eq(schema.repos.name, t.name)))
+      .where(repoCiMatch(t.owner, t.name))
       .get();
     const oneDayAgo = Date.now() - 24 * 3600 * 1000;
     if (existing && existing.lastSeenAt && +existing.lastSeenAt > oneDayAgo) {
@@ -649,10 +650,13 @@ async function runAnalysisInner(runId: number, userId: number) {
 
 async function upsertRepo(safety: SafetyReport, t: { owner: string; name: string }) {
   const now = new Date();
+  // Case-insensitive lookup: a differently-cased prior sighting of the same
+  // GitHub repo is the SAME row now (uniq_repo_ci). A case-sensitive lookup
+  // here would miss it and the insert below would trip the unique index.
   const existing = await db
     .select()
     .from(schema.repos)
-    .where(and(eq(schema.repos.owner, t.owner), eq(schema.repos.name, t.name)))
+    .where(repoCiMatch(t.owner, t.name))
     .get();
   if (existing) {
     await db
@@ -692,9 +696,19 @@ async function upsertRepo(safety: SafetyReport, t: { owner: string; name: string
       firstSeenAt: now,
       lastSeenAt: now,
     })
+    // No target: uniq_repo_ci is the only unique index, so a bare conflict
+    // clause absorbs a concurrent (possibly differently-cased) insert race.
+    .onConflictDoNothing()
     .returning()
     .get();
-  return ins!;
+  if (ins) return ins;
+  // Lost the insert race — the row now exists under some casing; re-select.
+  const row = await db
+    .select()
+    .from(schema.repos)
+    .where(repoCiMatch(t.owner, t.name))
+    .get();
+  return row!;
 }
 
 const RESURFACE_RETRY_DAYS = 20;

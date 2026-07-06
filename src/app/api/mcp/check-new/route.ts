@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { repoCiMatch } from "@/lib/resolve-repo";
 import { authenticate, corsHeaders } from "../_auth";
 
 // "Is there anything new and actionable for this user since they last
@@ -236,7 +237,7 @@ async function handleSkillTier({
     const r = await db
       .select()
       .from(schema.repos)
-      .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+      .where(repoCiMatch(owner, name))
       .get();
     if (!r) continue;
     if (excludedRepoIds.has(r.id)) continue;

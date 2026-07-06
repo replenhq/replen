@@ -10,7 +10,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { requireWritableUser } from "@/lib/auth/demo-mode";
 import { alternativesFor } from "@/lib/alternatives";
 import { computeOverlay } from "@/graph/overlay";
-import { resolveOrCreateRepoId } from "@/lib/resolve-repo";
+import { resolveOrCreateRepoId, repoCiMatch } from "@/lib/resolve-repo";
 import { embed, facetEmbeddingText, serialiseEmbedding, parseStoredFacetEmbeddings, serialiseFacetEmbeddings } from "@/lib/embeddings";
 import { buildUserGraph } from "@/graph/build";
 import { revalidatePath } from "next/cache";
@@ -195,7 +195,7 @@ export async function getNodeDossier(kind: string, nodeKey: string): Promise<Dos
     // write-up the agent composed at triage time.
     const [owner, name] = fullName.split("/");
     const repoRow = owner && name ? await db.select({ id: schema.repos.id }).from(schema.repos)
-      .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name))).get() : null;
+      .where(repoCiMatch(owner, name)).get() : null;
     const decisions: NonNullable<Dossier["decisions"]> = [];
     if (repoRow) {
       const events = await db.select().from(schema.triageEvents)

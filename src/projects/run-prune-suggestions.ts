@@ -9,6 +9,7 @@
 
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+import { repoCiMatch } from "../lib/resolve-repo";
 import { recordEvent } from "../scheduler/events";
 import { parseManifests } from "./manifest-parser";
 import { fetchFile, GitHubApiError } from "../github/repo-content";
@@ -256,10 +257,14 @@ export async function runPruneSuggestions(runId: number, userId: number, ghToken
 // is different from "newly-discovered repo from gh-trending". Just
 // populate enough columns that the feed UI can render the row.
 async function ensureRepoRow(owner: string, name: string, health: UpstreamHealth): Promise<number> {
+  // Case-insensitive lookup: a differently-cased existing repo is the same row
+  // now (uniq_repo_ci). A case-sensitive miss followed by a plain INSERT would
+  // trip the unique index and abort the whole prune phase (this call isn't in a
+  // try). Fold case on lookup and absorb the conflict on insert.
   const existing = await db
     .select({ id: schema.repos.id })
     .from(schema.repos)
-    .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+    .where(repoCiMatch(owner, name))
     .get();
   if (existing) return existing.id;
 
@@ -276,6 +281,16 @@ async function ensureRepoRow(owner: string, name: string, health: UpstreamHealth
       firstSeenAt: now,
       lastSeenAt: now,
     })
-    .returning({ id: schema.repos.id });
-  return inserted[0].id;
+    .onConflictDoNothing()
+    .returning({ id: schema.repos.id })
+    .get();
+  if (inserted?.id) return inserted.id;
+  // Lost the race (or a case-variant already existed) — re-select.
+  const row = await db
+    .select({ id: schema.repos.id })
+    .from(schema.repos)
+    .where(repoCiMatch(owner, name))
+    .get();
+  if (!row) throw new Error(`could not ensure repo ${owner}/${name}`);
+  return row.id;
 }

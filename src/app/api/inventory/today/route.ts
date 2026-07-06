@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db/client";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { repoCiMatch } from "@/lib/resolve-repo";
 import { authenticate, corsHeaders } from "../../mcp/_auth";
 import { checkEligibility } from "@/analyzer/eligibility";
 import type { RepoShape } from "@/fetchers/repo-shape";
@@ -1091,7 +1092,7 @@ export async function GET(req: Request) {
       const r = await db
         .select()
         .from(schema.repos)
-        .where(and(eq(schema.repos.owner, c.owner), eq(schema.repos.name, c.name)))
+        .where(repoCiMatch(c.owner, c.name))
         .get();
       return { c, r };
     }),
@@ -1197,7 +1198,7 @@ export async function GET(req: Request) {
       const r = await db
         .select({ id: schema.repos.id })
         .from(schema.repos)
-        .where(and(eq(schema.repos.owner, on.owner), eq(schema.repos.name, on.name)))
+        .where(repoCiMatch(on.owner, on.name))
         .get();
       repoId = r?.id ?? null;
     }
@@ -1308,7 +1309,7 @@ export async function GET(req: Request) {
     // known; catalogue-only repos keep repoId null (state writes resolve by name).
     const resolved = await Promise.all(matches.map(async (m) => {
       const r = await db.select({ id: schema.repos.id }).from(schema.repos)
-        .where(and(eq(schema.repos.owner, m.owner), eq(schema.repos.name, m.name))).get();
+        .where(repoCiMatch(m.owner, m.name)).get();
       return { m, repoId: r?.id ?? null };
     }));
     for (const { m, repoId } of resolved) {
@@ -1501,7 +1502,7 @@ export async function GET(req: Request) {
     for (const a of adj) {
       if (candidatesOut.length >= limit) break;
       const r = await db.select({ id: schema.repos.id }).from(schema.repos)
-        .where(and(eq(schema.repos.owner, a.owner), eq(schema.repos.name, a.name))).get();
+        .where(repoCiMatch(a.owner, a.name)).get();
       if (r && excludedRepoIds.has(r.id)) continue;
       const adjEntry: OutEntry = {
         candidateId: null,

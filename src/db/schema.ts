@@ -271,7 +271,13 @@ export const repos = sqliteTable(
     lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({
-    uniqRepo: uniqueIndex("uniq_repo").on(t.owner, t.name),
+    // Repo identity is case-insensitive: GitHub owner/name are ASCII and
+    // case-insensitive, so "Owner/Repo" and "owner/repo" are the
+    // same repo. The unique key is on lower(owner)/lower(name); original casing
+    // is preserved in the columns for display. Migration 0077 does the one-time
+    // merge of pre-existing case-variant duplicates and swaps the old
+    // case-sensitive `uniq_repo` for this index.
+    uniqRepoCi: uniqueIndex("uniq_repo_ci").on(sql`lower(${t.owner})`, sql`lower(${t.name})`),
   })
 );
 

@@ -17,15 +17,14 @@
     "sync": "tsx src/cli/digest-sync.ts"
   },
   "dependencies": {
-    "@libsql/client": "^0.14.0",
+    "@libsql/client": "^0.17.4",
     "cheerio": "^1.0.0",
     "drizzle-orm": "^0.45.1",
     "firebase": "^12.10.0",
-    "firebase-admin": "^13.10.0",
     "ignore": "^7.0.5",
     "next": "^16.2.6",
     "next-firebase-auth-edge": "^1.12.0",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.6.0",
     "nodemailer": "^9.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -33,7 +32,6 @@
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.16",
     "@types/react": "^19",
     "@types/react-dom": "^19",

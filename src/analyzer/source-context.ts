@@ -20,6 +20,7 @@ import type { SafetyReport } from "../scanner/safety";
 import type { LocalProject } from "../projects/loader";
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
+import { repoCiMatch } from "../lib/resolve-repo";
 
 export type SourceExcerptOpts = {
   /** Cap on the number of excerpts returned across all queries. */
@@ -203,7 +204,7 @@ export async function scoreWithSourceVerification(
   const existing = await db
     .select({ id: schema.repos.id })
     .from(schema.repos)
-    .where(and(eq(schema.repos.owner, owner), eq(schema.repos.name, name)))
+    .where(repoCiMatch(owner, name))
     .get();
   // Fall back to baseline if we can't anchor an index to a real repos row.
   // This shouldn't happen in the live pipeline (upsertRepo runs before
