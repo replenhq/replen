@@ -38,3 +38,5 @@ src/cli/*.local.ts
 # Synthetic test-cohort harness (operator-only; cohort.json holds real tokens)
 testbed/
 mcp/mcp-publisher
+
+__pycache__/

@@ -474,7 +474,15 @@ function writeAtomic(path: string, content: string): void {
 function backupIfExists(path: string): void {
   if (!existsSync(path)) return;
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  writeFileSync(`${path}.bak.${ts}`, readFileSync(path));
+  const backup = `${path}.bak.${ts}`;
+  // The backed-up config can carry tokens; keep it 0600 like the atomic
+  // write above, not the umask default (typically world-readable 0644).
+  writeFileSync(backup, readFileSync(path), { mode: 0o600 });
+  try {
+    chmodSync(backup, 0o600);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ============================================================================

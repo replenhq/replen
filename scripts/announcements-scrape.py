@@ -14,13 +14,16 @@ for line-set diffing on the Node side. Deterministic, no LLM, stderr-only logs.
 Requires: pip install "scrapling[fetchers]" (plain HTTP fetcher, no browser).
 """
 
+import ipaddress
 import json
 import logging
 import re
+import socket
 import sys
 import time
 import xml.etree.ElementTree as ET
 from hashlib import sha256
+from urllib.parse import urljoin, urlparse
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 for name in ("scrapling", "httpx"):
@@ -31,6 +34,63 @@ from scrapling.fetchers import Fetcher  # noqa: E402
 FETCH_TIMEOUT = 20
 MAX_FEED_ITEMS = 30
 MAX_PAGE_TEXT = 60_000
+MAX_FEED_BYTES = 5_000_000
+MAX_REDIRECTS = 5
+METADATA_HOSTS = frozenset({"metadata", "metadata.google.internal", "metadata.goog"})
+
+
+def url_is_safe(url: str) -> bool:
+    """SSRF guard: http(s) only, and the host must resolve to public addresses.
+
+    Rejects loopback, private, link-local (incl. 169.254.169.254), unique-local,
+    shared/CGN and reserved ranges, plus known cloud metadata hostnames. Every
+    resolved address is checked (defeats DNS tricks), and numeric host forms
+    (decimal, octal, hex, IPv4-mapped IPv6) are normalized by the resolver
+    before the range check.
+    """
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname
+    if not host or host.rstrip(".").lower() in METADATA_HOSTS:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, parts.port or 80, proto=socket.IPPROTO_TCP)
+    except (OSError, ValueError):
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        if not addr.is_global or addr.is_multicast:
+            return False
+    return True
+
+
+def safe_get(url: str):
+    """Fetch with the SSRF guard applied to the URL and to every redirect hop."""
+    for _ in range(MAX_REDIRECTS + 1):
+        if not url_is_safe(url):
+            raise ValueError(f"blocked unsafe url: {url[:200]}")
+        page = Fetcher.get(url, stealthy_headers=True, timeout=FETCH_TIMEOUT,
+                           follow_redirects=False)
+        if page.status in (301, 302, 303, 307, 308):
+            location = next((v for k, v in (page.headers or {}).items()
+                             if k.lower() == "location"), None)
+            if not location:
+                return page
+            url = urljoin(url, location)
+            continue
+        return page
+    raise ValueError("too many redirects")
 
 
 def strip_ns(tag: str) -> str:
@@ -41,8 +101,15 @@ def text_of(el) -> str:
     return re.sub(r"\s+", " ", "".join(el.itertext())).strip() if el is not None else ""
 
 
+DOCTYPE_RE = re.compile(r"<!(?:DOCTYPE|ENTITY)", re.I)
+
+
 def parse_feed(body: str):
     """Parse RSS 2.0 / Atom into items. Returns None when body isn't a feed."""
+    # Entity-expansion guard: refuse DTDs (DOCTYPE/ENTITY declarations) and
+    # oversized bodies instead of parsing them; callers fall back to page diffing.
+    if len(body) > MAX_FEED_BYTES or DOCTYPE_RE.search(body):
+        return None
     try:
         root = ET.fromstring(body)
     except ET.ParseError:
@@ -99,13 +166,12 @@ def discover_feed_url(body: str, base_url: str):
         return None
     if href.startswith("http"):
         return href
-    from urllib.parse import urljoin
     return urljoin(base_url, href)
 
 
 def scrape_one(src):
     try:
-        page = Fetcher.get(src["url"], stealthy_headers=True, timeout=FETCH_TIMEOUT)
+        page = safe_get(src["url"])
         if page.status != 200:
             return {"id": src["id"], "ok": False, "error": f"http {page.status}"}
         body = page.body if isinstance(page.body, str) else (page.body or b"").decode("utf-8", "replace")
@@ -119,7 +185,7 @@ def scrape_one(src):
         feed_url = discover_feed_url(body, src["url"])
         if feed_url:
             try:
-                feed_page = Fetcher.get(feed_url, stealthy_headers=True, timeout=FETCH_TIMEOUT)
+                feed_page = safe_get(feed_url)
                 if feed_page.status == 200:
                     fbody = feed_page.body if isinstance(feed_page.body, str) else (feed_page.body or b"").decode("utf-8", "replace")
                     items = parse_feed(fbody)

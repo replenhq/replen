@@ -23,6 +23,58 @@ import type { Config } from "./config.js";
 
 const MAX_FILE_BYTES = 1_000_000; // mirror the server per-file cap
 
+// Never read or transmit these, no matter what the manifest names. The
+// traversal guard in send() keeps reads inside the repo; this denylist keeps
+// in-repo secrets (.env files, private keys, credential stores) out of the
+// payload even if a compromised/hostile manifest asks for them. Matching is
+// on lowercased path segments with trailing dots stripped, so ".ENV" or
+// ".env." can't slip through.
+const SENSITIVE_DIRS = new Set([".git", ".aws", ".ssh", ".gnupg", ".docker"]);
+const SENSITIVE_NAMES = new Set([
+  ".npmrc", ".netrc", ".envrc", ".pgpass", ".dockercfg",
+  "credentials", "serviceaccount.json", "service-account.json",
+  "terraform.tfstate", "terraform.tfstate.backup",
+]);
+const SENSITIVE_EXTS = [
+  ".pem", ".key", ".p12", ".pfx", ".pgp", ".gpg", ".asc",
+  ".jks", ".keystore", ".ppk", ".tfstate",
+];
+// Programming-source extensions. A file such as token.ts or secret.ts is SOURCE
+// (grounding it is the whole point of immersion), so the secret-word heuristic
+// below must not treat a code file as a credential store just because its name
+// contains "token". Secrets live in config / data / dotfiles, not .ts modules.
+const SOURCE_EXTS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rs", ".java",
+  ".rb", ".php", ".cs", ".c", ".cc", ".cpp", ".h", ".hpp", ".swift", ".kt",
+  ".scala", ".sh", ".css", ".scss", ".sass", ".html", ".vue", ".svelte", ".sql",
+]);
+const SECRET_WORDS = new Set([
+  "secret", "secrets", "credential", "credentials", "token", "tokens",
+  "password", "passwords", "passwd",
+]);
+function isSensitivePath(rel: string): boolean {
+  const segs = rel.split(/[\\/]/).map((s) => s.toLowerCase().replace(/\.+$/, ""));
+  if (segs.some((s) => SENSITIVE_DIRS.has(s))) return true;
+  const base = segs[segs.length - 1] ?? "";
+  if (SENSITIVE_NAMES.has(base)) return true;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  if (SENSITIVE_EXTS.some((ext) => base.endsWith(ext))) return true;
+  // SSH / signing private keys: id_rsa, id_ed25519, id_ecdsa, id_dsa, and
+  // extensionless *_key / deploy_key files.
+  if (/^id_(rsa|dsa|ecdsa|ed25519)/.test(base)) return true;
+  const dot = base.lastIndexOf(".");
+  const ext = dot > 0 ? base.slice(dot) : "";
+  if (ext === "" && (base === "deploy_key" || base.endsWith("_key"))) return true;
+  // Secret-word heuristic. Whole-word match (so "tokenizer.ts" is not caught),
+  // and never exclude a real source file: github-token.json is a secret store,
+  // token.ts is source that immersion is meant to send.
+  if (!SOURCE_EXTS.has(ext)) {
+    const words = base.split(/[^a-z0-9]+/).filter(Boolean);
+    if (words.some((w) => SECRET_WORDS.has(w))) return true;
+  }
+  return false;
+}
+
 type Manifest = { tier: string; paths: string[]; storedCodeHash: string | null };
 type IngestResult = { ok: boolean; unchanged: boolean; filesEmbedded?: number; chunksEmbedded?: number; skipped?: string };
 
@@ -96,6 +148,7 @@ async function send(cfg: Config): Promise<void> {
     for (const rel of manifest.paths) {
       try {
         if (typeof rel !== "string" || rel.split(/[\\/]/).includes("..")) continue;
+        if (isSensitivePath(rel)) continue; // in-repo secret: never read, never send
         const abs = resolve(root, rel);
         if (abs !== root && !abs.startsWith(root + sep)) continue;
         const st = statSync(abs);
