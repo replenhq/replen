@@ -1,0 +1,1 @@
+ALTER TABLE `project_profiles` ADD `last_queried_at` integer;

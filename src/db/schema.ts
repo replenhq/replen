@@ -432,6 +432,12 @@ export const projectProfiles = sqliteTable(
     // powers the soft subject-area prior (matching precision). Rebuilt with the
     // centroid when tags change; backfilled lazily on the next pipeline run when null.
     domainAnchor: text("domain_anchor"),
+    // Last time the skill/MCP asked for THIS repo's inventory (a "repo open").
+    // Drives the since-last-open discovery window: the inventory route widens
+    // its default fetchedAt window to cover everything found since the user last
+    // looked here, floored at the steady window and capped at the first-run
+    // width. Null = never queried -> first-run width. Written per scoped query.
+    lastQueriedAt: integer("last_queried_at", { mode: "timestamp" }),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

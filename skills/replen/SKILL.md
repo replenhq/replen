@@ -33,8 +33,14 @@ Call:
 
 ```bash
 curl -sS -H "x-digest-token: $TOKEN" \
-  "$BASE/api/inventory/today?repo=<owner/name>&days=2&limit=10"
+  "$BASE/api/inventory/today?repo=<owner/name>&limit=10"
 ```
+
+Do NOT pass `days`. Omitting it lets the server pick the window adaptively:
+a wide first-run window for a repo that's never surfaced a match, then a
+since-last-open window (everything found since you last opened this repo,
+floored at ~a month) on later opens. Pass `days` only to force a fixed
+lookback for debugging.
 
 Parse the JSON response. Note:
 

@@ -82,6 +82,17 @@ function clipDesc(desc: string, max: number): string {
   return `"${clipped}"`;
 }
 
+// Feed titles are scraped external strings (OSV advisory summaries, upstream
+// issue titles, incident names) and can headline the dependency-match footnote
+// lead VERBATIM. Same guard clipDesc gives descriptions: sanitize at assembly
+// via sanitizeForMarkdown and collapse whitespace, so no path reaches
+// displayText with a raw title. Returns null when nothing survives, so the
+// caller's owner/name fallback still applies.
+function cleanFeedTitle(v: unknown): string | null {
+  const t = asString(v);
+  return t === null ? null : asString(sanitizeForMarkdown(t).replace(/\s+/g, " ").trim());
+}
+
 export async function GET(req: Request) {
   const auth = await authenticate(req);
   if (!auth) {
@@ -264,8 +275,43 @@ export async function GET(req: Request) {
           .where(eq(schema.userMatchState.userId, auth.userId))
           .limit(1);
     const firstRun = priorRows.length === 0;
-    days = firstRun ? FIRSTRUN_DAYS : STEADY_DAYS;
-    windowReason = firstRun ? (scopedProjectId ? "first-run-project" : "first-run") : "steady";
+    if (firstRun) {
+      days = FIRSTRUN_DAYS;
+      windowReason = scopedProjectId ? "first-run-project" : "first-run";
+    } else if (scopedProjectId && scopedProject?.lastQueriedAt) {
+      // Since-last-open. The window covers everything discovered since the user
+      // last opened THIS repo — not a fixed "2 days ago" or a flat month. A repo
+      // opened daily stays at the steady window; one untouched for weeks widens
+      // so candidates found in the gap aren't silently amputated by a narrow
+      // window. Floored at the steady window (never narrower than a normal run)
+      // and capped at the first-run width (a repo dormant for months doesn't
+      // re-open the entire backlog). Every open is scored live against the
+      // CURRENT project embedding, so a previously-rejected candidate that now
+      // fits a changed codebase can resurface within this window.
+      const gapDays = Math.ceil((Date.now() - scopedProject.lastQueriedAt.getTime()) / 86_400_000);
+      days = Math.min(FIRSTRUN_DAYS, Math.max(STEADY_DAYS, gapDays));
+      windowReason = days > STEADY_DAYS ? "since-last-open" : "steady";
+    } else {
+      // Established project, first open since this shipped (no lastQueriedAt yet),
+      // or the global firehose: fall back to the steady window.
+      days = STEADY_DAYS;
+      windowReason = "steady";
+    }
+  }
+
+  // Record this repo "open" so the NEXT query's since-last-open window measures
+  // from now. Scoped queries only — the global firehose isn't a repo open. The
+  // read of the old lastQueriedAt above has already happened, so overwriting it
+  // here is safe. scopedProjectId came from a userId-filtered lookup; the userId
+  // guard is defence-in-depth against ever touching another tenant's row.
+  if (scopedProjectId) {
+    await db
+      .update(schema.projectProfiles)
+      .set({ lastQueriedAt: new Date() })
+      .where(and(
+        eq(schema.projectProfiles.id, scopedProjectId),
+        eq(schema.projectProfiles.userId, auth.userId),
+      ));
   }
 
   // Build the user's tag set (for filter 'tags'). When scoped to one
@@ -1211,7 +1257,7 @@ export async function GET(req: Request) {
       candidateId: c.id,
       repoId,
       repo: on ? `${on.owner}/${on.name}` : (asString(raw?.specName) ?? asString(raw?.vendor) ?? asString(raw?.depName) ?? c.source),
-      title: asString(c.title) ?? (on ? `${on.owner}/${on.name}` : c.source),
+      title: cleanFeedTitle(c.title) ?? (on ? `${on.owner}/${on.name}` : c.source),
       url: c.url,
       description: asString(raw?.notes) ?? asString(raw?.summary) ?? null,
       stars: null,
