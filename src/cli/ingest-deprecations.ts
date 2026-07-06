@@ -10,7 +10,7 @@
 // (delete where source='ingested'). Cross-user-safe: Keystone is global.
 //
 // Usage:
-//   ssh prod-server 'cd /opt/replen && node --env-file=.env --import=tsx src/cli/ingest-deprecations.ts'
+//   ssh your-host 'cd /opt/replen && node --env-file=.env --import=tsx src/cli/ingest-deprecations.ts'
 //   …optionally  --packages lodash,request,@hapi/joi   --limit 400   --dry
 
 import { and, eq } from "drizzle-orm";

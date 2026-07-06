@@ -5,7 +5,7 @@
 // ALL null-embedding candidates for a user, RECENT-FIRST (so the matchable ones
 // land soonest), with no cap. Idempotent: re-run safely.
 //
-// Usage (host):  ssh prod-server 'cd /opt/replen && set -a && . ./.env && set +a && \
+// Usage (host):  ssh your-host 'cd /opt/replen && set -a && . ./.env && set +a && \
 //   npx tsx src/cli/reembed-candidates.ts --user 1'
 
 import { and, desc, eq, isNull } from "drizzle-orm";

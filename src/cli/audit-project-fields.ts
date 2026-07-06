@@ -4,7 +4,7 @@
 // + modality, not bare tags)? Prints aggregates + the worst offenders so we know
 // what to backfill and where the domain signal really lives.
 //
-// Usage (host):  ssh prod-server 'cd /opt/replen && set -a && . ./.env && set +a && npx tsx src/cli/audit-project-fields.ts'
+// Usage (host):  ssh your-host 'cd /opt/replen && set -a && . ./.env && set +a && npx tsx src/cli/audit-project-fields.ts'
 
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/client";

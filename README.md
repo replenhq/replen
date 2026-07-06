@@ -146,7 +146,7 @@ Subcommands: `replen sync-projects` · `replen status` · `replen inject` · `re
   > *By the way, an upstream you depend on needs attention: `request` looks dead (no push in 654 days). Maintained alternatives exist (`sindresorhus/got`).*
 
 - **💷 The price of what you run on: pricing, licences, deadlines.** Plan-level price changes on ~280 dev-tool pricing pages (personalised when you've declared your tier: *"Supabase changed pricing on YOUR plan"*), licence flips (MIT→BSL/SSPL), and dated obligations: EOLs and deprecation deadlines tracked against your reported versions, with reminders at T-30 and T-7.
-  > *P.s. python 3.10 reaches end-of-life on 31 Oct. Affects `acme` (3.10.12).*
+  > *P.s. python 3.10 reaches end-of-life on 31 Oct. Affects `acme-api` (3.10.12).*
 
 Everything runs through one discipline: **silence beats a weak match.** If nothing clears the relevance bar, Replen says nothing, with no daily "by the way" noise. A brand-new project gets a wide first look (months of history); after that, the last week. The inventory also learns from how people triage: a candidate enough users judge rubbish stops being shown to anyone, while one that proves useful for a project like yours can surface to you too. That uses repo identity and aggregate signal only, never your code or anyone else's.
 
@@ -492,7 +492,7 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Replen was built by [@nsokin](https://github.com/nsokin) and the community.
+Replen was built by the Replen team and the community.
 
 - [replen.dev](https://replen.dev) · site
 - [docs.replen.dev](https://docs.replen.dev) · docs

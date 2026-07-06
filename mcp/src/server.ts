@@ -410,7 +410,7 @@ const TOOLS: Tool[] = [
       "read from the real source files. This is what prevents word-collisions: \"anomaly detection\" is ambiguous, but " +
       "{tag:\"anomaly detection\", descriptor:\"rule-based detection over drone telemetry time-series (link-loss, GPS-drop); no ML\", " +
       "modality:[\"timeseries\"]} is not. QUALIFY THE DESCRIPTOR WITH THE DOMAIN/DATA so a generic head-noun can't collide " +
-      "cross-field: \"market data ingestion\" matches BOTH a prediction-market trade collector and an FX-futures bar loader — " +
+      "cross-field: \"market data ingestion\" matches BOTH a prediction-market trade collector and an index-futures bar loader — " +
       "write \"ingestion of 1-minute index-futures OHLCV bars\" instead. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
       "geospatial, graph, 3d, code, network (use [] if none apply). DERIVE all of it from the imports/deps and code, not " +
       "guesses. The server merges in dependency-derived capabilities and builds the facet vectors right away. " +
@@ -515,7 +515,7 @@ const TOOLS: Tool[] = [
       "Grouping them makes Replen union the whole product's capabilities when you're in ANY of its repos, and " +
       "attribute each match to the repo it's for. Replen auto-groups repos that share a name stem " +
       "(acme-web / acme-cv → one product); use this tool for repos that belong together but DON'T share a name " +
-      "(e.g. group 'acme-clinic-api' with 'cute'). Pass sameProductAs to join another repo's product (preferred), " +
+      "(e.g. group 'clinic-api' with 'billing-svc'). Pass sameProductAs to join another repo's product (preferred), " +
       "or productKey to set an explicit group name. Sets the product on the given repo only — call once per repo " +
       "you want to add.",
     inputSchema: {

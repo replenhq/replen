@@ -1,7 +1,7 @@
 # SkillSpector Security Report
 
 **Skill:** replen-triage  
-**Source:** `/Users/user/github/replen/skills/replen-triage`  
+**Source:** `~/github/replen/skills/replen-triage`  
 **Scanned:** 2026-06-22 07:12:45 UTC  
 
 ## Risk Assessment

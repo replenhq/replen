@@ -553,7 +553,7 @@ describe("triageBodySchema", () => {
 
 describe("capabilityReportSchema", () => {
   const legit = {
-    repo: "nsokin/replen",
+    repo: "acme/replen",
     purpose: "Tool/library discovery for AI coding workflows.",
     goals: ["calm cadence: 1-3 matches/month", "no per-user LLM bill"],
     capabilities: [

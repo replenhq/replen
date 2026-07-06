@@ -416,7 +416,7 @@ export function facetEmbeddingText(label: string, descriptor?: string | null, do
   const base = d ? `Capability: ${label.trim()} — ${d}` : `Capability: ${label.trim()}`;
   // Light domain qualifier (Step 1, domain-context matching). Anchors the facet
   // in the project's FIELD so a bare head-noun ("market data ingestion") doesn't
-  // float in generic space and collide cross-domain — FX-futures OHLCV ingestion
+  // float in generic space and collide cross-domain — index-futures OHLCV ingestion
   // vs a prediction-market trade collector are both "market data ingestion", but
   // a different domain. Kept SHORT and APPENDED (not prepended) so a sharp
   // grounded descriptor still dominates the vector: the domain nudges the facet
@@ -429,7 +429,7 @@ export function facetEmbeddingText(label: string, descriptor?: string | null, do
 // (src/cli/audit-project-fields.ts) found ~46% of projects have a `tags` field
 // that is mostly these — auto-detected at registration, never replaced by a real
 // domain cloud. Reading domain from such tags anchors a facet toward generic
-// stack tooling (the acme-clinic-api `webhooks` → adnanh/webhook collision). So
+// stack tooling (a clinic-api `webhooks` → adnanh/webhook collision). So
 // the domain qualifier is DERIVED from the richest reliable signal — the summary
 // `purpose` (the sector, present even when tags are stack) + non-stack tags — not
 // from raw tags. Keep broad; matched on normalised equality.
@@ -538,10 +538,10 @@ export function parseStoredFacetEmbeddings(raw: string | null | undefined): Face
 // "6" (domain-qualified facets): each facet embed text now carries a light
 // "(project domain: …)" qualifier from the head of the domain cloud, so a bare
 // head-noun facet is anchored in its field and stops colliding cross-domain
-// (demo-trading vs prediction-market "market data ingestion"). Bumping re-embeds
+// (index-futures vs prediction-market "market data ingestion"). Bumping re-embeds
 // every project's facets — an operational cost; schedule it, don't ship silently.
 // "7" (domain from purpose, not stack tags): the v6 qualifier read the `tags`
-// field, which the audit found is stack-polluted for ~46% of projects (acme-clinic-api
+// field, which the audit found is stack-polluted for ~46% of projects (a clinic-api's
 // tags = python/fastapi/postgres → anchored `webhooks` toward devops tooling). v7
 // derives the qualifier via projectDomainContext from the summary `purpose` (the
 // sector) + non-stack tags, so the domain is correct even when tags are just stack.

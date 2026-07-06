@@ -1,5 +1,5 @@
 {
-  "_note": "Keystone seed — architectural PRACTICES (kind=practice). Transferable structural moves, not libraries. A project 'uses' a practice when it has a capability/facet matching one of these. The data-driven domain ontology is the canonical practice-transfer example (acme built it; data-heavy multi-tenant projects benefit). better_than edges compare a practice to its anti-pattern, task-scoped.",
+  "_note": "Keystone seed — architectural PRACTICES (kind=practice). Transferable structural moves, not libraries. A project 'uses' a practice when it has a capability/facet matching one of these. The data-driven domain ontology is the canonical practice-transfer example (built for a multi-tenant platform; data-heavy multi-tenant projects benefit). better_than edges compare a practice to its anti-pattern, task-scoped.",
   "capabilities": [
     { "label": "configurable domain model", "domain": "data-architecture" },
     { "label": "auditable state", "domain": "data-architecture" },
@@ -17,6 +17,6 @@
     { "kind": "practice", "name": "computed/derived properties", "source": "concept", "description": "Define derived fields (e.g. 'is_recent') evaluated at query time from base data, rather than denormalizing and maintaining them.", "attributes": { "fills": ["configurable domain model"] } }
   ],
   "better_than": [
-    { "winner": "data-driven domain ontology", "loser": "hardcoded domain schema", "task": "serving multiple customers/segments from one platform without forking", "metric": "adaptability", "source": "a data-driven domain model is changed by a row, not a release — the multi-tenant-without-forking move (ACME pattern)" }
+    { "winner": "data-driven domain ontology", "loser": "hardcoded domain schema", "task": "serving multiple customers/segments from one platform without forking", "metric": "adaptability", "source": "a data-driven domain model is changed by a row, not a release — the multi-tenant-without-forking move" }
   ]
 }

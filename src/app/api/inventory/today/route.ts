@@ -764,7 +764,7 @@ export async function GET(req: Request) {
   const isCovered = (facet: string | null | undefined) => !!facet && coveredCaps.size > 0 && coveredCaps.has(normForCover(facet));
 
   // Soft subject-area prior (ON by default). A facet-led candidate far OUTSIDE the
-  // project's subject area (domain-anchor cosine < floor) is the demo-trading collision
+  // project's subject area (domain-anchor cosine < floor) is the cross-domain collision
   // shape — matches a capability facet's words but isn't in the project's field.
   // Bounded RANK penalty only (never a hard cut, never touches the displayed cosine).
   // Validated offline (branch experiment/learned-reranker): the domain-anchor at floor

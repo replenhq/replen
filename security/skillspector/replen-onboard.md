@@ -1,7 +1,7 @@
 # SkillSpector Security Report
 
 **Skill:** replen-onboard  
-**Source:** `/Users/user/.claude/skills/replen-onboard`  
+**Source:** `~/.claude/skills/replen-onboard`  
 **Scanned:** 2026-06-22 07:12:49 UTC  
 
 ## Risk Assessment

@@ -7,7 +7,7 @@
 // NOT dump all 4243 catalogue repos into Keystone; only real, used deps).
 //
 // Public facts (package → capability), no user code. Idempotent; source='ingested'.
-// Usage: ssh prod-server 'cd /opt/replen && node --env-file=.env --import=tsx src/cli/ingest-fills.ts [--dry]'
+// Usage: ssh your-host 'cd /opt/replen && node --env-file=.env --import=tsx src/cli/ingest-fills.ts [--dry]'
 
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "../db/client";

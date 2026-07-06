@@ -1,7 +1,7 @@
 # SkillSpector Security Report
 
 **Skill:** replen  
-**Source:** `/Users/user/github/replen/skills/replen`  
+**Source:** `~/github/replen/skills/replen`  
 **Scanned:** 2026-06-22 07:12:42 UTC  
 
 ## Risk Assessment

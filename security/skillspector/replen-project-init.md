@@ -1,7 +1,7 @@
 # SkillSpector Security Report
 
 **Skill:** replen-project-init  
-**Source:** `/Users/user/github/replen/skills/replen-project-init`  
+**Source:** `~/github/replen/skills/replen-project-init`  
 **Scanned:** 2026-06-22 07:12:47 UTC  
 
 ## Risk Assessment

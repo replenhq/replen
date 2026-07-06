@@ -6,8 +6,8 @@ import { deriveProductKey } from "@/projects/product-key";
 
 // Multi-repo products — manual override. Repos sharing a product_key are one
 // product (matching unions their capabilities). Auto-grouping is by name-stem,
-// which catches acme-web/acme-cv but not differently-named siblings (cute /
-// acme-clinic-api). This stitches those together.
+// which catches acme-web/acme-cv but not differently-named siblings (clinic-api /
+// billing-svc). This stitches those together.
 //
 // Body: { repo?: "owner/name", repoId?: number,
 //         sameProductAs?: "owner/name"|slug,   // join this repo's product

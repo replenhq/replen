@@ -1,6 +1,6 @@
 // Soft subject-area (domain) prior — a bounded, deterministic RANK penalty for
 // facet-led candidates that sit far OUTSIDE the project's domain neighbourhood
-// (low cosine to the project centroid). This is the demo-trading collision shape:
+// (low cosine to the project centroid). This is the cross-domain collision shape:
 // a candidate matches one capability facet's *words* but isn't in the project's
 // subject area at all.
 //

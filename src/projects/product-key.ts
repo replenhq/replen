@@ -7,7 +7,7 @@
 //
 // v1 grouping is automatic, by owner + a shared name stem (acme-web /
 // acme-cv → "acme"). It's deliberately conservative (exact stem match after
-// stripping one common suffix); ambiguous cases (cute / acme-clinic) are left
+// stripping one common suffix); ambiguous cases (acme / acme-api) are left
 // for an explicit override. Users can set productKey by hand on /projects.
 
 // Common repo-role suffixes stripped to find the product stem.
