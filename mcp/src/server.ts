@@ -2,6 +2,14 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { apiGet, apiPost, type ApiConfig } from "./api.js";
+import { gitHead } from "./repo-detect.js";
+
+// Live git HEAD of the spawn repo, read FRESH each call (the MCP process can
+// live for weeks, so a startup snapshot would go stale). Feeds the server's
+// drift check for silent auto-reground. Undefined when not in a git repo.
+function currentHead(cfg: ApiConfig): string | undefined {
+  return cfg.repoToplevel ? gitHead(cfg.repoToplevel) ?? undefined : undefined;
+}
 
 // Tool definitions and dispatch. The MCP SDK's low-level Server handles JSON-
 // RPC; we just declare a list and a switch.
@@ -134,6 +142,9 @@ const TOOLS: Tool[] = [
         // adaptive lookback (first-run months, then ~week). apiGet drops
         // undefined query params.
         days: parsed.days,
+        // Live HEAD of the cwd repo so the server can flag `needsReground` when
+        // the grounded capabilities have drifted from current code. Read fresh.
+        head: currentHead(cfg),
       }) as { displayText?: string | null; [k: string]: unknown };
 
       // Two-section response: prominent USER-FACING MESSAGE block first
@@ -513,7 +524,10 @@ const TOOLS: Tool[] = [
       if (!parsed.repo && parsed.repoId === undefined) {
         throw new Error("must specify repo (owner/name) or repoId");
       }
-      const data = await apiPost(cfg, "/api/projects/capabilities", parsed);
+      // Stamp the grounding fingerprint with the repo's live HEAD so the server
+      // records the exact commit these grounded capabilities were derived at —
+      // the anchor drift detection diffs future HEADs against. Read fresh.
+      const data = await apiPost(cfg, "/api/projects/capabilities", { ...parsed, head: currentHead(cfg) });
       return JSON.stringify(data, null, 2);
     },
   },
@@ -596,7 +610,12 @@ const TOOLS: Tool[] = [
       "This is what turns a 24-minute re-run into ~2 minutes. Returns names + booleans only, never code or report contents.",
     inputSchema: { type: "object", properties: {} },
     handler: async (cfg) => {
-      const data = await apiGet(cfg, "/api/projects/state", {});
+      // Pass the cwd repo + its live HEAD so the scoped repo also gets a code-drift
+      // reground check (every repo gets the head-independent schema-staleness check).
+      const data = await apiGet(cfg, "/api/projects/state", {
+        repo: cfg.defaultRepo ?? undefined,
+        head: currentHead(cfg),
+      });
       return JSON.stringify(data, null, 2);
     },
   },

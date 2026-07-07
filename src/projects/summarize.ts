@@ -32,6 +32,16 @@ import { coerceModalities, coerceMaturity, inferCapabilityModality, type Capabil
 // opportunities the triage can act on. Old summaries regenerate.
 export const PROMPT_VERSION = "7";
 
+// Schema version of the GROUNDED (in-session, code-read) capability set —
+// SEPARATE from PROMPT_VERSION (which versions the server DOC summarizer). Bump
+// this when the grounded capability shape changes in a way that warrants
+// re-reading code (e.g. the mechanism+maturity fields). A grounded row stamped
+// with an older grounding.schemaVersion (or none) reads as needsReground: the
+// client silently re-grounds to backfill the new fields — instead of the doc
+// summarizer clobbering the grounded set (see needsReground / protectGrounded).
+// "1" = includes mechanism + maturity (+ paths, descriptor, modality).
+export const GROUNDING_SCHEMA_VERSION = "1";
+
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
 // hasn't pushed the doc edits yet. 3 days = sweet spot for AI-paced dev.
@@ -114,6 +124,21 @@ export type ProjectSummary = {
   // Leaps traverses them. Titles + relation strings only ever leave the
   // machine — never note bodies, file paths, or code (see CLAUDE.md privacy).
   vaultConcepts?: VaultConcept[];
+
+  // Grounding fingerprint — present ONLY on summaries written by the grounded
+  // (in-session, code-read) capabilities route, never by the server doc
+  // summarizer. Records the git HEAD + a code-content hash the capabilities were
+  // derived at, plus the grounding schema version. Drives silent auto-reground:
+  // when the cwd repo's live HEAD drifts from `sha`, or `schemaVersion` is behind
+  // GROUNDING_SCHEMA_VERSION, needsReground fires. Its presence is also how we
+  // know a row is grounded (see summaryIsGrounded) and must be protected from the
+  // doc summarizer. `at` is the ISO time of grounding (throttles the re-ground).
+  grounding?: {
+    sha?: string;         // git HEAD at grounding time (client-reported)
+    codeHash?: string;    // content hash of the grounded files (optional)
+    schemaVersion?: string;
+    at?: string;          // ISO timestamp
+  };
 
   // Metadata for the UI + debugging.
   generatedAt: string;
@@ -469,7 +494,56 @@ export function reconcileCapabilities(tags: string[], specs: CapabilitySpec[]): 
   return out;
 }
 
-// Cache-invalidation predicate. True if we need to (re)generate the summary.
+/**
+ * True when a stored summary is GROUNDED — written by the in-session code-read
+ * capabilities route, not the server doc summarizer. Grounded rows carry a
+ * `grounding` fingerprint (new) and/or capabilities with provenance "grounded"
+ * (legacy, pre-fingerprint). They must NOT be overwritten by the doc summarizer
+ * (which would replace grounded descriptors / paths / mechanism / maturity with
+ * prose guesses and drop the evidence anchors); they refresh via silent
+ * re-grounding instead (needsReground).
+ */
+export function summaryIsGrounded(summaryJson: string | null): boolean {
+  if (!summaryJson) return false;
+  try {
+    const s = JSON.parse(summaryJson) as Partial<ProjectSummary>;
+    if (s.grounding && (s.grounding.sha || s.grounding.schemaVersion || s.grounding.at)) return true;
+    return Array.isArray(s.capabilities) && s.capabilities.some((c) => c?.provenance === "grounded");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy the GROUNDED-only fields from a previous (grounded) summary onto a freshly
+ * DOC-generated summary, so a doc-recompute of a grounded project never silently
+ * drops in-session-authored data. This is the single do-no-harm point every
+ * doc-recompute path funnels through (cron is structurally blocked upstream by
+ * needsRegeneration; the manual paths — /projects recompute + the CLI tools —
+ * call this). Preserves:
+ *   - capabilities, capabilityTags, grounding fingerprint, vaultConcepts —
+ *     grounded-only; the doc summarizer can't produce them, so always keep.
+ *   - purpose (product thesis) + user-sourced outcomeGoals — grounded-AUTHORED,
+ *     but only when the grounded row actually set them; otherwise the doc pass's
+ *     inferred values stand (don't overwrite a real doc purpose with an empty one).
+ * Mutates `target`. No-op if prevJson is null/unparseable.
+ */
+export function preserveGroundedFields(target: ProjectSummary, prevJson: string | null): void {
+  if (!prevJson) return;
+  let prev: ProjectSummary;
+  try { prev = JSON.parse(prevJson) as ProjectSummary; } catch { return; }
+  target.capabilities = prev.capabilities;
+  target.capabilityTags = prev.capabilityTags;
+  target.grounding = prev.grounding;
+  target.vaultConcepts = prev.vaultConcepts;
+  if (typeof prev.purpose === "string" && prev.purpose.trim()) target.purpose = prev.purpose;
+  if (Array.isArray(prev.outcomeGoals) && prev.outcomeGoals.some((g) => g?.source === "user")) {
+    target.outcomeGoals = prev.outcomeGoals;
+  }
+}
+
+// Cache-invalidation predicate. True if we need to (re)generate the summary via
+// the server DOC summarizer.
 export function needsRegeneration(args: {
   summaryJson: string | null;
   summaryHash: string | null;
@@ -477,6 +551,13 @@ export function needsRegeneration(args: {
   summaryPromptVersion: string | null;
   currentProfileHash: string;
 }): { regen: boolean; reason: string } {
+  // Do-no-harm: GROUNDED rows are refreshed by silent re-grounding (which reads
+  // live code in the user's session), never by the doc summarizer. Running the
+  // doc path over a grounded row overwrites its grounded capabilities — losing
+  // paths, mechanism, maturity, and the "grounded" provenance — which is an
+  // active regression on every profile-hash change / prompt bump / 3-day
+  // staleness tick. Protect them here; the staleness surfaces as needsReground.
+  if (summaryIsGrounded(args.summaryJson)) return { regen: false, reason: "grounded-protected" };
   if (!args.summaryJson) return { regen: true, reason: "no-summary" };
   if (args.summaryHash !== args.currentProfileHash) return { regen: true, reason: "profile-hash-changed" };
   if (args.summaryPromptVersion !== PROMPT_VERSION) return { regen: true, reason: "prompt-version-bumped" };
@@ -484,4 +565,38 @@ export function needsRegeneration(args: {
   const ageMs = Date.now() - args.summaryGeneratedAt.getTime();
   if (ageMs > STALENESS_MS) return { regen: true, reason: `older-than-${Math.floor(STALENESS_MS / 86400000)}d` };
   return { regen: false, reason: "fresh" };
+}
+
+/**
+ * Should the CLIENT silently re-run the grounded (code-read) derivation for this
+ * repo? Fires when a grounded row is (a) SCHEMA-STALE — grounded before the
+ * current GROUNDING_SCHEMA_VERSION (e.g. pre mechanism+maturity), or (b)
+ * CODE-DRIFTED — the cwd repo's live HEAD differs from the grounded SHA.
+ * Throttled: suppressed within `throttleHours` of the last grounding, so an
+ * actively-developed repo re-grounds at most ~daily, not every session. Never
+ * fires for un-grounded rows (that is needsOnboarding's job). `localHead` comes
+ * from the local MCP server's `git rev-parse HEAD`; omit it to check schema
+ * staleness only (drift can't be judged without it).
+ */
+export function needsReground(args: {
+  summaryJson: string | null;
+  localHead?: string | null;
+  now?: number;
+  throttleHours?: number;
+}): { reground: boolean; reason: string } {
+  if (!summaryIsGrounded(args.summaryJson)) return { reground: false, reason: "not-grounded" };
+  let g: ProjectSummary["grounding"] | undefined;
+  try { g = (JSON.parse(args.summaryJson as string) as ProjectSummary).grounding; } catch { /* legacy grounded row, no fingerprint */ }
+  const now = args.now ?? Date.now();
+  const throttleMs = Math.max(0, args.throttleHours ?? 24) * 3600 * 1000;
+  // Throttle on the last grounding time so churn during active development
+  // doesn't re-ground every session. Legacy rows (no `at`) are never throttled.
+  const atMs = g?.at ? Date.parse(g.at) : NaN;
+  if (Number.isFinite(atMs) && now - atMs < throttleMs) return { reground: false, reason: "throttled" };
+  // Schema-stale: grounded before the current grounding schema. Backfills the
+  // new fields (mechanism/maturity) into repos grounded before they existed.
+  if ((g?.schemaVersion ?? "") !== GROUNDING_SCHEMA_VERSION) return { reground: true, reason: "schema-stale" };
+  // Code-drift: the live HEAD moved past the grounded SHA.
+  if (args.localHead && g?.sha && args.localHead !== g.sha) return { reground: true, reason: "code-drift" };
+  return { reground: false, reason: "current" };
 }

@@ -11,7 +11,7 @@
 
 import { db, schema } from "../db/client";
 import { and, eq } from "drizzle-orm";
-import { generateProjectSummary, needsRegeneration, PROMPT_VERSION } from "../projects/summarize";
+import { generateProjectSummary, needsRegeneration, summaryIsGrounded, preserveGroundedFields, PROMPT_VERSION } from "../projects/summarize";
 import { parseShapeJson } from "../projects/loader";
 import { resolveUserConfig } from "../scheduler/user-config";
 import { withRunConfig } from "../analyzer/run-context";
@@ -85,6 +85,12 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
 
   if (persist) {
+    // Do-no-harm: a doc-recompute must not clobber GROUNDED (in-session
+    // code-read) capabilities. Preserve the grounded fields on persist.
+    if (summaryIsGrounded(project.summaryJson ?? null)) {
+      preserveGroundedFields(summary, project.summaryJson ?? null);
+      console.error(`[inspect] grounded — preserving in-session capabilities on persist`);
+    }
     await db
       .update(schema.projectProfiles)
       .set({

@@ -10,7 +10,7 @@ import { createHandoffPR, fetchPrState } from "@/lib/github-pr";
 import { handoffBranchName, handoffFilePath, renderHandoff, sanitizePrTitle } from "@/lib/handoff-template";
 import { startPipelineForUser } from "@/scheduler/run-once";
 import { proposeDocsImprovement } from "@/projects/self-improvement";
-import { generateProjectSummary, PROMPT_VERSION } from "@/projects/summarize";
+import { generateProjectSummary, PROMPT_VERSION, summaryIsGrounded, preserveGroundedFields } from "@/projects/summarize";
 import { parseShapeJson } from "@/projects/loader";
 import { resolveUserConfig } from "@/scheduler/user-config";
 import { withRunConfig } from "@/analyzer/run-context";
@@ -370,6 +370,14 @@ export async function recomputeProjectSummary(projectId: number): Promise<{ ok: 
   );
   if (!summary) {
     return { ok: false, reason: "project has no docs and no techSummary — nothing to summarize" };
+  }
+  // Do-no-harm: if the existing summary is GROUNDED (in-session code-read
+  // capabilities), a manual doc-recompute must not clobber it. Preserve the
+  // grounded fields (caps/tags/grounding/vaultConcepts + authored purpose/goals);
+  // the doc pass only refreshes the non-grounded context (currentTech,
+  // languageSignals). Re-grounding from live code is the way to refresh caps.
+  if (summaryIsGrounded(project.summaryJson)) {
+    preserveGroundedFields(summary, project.summaryJson);
   }
   await db
     .update(schema.projectProfiles)

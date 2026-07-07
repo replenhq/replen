@@ -77,8 +77,10 @@ Commands:
   // and asks for everything across all the user's projects.
   const detected = detectCurrentRepo();
   const defaultRepo = detected?.ownerRepo ?? null;
+  const repoToplevel = detected?.toplevel ?? null;
+  const cfg = { baseUrl, token, defaultRepo, repoToplevel };
 
-  registerTools(server, { baseUrl, token, defaultRepo });
+  registerTools(server, cfg);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -90,7 +92,7 @@ Commands:
 
   // Keep the local Atlas tiles (~/.replen/atlas/) fresh in the background —
   // fire-and-forget, debounced (twice a day max), never blocks the transport.
-  refreshAtlasVaultInBackground({ baseUrl, token, defaultRepo });
+  refreshAtlasVaultInBackground(cfg);
 }
 
 main().catch((e) => {

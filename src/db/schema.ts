@@ -141,6 +141,13 @@ export const userSettings = sqliteTable(
     digestEnabled: integer("digest_enabled", { mode: "boolean" }).notNull().default(true),
     securityAlertsEnabled: integer("security_alerts_enabled", { mode: "boolean" }).notNull().default(true),
     briefFrequency: text("brief_frequency").notNull().default("weekly"),
+    // Silent auto-reground master switch. Default ON: the in-session agent
+    // silently re-derives a repo's grounded capabilities (in a background
+    // subagent) when they drift from live code or fall behind the grounding
+    // schema (see needsReground / the injected instruction). Set false to opt
+    // out entirely — the server then never emits needsReground and onboarding
+    // reverts to the consent offer. `npx replen autoground off` flips it.
+    autogroundEnabled: integer("autoground_enabled", { mode: "boolean" }).notNull().default(true),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (t) => ({

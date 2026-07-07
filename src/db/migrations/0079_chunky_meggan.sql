@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `autoground_enabled` integer DEFAULT true NOT NULL;

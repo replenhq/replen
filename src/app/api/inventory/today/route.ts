@@ -31,6 +31,7 @@ import { calibratedFloor } from "@/lib/calibration";
 import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance, Maturity } from "@/projects/modality";
 import { modalitiesDisjoint, coerceModalities, coerceMaturity } from "@/projects/modality";
+import { needsReground } from "@/projects/summarize";
 
 // Skill-mode inventory endpoint.
 //
@@ -107,6 +108,18 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "20", 10) || 20, 1), 50);
   const repoFilter = url.searchParams.get("repo")?.trim().toLowerCase() || null;
+  // The cwd repo's live git HEAD, reported by the LOCAL MCP server (it already
+  // runs `git rev-parse` to detect the repo). Lets the server judge whether the
+  // scoped repo's grounded capabilities have drifted from live code → silent
+  // auto-reground. Validated as a hex SHA; ignored otherwise.
+  const localHead = (() => { const h = url.searchParams.get("head")?.trim().toLowerCase(); return h && /^[0-9a-f]{7,64}$/.test(h) ? h : null; })();
+  const REGROUND_THROTTLE_HOURS = Math.max(0, parseInt(process.env.REPLEN_REGROUND_THROTTLE_HOURS ?? "24", 10) || 24);
+  // Account-level auto-ground switch. When ON (default), an unprofiled repo is
+  // grounded SILENTLY in a background subagent (driven by the injected
+  // instruction off replen_onboard_state), so the needsOnboarding offer below
+  // must stay quiet — surfacing "want me to profile it?" would contradict the
+  // silent background ground already in flight. When OFF, we surface the offer.
+  const autoground = auth.settings.autogroundEnabled !== false;
 
   // Adaptive lookback window. An explicit ?days= wins (clamped 1..365).
   // Otherwise the window adapts to the SCOPED PROJECT's history (computed
@@ -206,12 +219,20 @@ export async function GET(req: Request) {
             afterFilter: 0,
             candidates: [],
             needsOnboarding: true,
-            displayText: withUpgradeNudge(
-              "This repo is set up in Replen but I haven't profiled its capabilities yet, so I can't surface good matches for it. Want me to read the code and build its capability profile now? (Runs here in-session — no API key, a couple of minutes.)",
-              upgradeNudge,
-            ),
-            note:
-              "This project is registered but UNPROFILED (identity + tags only, no capability facets) — do NOT triage the inventory (there is nothing meaningful to score yet). Instead, ONBOARD it in-session if the user accepts the offer above: " +
+            autoground,
+            // When auto-ground is ON the injected instruction is already
+            // grounding this repo in a background subagent, so stay silent (null
+            // footnote) — an offer here would contradict that. When OFF, surface
+            // the calm in-session offer.
+            displayText: autoground
+              ? withUpgradeNudge(null, upgradeNudge)
+              : withUpgradeNudge(
+                  "This repo is set up in Replen but I haven't profiled its capabilities yet, so I can't surface good matches for it. Want me to read the code and build its capability profile now? (Runs here in-session — no API key, a couple of minutes.)",
+                  upgradeNudge,
+                ),
+            note: autoground
+              ? "This project is registered but UNPROFILED. Auto-ground is ON, so it is being profiled SILENTLY in a background subagent (see replen_onboard_state). Do NOT surface an offer and do NOT triage — matching starts once grounding lands."
+              : "This project is registered but UNPROFILED (identity + tags only, no capability facets) — do NOT triage the inventory (there is nothing meaningful to score yet). Instead, ONBOARD it in-session if the user accepts the offer above: " +
               "(1) read the actual source (src/, lib/, app/ — skip node_modules/dist/.next) to understand what it does; " +
               "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, mechanism, maturity, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints — QUALIFY it with the project's domain/data so a generic head-noun can't collide cross-field: 'ingestion of 1-minute index-futures OHLCV bars', not 'market data ingestion'; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []; mechanism = HOW it's implemented, the execution approach/algorithm the code actually uses ('price-time-priority order book in a hand-written heap', not just 'order matching'); maturity = 'hand-rolled' (from scratch — a REPLACEMENT opportunity) / 'library-backed' (delegated to a mature lib) / 'mixed', judged from the imports — this is what lets Replen flag which of your capabilities a candidate could actually make BETTER); " +
               "(3) call replen_set_capabilities (mode='replace') with those capabilities, plus a short grounded `report` and a 1-2 sentence `purpose` when you can; " +
@@ -2080,10 +2101,29 @@ export async function GET(req: Request) {
 
   // keystoneUpgrades computed in the awareness block above (the better_than
   // upgrades for this project's reported solutions, task-scoped).
+  // Silent auto-reground signal for the SCOPED (cwd) repo: fires when its
+  // grounded capabilities are schema-stale (grounded before mechanism/maturity)
+  // or when the live HEAD has drifted from the grounded SHA. Throttled ~daily.
+  // The injected instruction turns this into a silent background re-ground. Only
+  // meaningful for an already-grounded repo; un-grounded repos surface
+  // needsOnboarding instead (handled far above). Gated by the account opt-out
+  // (`autoground`, computed at the top) — when off, we never emit needsReground
+  // and the client reverts to the consent offer for onboarding.
+  const regroundDecision = scopedProject && autoground
+    ? needsReground({ summaryJson: scopedProject.summaryJson ?? null, localHead, throttleHours: REGROUND_THROTTLE_HOURS })
+    : { reground: false, reason: !scopedProject ? "no-scope" : "opted-out" };
+
   return NextResponse.json(
     {
       filterMode,
       scopedTo: scopedProject ? `${scopedProject.slug} (${scopedProject.githubFullName})` : null,
+      // Silent-reground hint for the cwd repo (see needsReground). When
+      // `reground` is true the injected instruction re-grounds in the background.
+      needsReground: regroundDecision.reground,
+      regroundReason: regroundDecision.reason,
+      // Account-level auto-ground switch. When false, the client uses the
+      // consent offer for onboarding instead of silent-auto grounding.
+      autoground,
       // What the project is trying to BE — triage candidates against this, not
       // just the capability slots. Null until onboarding captures it.
       projectThesis,

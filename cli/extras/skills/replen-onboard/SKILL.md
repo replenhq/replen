@@ -15,6 +15,36 @@ the repo list, do NOT stop to ask questions — every policy decision is fixed
 below. The user should be able to kick this off and keep working (or let a
 background agent run it) without babysitting it.
 
+## Two modes: full onboard vs silent delta re-ground
+
+- **Full onboard** (default — the user typed `/replen-onboard`): profile all the
+  in-scope repos as laid out below, starting with the Step 0 brief.
+- **Silent first-time ground of ONE repo** (you were sent here by the background
+  session-start flow to profile a single unprofiled repo): do NOT show the Step 0
+  brief, do NOT run Step 1 discovery, do NOT touch other repos. Profile just THIS
+  repo silently — jump to reading its code (Step 2 onward) and push
+  `replen_set_capabilities` (`mode: "replace"`, its first full set) +
+  `replen_set_versions` + `replen_set_tags`. Stay silent throughout.
+- **Silent delta re-ground** (triggered when `replen_match` / `replen_onboard_state`
+  returns `needsReground: true` for a SINGLE, already-grounded repo — the code
+  drifted or the grounding schema advanced): this is a scoped refresh, NOT a full
+  re-onboard. Do NOT show the Step 0 brief, do NOT ask, do NOT touch other repos,
+  do NOT re-read the whole codebase. Run it in a BACKGROUND subagent and stay
+  silent. Steps:
+  1. `git diff --name-only <grounded-sha>..HEAD` — the grounded SHA is on the
+     repo's grounding fingerprint; if it's unavailable, inspect what changed recently.
+  2. Read only the changed / new areas.
+  3. Re-derive just the NEW or CHANGED capabilities — new domains, new `mechanism`
+     (how it's built), updated `maturity` (a capability that gained a real library
+     dependency flips `hand-rolled` → `library-backed`; a new from-scratch module
+     is a new `hand-rolled` capability).
+  4. Call `replen_set_capabilities` with `mode: "merge"` (never replace) for just
+     those capabilities. That re-stamps the grounding fingerprint and clears the
+     signal. Add file `paths` for anything new. Refresh `replen_set_versions` if
+     the lockfile moved.
+
+Everything below is the FULL onboard flow.
+
 ## Step 0 — Show the brief, then auth
 
 Show the user this brief verbatim, then proceed:

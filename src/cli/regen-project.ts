@@ -10,7 +10,7 @@
 
 import { and, eq, like } from "drizzle-orm";
 import { db, schema } from "../db/client";
-import { generateProjectSummary, PROMPT_VERSION, type ProjectSummary } from "../projects/summarize";
+import { generateProjectSummary, PROMPT_VERSION, summaryIsGrounded, preserveGroundedFields } from "../projects/summarize";
 import { parseShapeJson } from "../projects/loader";
 import { facetInputsFor, embedFacets } from "../projects/facets";
 import { serialiseFacetEmbeddings } from "../lib/embeddings";
@@ -41,6 +41,14 @@ async function main() {
         techSummary: p.techSummary, agentReport: p.agentReport, shape: parseShapeJson(p.shapeJson),
       });
       if (!summary) { console.log(`  - ${p.slug}: no docs, skipped`); continue; }
+      // Do-no-harm: never let a doc-regen clobber GROUNDED (in-session code-read)
+      // capabilities. Preserve the grounded fields; the facet rebuild below then
+      // vectors from the grounded caps, not doc-inferred ones. Re-grounding from
+      // live code is the only path that refreshes caps.
+      if (summaryIsGrounded(p.summaryJson ?? null)) {
+        preserveGroundedFields(summary, p.summaryJson ?? null);
+        console.log(`  · ${p.slug}: grounded — preserving in-session capabilities`);
+      }
       await db.update(schema.projectProfiles).set({
         summaryJson: JSON.stringify(summary),
         summaryHash: p.profileHash,

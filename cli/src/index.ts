@@ -211,6 +211,11 @@ async function main() {
     return runImmerse(argv.slice(1));
   }
 
+  if (cmd === "autoground") {
+    const { runAutoground } = await import("./autoground.js");
+    return runAutoground(argv.slice(1));
+  }
+
   if (cmd === "run") return runRun(argv);
   if (cmd === "progress") return runProgress(argv);
   if (cmd === "feed") return runFeed(argv);

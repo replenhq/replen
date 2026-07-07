@@ -15,9 +15,27 @@ import { execFileSync } from "node:child_process";
 export type DetectedRepo = {
   /** GitHub-style "owner/name" identifier matching project_profiles.githubFullName. */
   ownerRepo: string;
-  /** Filesystem path to the git toplevel — useful for logging. */
+  /** Filesystem path to the git toplevel — kept so we can re-read HEAD per call. */
   toplevel: string;
 };
+
+/**
+ * Current git HEAD SHA of a repo, read FRESH. The MCP process lives for the whole
+ * (possibly weeks-long) session, so HEAD must be read at request time — not once
+ * at spawn — for drift detection to work in long sessions. Returns null on any
+ * failure (detached/empty repo, no git). `dir` is the toplevel from detectCurrentRepo.
+ */
+export function gitHead(dir: string): string | null {
+  try {
+    const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return /^[0-9a-f]{7,64}$/i.test(head) ? head.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
 
 export function detectCurrentRepo(cwd: string = process.cwd()): DetectedRepo | null {
   let toplevel: string;

@@ -20,6 +20,9 @@ export type ApiConfig = {
   // Tools that accept a `repo` filter default to this when the caller doesn't
   // override it. Null when we're not in a recognisable GitHub repo.
   defaultRepo: string | null;
+  // Filesystem toplevel of the spawn repo. Kept so tools can read git HEAD FRESH
+  // per call (drift detection for silent auto-reground). Null when not in a repo.
+  repoToplevel: string | null;
 };
 
 export async function apiGet<T = unknown>(cfg: ApiConfig, path: string, query?: Record<string, string | number | undefined>): Promise<T> {

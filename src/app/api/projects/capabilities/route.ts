@@ -7,7 +7,7 @@ import { capabilitiesFromDeps, mergeCapabilityTags } from "@/projects/capabiliti
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
 import { serialiseFacetEmbeddings } from "@/lib/embeddings";
-import { PROMPT_VERSION, reconcileCapabilities, type ProjectSummary, type VaultConcept } from "@/projects/summarize";
+import { PROMPT_VERSION, GROUNDING_SCHEMA_VERSION, reconcileCapabilities, summaryIsGrounded, type ProjectSummary, type VaultConcept } from "@/projects/summarize";
 import { coerceModalities, coerceMaturity, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
 
 // A vault "concept" must be a decision-unit (capability/concept), NEVER a code
@@ -37,7 +37,7 @@ const normConceptKey = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+
 //
 // Project resolution is owner-tolerant (exact github_full_name, then repo name).
 
-type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown; mode?: unknown; concepts?: unknown };
+type Body = { repo?: string; repoId?: number; capabilities?: unknown; report?: unknown; purpose?: unknown; goals?: unknown; mode?: unknown; concepts?: unknown; head?: unknown; codeHash?: unknown };
 
 // Cap the stored report so a runaway agent can't write megabytes.
 const MAX_REPORT_CHARS = 24_000;
@@ -133,6 +133,19 @@ export async function POST(req: Request) {
   // incoming specs are unioned onto matching tags; new tags are appended.
   // mode=replace (default, onboarding's full set): unchanged.
   const mode = body.mode === "merge" ? "merge" : "replace";
+  // Replace-mode floor: a full-replace that arrived with ZERO grounded capability
+  // specs would let dependency-derived tags overwrite an existing GROUNDED set
+  // (losing descriptors / paths / mechanism / maturity) and then re-stamp a fresh
+  // fingerprint below, masking the loss so no reground re-fires. A grounded
+  // project is never legitimately "replaced" with nothing — reject, so a
+  // truncated or empty in-session re-derivation can't silently wipe it. (merge is
+  // already additive; a fresh un-grounded project has no grounded set to protect.)
+  if (mode === "replace" && agentSpecs.length === 0 && summaryIsGrounded(project.summaryJson)) {
+    return NextResponse.json(
+      { error: "replace with no capabilities would wipe this project's grounded profile — send the capabilities, or use mode='merge'" },
+      { status: 400, headers: corsHeaders },
+    );
+  }
   let baseTags = agentTags;
   let baseSpecs = agentSpecs;
   if (mode === "merge") {
@@ -164,7 +177,14 @@ export async function POST(req: Request) {
 
   // Merge agent capabilities with the deterministic dep→capability tags, then
   // reconcile grounded specs so every final tag has a descriptor + modality.
-  const merged = mergeCapabilityTags(baseTags, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)));
+  // Grounded caps are AUTHORITATIVE (the agent read the code) and the onboarding
+  // instruction asks for 8-15, which triage write-backs grow over time — so cap
+  // well above the doc-summarizer's default 12 or we'd silently truncate grounded
+  // capabilities (dropping their descriptor/paths/mechanism/maturity) and block
+  // merge-mode from ever adding a 13th. baseTags (grounded) lead the merge, so
+  // dep tags only fill remaining headroom.
+  const GROUNDED_CAP_LIMIT = 40;
+  const merged = mergeCapabilityTags(baseTags, capabilitiesFromDeps(parseTechSummaryDeps(project.techSummary)), GROUNDED_CAP_LIMIT);
   if (merged.length === 0) {
     return NextResponse.json({ error: "no usable capabilities after cleaning" }, { status: 400, headers: corsHeaders });
   }
@@ -257,6 +277,22 @@ export async function POST(req: Request) {
   const agentReport = typeof body.report === "string" && body.report.trim()
     ? body.report.trim().slice(0, MAX_REPORT_CHARS)
     : project.agentReport;
+
+  // Stamp the GROUNDING FINGERPRINT so silent auto-reground can tell when this
+  // grounded set has drifted from live code or fallen behind the grounding
+  // schema. `head` (git HEAD) + `codeHash` are supplied by the local MCP server;
+  // absent on legacy callers, in which case we still record schemaVersion + time
+  // so schema-staleness clears and the throttle has an anchor. Stamped on EVERY
+  // grounded push (replace AND merge) so a re-ground — even one that changes
+  // nothing — refreshes the fingerprint and resets the drift/throttle clock.
+  const groundHead = typeof body.head === "string" && /^[0-9a-f]{7,64}$/i.test(body.head.trim()) ? body.head.trim().toLowerCase() : undefined;
+  const groundCodeHash = typeof body.codeHash === "string" && body.codeHash.trim() ? body.codeHash.trim().slice(0, 128) : undefined;
+  summary.grounding = {
+    ...(groundHead ? { sha: groundHead } : {}),
+    ...(groundCodeHash ? { codeHash: groundCodeHash } : {}),
+    schemaVersion: GROUNDING_SCHEMA_VERSION,
+    at: new Date().toISOString(),
+  };
 
   // Build facet vectors now (grounded capabilities + any doc sections). Embeddings only.
   // The stored domain cloud anchors each facet in the project's field (Step 1).
