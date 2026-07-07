@@ -43,6 +43,22 @@ export function coerceProvenance(raw: unknown): Provenance | null {
   return typeof raw === "string" && ALL_PROVENANCE.has(raw as Provenance) ? (raw as Provenance) : null;
 }
 
+// Implementation maturity of a capability — the load-bearing signal for "would a
+// candidate actually make this BETTER?" (vs. merely sitting in the same domain).
+//   hand-rolled    — implemented from scratch (a hand-written parser, an in-house
+//                    queue). A REPLACEMENT opportunity: a candidate that does this
+//                    properly is genuinely actionable.
+//   library-backed — already delegated to a mature library. Surfacing an
+//                    alternative is usually noise (the covered-facet logic agrees).
+//   mixed          — part hand-rolled, part delegated.
+// Absent/undefined = unknown: don't gate, don't boost. Distinct from `descriptor`
+// (WHAT the capability does) and `mechanism` (HOW it's implemented).
+export type Maturity = "hand-rolled" | "library-backed" | "mixed";
+export const ALL_MATURITY: ReadonlySet<Maturity> = new Set<Maturity>(["hand-rolled", "library-backed", "mixed"]);
+export function coerceMaturity(raw: unknown): Maturity | null {
+  return typeof raw === "string" && ALL_MATURITY.has(raw as Maturity) ? (raw as Maturity) : null;
+}
+
 // A project capability, grounded. `tag` is the short GitHub-searchable term (for
 // retrieval); `descriptor` is the rich, code-grounded phrase that actually gets
 // embedded (for matching); `modality` is the data axis (for the gate);
@@ -57,6 +73,17 @@ export type CapabilitySpec = {
   // cross-project leaps actionable ("acme solved this — see src/cv/…")
   // and ground the Atlas dossier in real locations.
   paths?: string[];
+  // HOW the capability is implemented — the execution approach / data-flow /
+  // algorithm actually used ("price-time-priority order book in a hand-written
+  // heap", "CDC via Postgres logical replication"). Distinct from `descriptor`,
+  // which is WHAT it does. OSS candidates describe themselves by mechanism while
+  // repos describe themselves by domain; capturing mechanism lets the matcher
+  // align a candidate's HOW to the project's HOW, and lets triage say a candidate
+  // would REPLACE a specific implementation rather than just share a field.
+  mechanism?: string;
+  // Implementation maturity (see Maturity). The replacement-opportunity signal:
+  // a hand-rolled capability is where a candidate can actually improve things.
+  maturity?: Maturity;
 };
 
 /** Validate arbitrary LLM/API input into a clean Modality[] (dedup, drop unknown values). */

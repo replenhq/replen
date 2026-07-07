@@ -29,8 +29,8 @@ import { loadTasteVector, tasteBoost } from "@/lib/taste";
 import { loadOutcomePriors, priorBoost, sourcePrefix } from "@/lib/outcome-priors";
 import { calibratedFloor } from "@/lib/calibration";
 import { loadRankHints, type RankHints } from "@/graph/coverage";
-import type { Modality, Provenance } from "@/projects/modality";
-import { modalitiesDisjoint, coerceModalities } from "@/projects/modality";
+import type { Modality, Provenance, Maturity } from "@/projects/modality";
+import { modalitiesDisjoint, coerceModalities, coerceMaturity } from "@/projects/modality";
 
 // Skill-mode inventory endpoint.
 //
@@ -213,7 +213,7 @@ export async function GET(req: Request) {
             note:
               "This project is registered but UNPROFILED (identity + tags only, no capability facets) — do NOT triage the inventory (there is nothing meaningful to score yet). Instead, ONBOARD it in-session if the user accepts the offer above: " +
               "(1) read the actual source (src/, lib/, app/ — skip node_modules/dist/.next) to understand what it does; " +
-              "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints — QUALIFY it with the project's domain/data so a generic head-noun can't collide cross-field: 'ingestion of 1-minute index-futures OHLCV bars', not 'market data ingestion'; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []); " +
+              "(2) derive 8-15 SPECIFIC, grounded capabilities as {tag, descriptor, modality, mechanism, maturity, paths} objects (descriptor = one sentence grounded in the real code: the data it operates on, the task, key constraints — QUALIFY it with the project's domain/data so a generic head-noun can't collide cross-field: 'ingestion of 1-minute index-futures OHLCV bars', not 'market data ingestion'; modality from image/video/timeseries/tabular/text/audio/geospatial/graph/3d/code/network, or []; mechanism = HOW it's implemented, the execution approach/algorithm the code actually uses ('price-time-priority order book in a hand-written heap', not just 'order matching'); maturity = 'hand-rolled' (from scratch — a REPLACEMENT opportunity) / 'library-backed' (delegated to a mature lib) / 'mixed', judged from the imports — this is what lets Replen flag which of your capabilities a candidate could actually make BETTER); " +
               "(3) call replen_set_capabilities (mode='replace') with those capabilities, plus a short grounded `report` and a 1-2 sentence `purpose` when you can; " +
               "(4) read the lockfile and call replen_set_versions with the resolved direct dependency versions; " +
               "(5) call replen_set_tags with a DENSE, RANKED domain tag cloud (aim 25-50+, most-central first) — the WORLD the project operates in: sector + synonyms ('estate-agents','letting-agents','property','proptech'), job-to-be-done ('lead-generation','lead-routing'), and entities/data ('uk-postcodes','uk-addresses','landlords','property-listings'). DISAMBIGUATE BY DENSITY: for any ambiguous term emit its synonyms/abbreviations/neighbours too (not just 'uas' but 'unmanned-systems','uav','drone','drones','military-drones') so the collective pins the meaning. QUALIFY AMBIGUOUS HEAD-NOUNS with the domain ('estate-agent-matching' not 'agent-matching') so a bare noun doesn't drag the centroid toward the wrong field. GROUNDED ONLY. EXCLUDE stack ('typescript'/'next.js'/'react'/'firebase' — those go via replen_set_versions) and generic SaaS plumbing ('auth','signup','subscription-management','crud'). The auto-detected stack tags from registration are near-useless for matching; the dense domain cloud is what lets matching surface relevant candidates instead of generic frameworks. " +
@@ -630,6 +630,27 @@ export async function GET(req: Request) {
       goalLabels.add(normFacetLabel(g.label));
     }
   }
+  // Mechanism + maturity per capability (from the scoped project's summary — the
+  // source of truth). Keyed by the same normalized label as facets. Drives the
+  // hand-rolled replacement-opportunity rank lever and is surfaced on each match
+  // so the triage agent can say a candidate would REPLACE a hand-rolled impl (the
+  // execution-fit signal), not merely share the domain. Scoped-only: a match led
+  // by a SIBLING repo's facet simply gets no boost / no surfaced mechanism (graceful).
+  const capInfoByLabel = new Map<string, { mechanism: string | null; maturity: Maturity | null }>();
+  if (scopedProject?.summaryJson) {
+    try {
+      const s = JSON.parse(scopedProject.summaryJson) as { capabilities?: Array<{ tag?: unknown; mechanism?: unknown; maturity?: unknown }> };
+      for (const c of s.capabilities ?? []) {
+        if (!c || typeof c.tag !== "string") continue;
+        const k = normFacetLabel(c.tag);
+        if (!k || capInfoByLabel.has(k)) continue;
+        capInfoByLabel.set(k, {
+          mechanism: typeof c.mechanism === "string" && c.mechanism.trim() ? c.mechanism.trim() : null,
+          maturity: coerceMaturity(c.maturity),
+        });
+      }
+    } catch { /* no mechanism/maturity signal — lever + surfacing simply stay off */ }
+  }
   // PROBE facets — the subset allowed to LEAD a match, seed adjacency, or
   // pull catalogue suggestions. Generic infrastructure plumbing (S3, Docker,
   // CI/CD, deployment) is excluded: it's a capability almost every project
@@ -802,6 +823,12 @@ export async function GET(req: Request) {
   // and can't override the gate/floor or surface a dropped candidate. Default 0 = off.
   const PROVENANCE_RANK_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_PROVENANCE_RANK_WEIGHT ?? "0"));
   const provTrustUnit = (p: Provenance | null): number => (p === "grounded" ? 1 : p === "extracted" ? 0.5 : 0);
+  // Mechanism/maturity lever — reward a match that fills a HAND-ROLLED capability
+  // (a genuine replacement opportunity: a candidate that does it properly makes
+  // the project better, not merely shares its domain). Positive-only, additive,
+  // ordering-only, off by default (validate offline before enabling, same as the
+  // other levers). Reads maturity from the scoped summary (capInfoByLabel below).
+  const MATURITY_RANK_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_MATURITY_RANK_WEIGHT ?? "0"));
   const FACET_IDF_WEIGHT = Math.max(0, parseFloat(process.env.REPLEN_FACET_IDF_WEIGHT ?? "0.06"));
   const FACET_CAL_MIN_POOL = Math.max(20, parseInt(process.env.REPLEN_FACET_CAL_MIN_POOL ?? "40", 10) || 40);
   // Candidate embedding by "owner/name" — collected as we score, reused for MMR
@@ -1079,6 +1106,10 @@ export async function GET(req: Request) {
       // / grounded capability over an inferred one. Positive-only, additive, off by
       // default. Displayed cosine + the keep-set are untouched.
       if (PROVENANCE_RANK_WEIGHT > 0) rank += PROVENANCE_RANK_WEIGHT * provTrustUnit(matchedProvenance);
+      // Maturity lever: the matched capability is one the user HAND-ROLLED, so a
+      // candidate that fills it is a real replacement opportunity — nudge it up.
+      // Positive-only, ordering-only, off by default. Keep-set + cosine untouched.
+      if (MATURITY_RANK_WEIGHT > 0 && capInfoByLabel.get(normFacetLabel(matchedFacet))?.maturity === "hand-rolled") rank += MATURITY_RANK_WEIGHT;
     }
 
     filtered.push({
@@ -1180,6 +1211,12 @@ export async function GET(req: Request) {
     cosine: number | null;
     matchedFacet: string | null; // capability this candidate fills, when facet-led
     matchedProvenance?: import("@/projects/modality").Provenance | null; // how grounded that capability is
+    // The matched capability's mechanism (HOW the user implements it today) + maturity
+    // (hand-rolled vs library-backed). Lets the triage agent judge whether this candidate
+    // would REPLACE a hand-rolled implementation — where "makes it better" actually lives —
+    // rather than merely sharing the domain. Null when the scoped summary lacks the signal.
+    capabilityMechanism?: string | null;
+    capabilityMaturity?: Maturity | null;
     matchedRepo?: string | null; // sibling repo it's for, when cross-repo (multi-repo products)
     promoted: boolean;
     dependencyMatch: boolean;
@@ -1422,6 +1459,8 @@ export async function GET(req: Request) {
         if (hints.waypointLabels.has(nf)) cRank += WAYPOINT_BOOST;
         if (hints.unfilledLabels.has(nf)) cRank += BLINDSPOT_BOOST;
         if (goalLabels.has(nf)) { cRank += GOAL_BOOST; pushed.whyShortlisted += `; advances your goal: ${m.matchedFacet}`; }
+        // Maturity lever (parity with the own-pool loop): fills a hand-rolled capability.
+        if (MATURITY_RANK_WEIGHT > 0 && capInfoByLabel.get(nf)?.maturity === "hand-rolled") cRank += MATURITY_RANK_WEIGHT;
       }
       entryRank.set(pushed, cRank);
     }
@@ -1638,6 +1677,22 @@ export async function GET(req: Request) {
         priorContext: rc.oneLine ? `your note at the time: ${rc.oneLine}` : null,
       });
       break; // one re-check per response — calm cadence
+    }
+  }
+
+  // Attach the matched capability's mechanism + maturity (from the scoped summary)
+  // to each facet-led entry, so the triage agent knows whether the candidate would
+  // REPLACE a hand-rolled implementation (actionable) vs. a library-backed one
+  // (usually not). This is the execution-fit signal the domain-only match was
+  // missing — "makes it better" lives here, and triage is where that call is made.
+  if (capInfoByLabel.size > 0) {
+    for (const e of candidatesOut) {
+      if (!e.matchedFacet) continue;
+      const info = capInfoByLabel.get(normFacetLabel(e.matchedFacet));
+      if (!info) continue;
+      e.capabilityMechanism = info.mechanism;
+      e.capabilityMaturity = info.maturity;
+      if (info.maturity === "hand-rolled") e.whyShortlisted += "; fills a capability you currently hand-roll";
     }
   }
 

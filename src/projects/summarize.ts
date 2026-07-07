@@ -6,7 +6,7 @@
 import { chatCompletion, triageModel } from "../analyzer/llm";
 import { capabilitiesFromDeps, mergeCapabilityTags } from "./capabilities";
 import { parseTechSummaryDeps } from "../fetchers/stack-watch/registry";
-import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "./modality";
+import { coerceModalities, coerceMaturity, inferCapabilityModality, type CapabilitySpec } from "./modality";
 
 // Bump when the prompt or output schema changes. Bumping invalidates all
 // existing summaries — they re-generate on next pipeline run.
@@ -25,7 +25,12 @@ import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "
 // descriptor (what data it operates on, the task, key constraints) + a data
 // modality, so matching separates same-word/different-modality collisions
 // (telemetry vs image "anomaly detection"). Old summaries regenerate.
-export const PROMPT_VERSION = "6";
+// "7" (mechanism + maturity): each capability now also carries `mechanism` (HOW
+// it's implemented — execution/data-flow/algorithm) and `maturity` (hand-rolled
+// / library-backed / mixed). Mechanism lets a candidate be matched by HOW, not
+// just domain; maturity marks hand-rolled capabilities as replacement
+// opportunities the triage can act on. Old summaries regenerate.
+export const PROMPT_VERSION = "7";
 
 // Max age before we force-regenerate even if profileHash is unchanged.
 // Catches the case where a user has changed direction in their head but
@@ -73,11 +78,13 @@ export type ProjectSummary = {
   // for a project that does CV. Augmented post-LLM from the dependency set.
   capabilityTags: string[];
 
-  // Phase "6": the grounded form of capabilityTags. One spec per tag, carrying a
-  // descriptor (modality + data + task + constraints, grounded in the code) and
-  // a data modality. The descriptor is what gets EMBEDDED for matching (richer
+  // Phase "6"/"7": the grounded form of capabilityTags. One spec per tag, carrying
+  // a descriptor (data + task + constraints, grounded in the code), a data
+  // modality, plus `mechanism` (HOW it's implemented) and `maturity` (hand-rolled
+  // vs library-backed). The descriptor is what gets EMBEDDED for matching (richer
   // than the bare tag, so it doesn't collide across modalities); the modality
-  // drives the cross-modal gate. capabilityTags stays the short retrieval view.
+  // drives the cross-modal gate; mechanism+maturity drive the "would this make it
+  // better?" signal in ranking and triage. capabilityTags stays the short retrieval view.
   capabilities: CapabilitySpec[];
 
   // Current implementation across functional areas. Keys are free-form (web,
@@ -226,6 +233,20 @@ Rules:
       "geospatial","graph","3d","code","network"]. Use [] only if genuinely
       none apply. A satellite-imagery segmenter is ["image","geospatial"]; a
       telemetry detector is ["timeseries"]; a recsys is ["tabular"].
+    - "mechanism": one grounded phrase for HOW this is implemented — the execution
+      approach, data-flow, or algorithm the code ACTUALLY uses. This is distinct
+      from "descriptor" (WHAT it does): mechanism is HOW. Examples: "price-time
+      priority order book in a hand-written binary heap", "change-data-capture via
+      Postgres logical replication slots", "regex + cheerio DOM extraction, no
+      headless browser". Read it from the imports and the code, not marketing.
+      Omit if the docs/code genuinely don't reveal it.
+    - "maturity": how the capability is built, from EXACTLY: "hand-rolled"
+      (implemented from scratch — a from-scratch parser, an in-house queue: a
+      REPLACEMENT opportunity), "library-backed" (delegated to a mature library —
+      already solved), or "mixed" (partly both). Judge from the imports: code that
+      calls a well-known library for the job is "library-backed"; a from-scratch
+      implementation is "hand-rolled". Omit if genuinely unclear. This is the key
+      signal for whether a candidate could make the capability better.
 
 Output JSON only. No prose before or after. Schema:
 {
@@ -233,7 +254,7 @@ Output JSON only. No prose before or after. Schema:
   "keyCapabilities": ["3-8 short noun phrases"],
   "capabilityTags": ["3-10 short GitHub-searchable tech capability terms"],
   "capabilities": [
-    { "tag": "...", "descriptor": "grounded one-liner", "modality": ["image", ...] }
+    { "tag": "...", "descriptor": "grounded one-liner", "mechanism": "how it's implemented (optional)", "maturity": "hand-rolled" | "library-backed" | "mixed", "modality": ["image", ...] }
   ],
   "currentTech": { "web": "...", "scraping": "...", ... },
   "outcomeGoals": [
@@ -299,9 +320,13 @@ function coerceSummary(raw: unknown, model: string, sourceFiles: string[]): Proj
             const descriptor = typeof cc.descriptor === "string" ? cc.descriptor.trim() : "";
             // Fall back to inferring the modality from tag+descriptor when the LLM omitted it.
             const modality = coerceModalities(cc.modality);
+            // HOW it's implemented + how mature — optional; drive the "makes it
+            // better?" rank/triage signal without touching the descriptor embed.
+            const mechanism = typeof cc.mechanism === "string" && cc.mechanism.trim() ? cc.mechanism.trim().slice(0, 500) : undefined;
+            const maturity = coerceMaturity(cc.maturity) ?? undefined;
             // Server-side summarizer = inferred from docs (the agent path, which is
             // grounded, comes through the capabilities route instead).
-            return { tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "inferred" } as CapabilitySpec;
+            return { tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "inferred", mechanism, maturity } as CapabilitySpec;
           })
           .filter((c): c is CapabilitySpec => c !== null)
       : [],
@@ -433,7 +458,9 @@ export function reconcileCapabilities(tags: string[], specs: CapabilitySpec[]): 
     if (s) {
       // Preserve `paths` (the evidence anchors) — dropping them here is what
       // left every facet (and so recall) path-less even when onboarding sent them.
-      out.push({ tag, descriptor: s.descriptor, modality: s.modality.length ? s.modality : inferCapabilityModality(tag, s.descriptor), provenance: s.provenance ?? (s.descriptor ? "grounded" : "inferred"), paths: s.paths });
+      // Same for mechanism/maturity — they must survive reconciliation to reach
+      // ranking + triage.
+      out.push({ tag, descriptor: s.descriptor, modality: s.modality.length ? s.modality : inferCapabilityModality(tag, s.descriptor), provenance: s.provenance ?? (s.descriptor ? "grounded" : "inferred"), paths: s.paths, mechanism: s.mechanism, maturity: s.maturity });
     } else {
       // No spec for this tag = it came from the deterministic dep→capability table.
       out.push({ tag, descriptor: "", modality: inferCapabilityModality(tag), provenance: "extracted" });

@@ -100,8 +100,8 @@ no cross-repo domain bleed). Singletons (no stack sibling) just full-ground
 normally.
 
 Mechanically: process the group leader first and have its subagent **return its
-`capabilities` array** (the `{tag, descriptor, modality}` objects, paths
-stripped) in its final message; the orchestrator passes that array into each
+`capabilities` array** (the `{tag, descriptor, modality, mechanism, maturity}`
+objects, paths stripped) in its final message; the orchestrator passes that array into each
 sibling subagent's prompt as `STACK DRAFT (verify against THIS repo, don't
 auto-accept)`. Groups still run concurrently with each other — only the
 leader→siblings step within a group is ordered. If returning the array is
@@ -265,7 +265,7 @@ Pass both to `replen_set_capabilities` (`purpose`, `goals`) in 2e.
 ### 2d. Derive grounded capabilities
 
 From the report + code, produce 8–15 **grounded** capability objects — NOT bare
-strings. Each is `{tag, descriptor, modality}`:
+strings. Each is `{tag, descriptor, modality, mechanism, maturity}`:
 - **`tag`** — short, GitHub-searchable tech term (`"anomaly detection"`,
   `"satellite imagery"`).
 - **`descriptor`** — one sentence grounding it in the actual code: the data it
@@ -273,6 +273,17 @@ strings. Each is `{tag, descriptor, modality}`:
   collisions.
 - **`modality`** — array from EXACTLY: `image, video, timeseries, tabular, text,
   audio, geospatial, graph, 3d, code, network` (`[]` if none apply).
+- **`mechanism`** — one phrase for HOW it's implemented: the execution approach /
+  algorithm the code ACTUALLY uses (`"price-time-priority order book in a
+  hand-written heap"`, `"CDC via Postgres logical replication"`, `"regex +
+  cheerio, no headless browser"`). Distinct from `descriptor` (WHAT it does).
+  OSS candidates describe themselves by mechanism — capturing yours is what lets
+  a candidate be matched by HOW it works, not just its domain. Omit if unclear.
+- **`maturity`** — one of `hand-rolled` (written from scratch — a REPLACEMENT
+  opportunity), `library-backed` (already delegated to a mature lib — solved), or
+  `mixed`. Judge from the imports. **This is the load-bearing "makes it better"
+  signal**: a hand-rolled capability is where a candidate can genuinely improve
+  the project; a library-backed one usually can't. Omit only if truly unclear.
 
 Break broad capabilities into the concrete techniques the code uses. Be
 specific — `cloudflare bypass`/`proxy rotation`, not just `web scraping`.
@@ -395,8 +406,8 @@ Replen will now surface genuinely relevant tools for these repos.
 - One question only: confirm/trim the repo list (Step 1). Everything else is
   fixed.
 - Never overwrite a `good` doc; doc writes go on a branch / clearly flagged.
-- Capabilities are GROUNDED objects (`{tag, descriptor, modality}`) + a report —
-  never bare strings.
+- Capabilities are GROUNDED objects (`{tag, descriptor, modality, mechanism,
+  maturity}`) + a report — never bare strings.
 - Re-running is safe and idempotent; that's how an interrupted sweep resumes.
 - Nothing leaves the agent except the project profile (tags, grounded
   capabilities, report) you push to Replen.

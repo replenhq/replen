@@ -92,6 +92,16 @@ For each candidate, do this loop:
     grep the user's source for files that already do that work
     (e.g. `grep -rln "Canvas\|imageRenderer\|OG"` under `lib/` and `src/`).
   - If you find one, read the file to understand what the user has built.
+- **Check `capabilityMaturity` / `capabilityMechanism` on the candidate** (present
+  on facet-led matches). When Replen marks the matched capability `hand-rolled`,
+  it's a REPLACEMENT opportunity — the user built this from scratch, so a candidate
+  that does it properly can genuinely make the project *better*, not merely share
+  its domain. `capabilityMechanism` tells you HOW they do it today (e.g. "regex +
+  cheerio, no headless browser"); grep to that implementation and compare the
+  candidate's approach against it directly. This is where "makes it better" lives —
+  weight Pass 1 (adopt/port) and Pass 2 (upgrade) up accordingly. When it's
+  `library-backed`, the capability is already solved: only surface a candidate
+  that's concretely, nameably better (the Pass 2 bar), else lean `skip`/`covered`.
 
 #### 3b. The four-pass funnel: run ALL FOUR, in order, even after a "no"
 

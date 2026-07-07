@@ -410,10 +410,20 @@ export function selectFacetLabels(labels: Array<string | null | undefined>, cap 
  * from an image-defect library. Without a descriptor we fall back to the bare
  * "Capability: <label>" anchor (legacy behaviour). Trimmed to the embed cap.
  */
-export function facetEmbeddingText(label: string, descriptor?: string | null, domainContext?: string | null): string {
+export function facetEmbeddingText(label: string, descriptor?: string | null, domainContext?: string | null, mechanism?: string | null): string {
   const d = descriptor?.trim();
   const dom = domainContext?.trim();
+  const mech = mechanism?.trim();
   const base = d ? `Capability: ${label.trim()} — ${d}` : `Capability: ${label.trim()}`;
+  // Optional mechanism clause (mechanism-fit matching). OSS candidates describe
+  // themselves by HOW ("streaming CDC via logical replication") while a repo's
+  // capability tag names WHAT. Appending the project's mechanism nudges the facet
+  // toward candidates that do the same KIND of work, so a domain-adjacent match
+  // becomes a mechanism-aligned one. Appended (not prepended) so the grounded
+  // descriptor still dominates; only added when the caller passes it (flagged in
+  // facetInputsFor), so the default embed text — and every stored vector — is
+  // byte-identical to before until the flag is deliberately enabled.
+  const withMech = mech ? `${base}. Approach: ${mech}` : base;
   // Light domain qualifier (Step 1, domain-context matching). Anchors the facet
   // in the project's FIELD so a bare head-noun ("market data ingestion") doesn't
   // float in generic space and collide cross-domain — index-futures OHLCV ingestion
@@ -421,7 +431,7 @@ export function facetEmbeddingText(label: string, descriptor?: string | null, do
   // a different domain. Kept SHORT and APPENDED (not prepended) so a sharp
   // grounded descriptor still dominates the vector: the domain nudges the facet
   // toward its field, it never owns it. See docs/matching-domain-context-and-ir-roadmap.md.
-  const text = dom ? `${base} (project domain: ${dom})` : base;
+  const text = dom ? `${withMech} (project domain: ${dom})` : withMech;
   return text.slice(0, 7000);
 }
 

@@ -16,6 +16,16 @@ import { inferCapabilityModality, type CapabilitySpec, type Modality, type Prove
 
 export type FacetInput = { label: string; text: string; modality: Modality[]; provenance: Provenance; paths?: string[] };
 
+// Mechanism-fit matching (flagged, off by default). When on, each facet's embed
+// text carries the capability's `mechanism` (HOW it's implemented), so a
+// candidate that does the same KIND of work aligns even when the domain differs.
+// Off ⇒ the embed text is byte-identical to before ⇒ every stored vector and the
+// entire keep-set are unchanged; flipping it on re-embeds facets per-project (the
+// mechanism clause changes the facet text, which is in the regeneration hash).
+// Validate offline before enabling by default — same discipline as the domain
+// qualifier and the ontology levers. Set REPLEN_FACET_MECHANISM=1 to enable.
+const FACET_MECHANISM = process.env.REPLEN_FACET_MECHANISM === "1";
+
 /**
  * Plan a project's facet inputs (cheap — no embedding). Returns the content
  * hash and the {label, text, modality} inputs. Caller embeds only when the hash
@@ -73,7 +83,11 @@ export function facetInputsFor(input: {
     // Provenance comes from the spec when set; otherwise a grounded descriptor
     // implies grounded, and a bare tag with no spec is inferred.
     const provenance: Provenance = spec?.provenance ?? (descriptor ? "grounded" : "inferred");
-    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor, domainContext), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
+    // Mechanism only enters the embed text when the flag is on (default off keeps
+    // vectors identical). Maturity is NOT embedded — it's read from the summary at
+    // rank time (source of truth), so it never needs a facet re-embed to take effect.
+    const mechanism = FACET_MECHANISM && spec?.mechanism?.trim() ? spec.mechanism : null;
+    inputs.push({ label: l, text: facetEmbeddingText(l, descriptor, domainContext, mechanism), modality, provenance, paths: spec?.paths?.length ? spec.paths : undefined });
   }
   const hash = facetSetHash(inputs.map((f) => `${f.label}::${f.text}::${f.modality.join(",")}::${f.provenance}`));
   return { hash, inputs };

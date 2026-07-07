@@ -8,7 +8,7 @@ import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
 import { serialiseFacetEmbeddings } from "@/lib/embeddings";
 import { PROMPT_VERSION, reconcileCapabilities, type ProjectSummary, type VaultConcept } from "@/projects/summarize";
-import { coerceModalities, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
+import { coerceModalities, coerceMaturity, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
 
 // A vault "concept" must be a decision-unit (capability/concept), NEVER a code
 // unit. This is the transport-layer guard (the third of three) — even if the
@@ -88,8 +88,13 @@ export async function POST(req: Request) {
             .filter(Boolean)
             .slice(0, 5)
         : undefined;
+      // HOW it's implemented (grounded) + how mature — optional. Mechanism aligns
+      // a candidate by execution, not just domain; maturity flags hand-rolled
+      // capabilities as replacement opportunities. Bounded like the other fields.
+      const mechanism = typeof cc.mechanism === "string" && cc.mechanism.trim() ? cc.mechanism.trim().slice(0, 500) : undefined;
+      const maturity = coerceMaturity(cc.maturity) ?? undefined;
       agentTags.push(tag);
-      agentSpecs.push({ tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "grounded", paths: paths?.length ? paths : undefined });
+      agentSpecs.push({ tag, descriptor, modality: modality.length ? modality : inferCapabilityModality(tag, descriptor), provenance: "grounded", paths: paths?.length ? paths : undefined, mechanism, maturity });
     }
   }
 
@@ -148,6 +153,9 @@ export async function POST(req: Request) {
         modality: ex.modality?.length ? ex.modality : s.modality,
         provenance: "grounded",
         paths: paths.length ? paths : undefined,
+        // Existing mechanism/maturity win; a merge call that discovered them fills the gap.
+        mechanism: ex.mechanism || s.mechanism,
+        maturity: ex.maturity ?? s.maturity,
       });
     }
     baseSpecs = [...byTag.values()];

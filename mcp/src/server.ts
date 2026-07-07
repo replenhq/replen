@@ -70,7 +70,7 @@ const TOOLS: Tool[] = [
         "",
         "  Onboarding (grounding a project — used by /replen-onboard):",
         "    replen_onboard_state    Per-repo onboarding state — the pre-flight before grounding.",
-        "    replen_set_capabilities Grounded capabilities (tag + descriptor + modality + paths) for a project.",
+        "    replen_set_capabilities Grounded capabilities (tag + descriptor + modality + mechanism + maturity + paths) for a project.",
         "    replen_set_tags         Dense, ranked domain tag cloud.",
         "    replen_set_versions     Pinned dependency/runtime versions (names + versions only).",
         "    replen_set_product      Group repos into a multi-repo product.",
@@ -412,7 +412,13 @@ const TOOLS: Tool[] = [
       "modality:[\"timeseries\"]} is not. QUALIFY THE DESCRIPTOR WITH THE DOMAIN/DATA so a generic head-noun can't collide " +
       "cross-field: \"market data ingestion\" matches BOTH a prediction-market trade collector and an index-futures bar loader — " +
       "write \"ingestion of 1-minute index-futures OHLCV bars\" instead. 'modality' is from EXACTLY: image, video, timeseries, tabular, text, audio, " +
-      "geospatial, graph, 3d, code, network (use [] if none apply). DERIVE all of it from the imports/deps and code, not " +
+      "geospatial, graph, 3d, code, network (use [] if none apply). ALSO capture, per capability, HOW it's built: " +
+      "'mechanism' (the execution approach / algorithm the code actually uses — 'price-time-priority order book in a " +
+      "hand-written heap', not just 'order matching') and 'maturity' ('hand-rolled' = written from scratch and thus a " +
+      "REPLACEMENT opportunity, 'library-backed' = already delegated to a mature lib, or 'mixed'). Mechanism lets a " +
+      "candidate be matched by HOW it works, not just its domain; maturity is what tells triage whether a candidate would " +
+      "actually make the capability BETTER (a hand-rolled parser is worth replacing; a library-backed one usually isn't). " +
+      "DERIVE all of it from the imports/deps and code, not " +
       "guesses. The server merges in dependency-derived capabilities and builds the facet vectors right away. " +
       "Default (mode='replace') sets the project's full capability set — use during onboarding. " +
       "During TRIAGE, use mode='merge' to ADD or augment a single capability (e.g. attach the file `paths` you " +
@@ -439,6 +445,8 @@ const TOOLS: Tool[] = [
                   tag: { type: "string", description: "Short GitHub-searchable term (1-4 words)" },
                   descriptor: { type: "string", description: "One grounded sentence: the data it operates on, the task, key constraints — read from the code" },
                   modality: { type: "array", items: { type: "string" }, description: "From: image, video, timeseries, tabular, text, audio, geospatial, graph, 3d, code, network" },
+                  mechanism: { type: "string", description: "HOW it's implemented — the execution approach / data-flow / algorithm the code ACTUALLY uses (e.g. 'price-time-priority order book in a hand-written heap', 'CDC via Postgres logical replication', 'regex + cheerio, no headless browser'). Distinct from descriptor (WHAT it does). This is how a candidate gets matched by mechanism, not just domain." },
+                  maturity: { type: "string", enum: ["hand-rolled", "library-backed", "mixed"], description: "How it's built: 'hand-rolled' (from scratch — a REPLACEMENT opportunity), 'library-backed' (delegated to a mature lib — already solved), or 'mixed'. Judge from the imports. This is the key signal for whether a candidate could make the capability better." },
                   paths: { type: "array", items: { type: "string" }, description: "Evidence anchors: up to 5 file paths that implement this capability (e.g. ['src/cv/transformations.py']). Paths only, never code. They make cross-project leaps actionable ('see acme: src/cv/…') and ground the Atlas dossier." },
                 },
                 required: ["tag"],
@@ -487,6 +495,8 @@ const TOOLS: Tool[] = [
             tag: z.string().max(120),
             descriptor: z.string().max(800).optional(),
             modality: z.array(z.string().max(40)).max(8).optional(),
+            mechanism: z.string().max(800).optional(),
+            maturity: z.enum(["hand-rolled", "library-backed", "mixed"]).optional(),
             paths: z.array(z.string().max(200)).max(5).optional(),
           }),
         ])).max(40),
