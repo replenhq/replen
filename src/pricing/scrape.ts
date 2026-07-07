@@ -50,11 +50,21 @@ export function diffPricing(
       // stable secondary numbers (add-ons, overages) that didn't move.
       const added = c.to.filter((x) => !c.from.includes(x));
       const removed = c.from.filter((x) => !c.to.includes(x));
-      if (removed.length === 1 && added.length === 1) return `${cap}: ${removed[0]} → ${added[0]}`;
+      if (removed.length === 1 && added.length === 1) {
+        // Guard against the classic scrape artifact: a paid plan "dropping" to
+        // $0.00 (e.g. "Standard: $2,000/mo → $0.00") is almost always a failed
+        // parse or a misdetected free tier, not a real price change. Suppress it.
+        // A genuine paid→free move shows up as the plan's amounts disappearing
+        // entirely, not as a single non-zero→$0 delta.
+        const isZero = (s: string) => /^\$?0(\.0+)?\s*(\/|$)/.test(s.trim());
+        if (!isZero(removed[0]) && isZero(added[0])) return "";
+        return `${cap}: ${removed[0]} → ${added[0]}`;
+      }
       if (!removed.length && added.length) return `${cap}: now ${added.slice(0, 3).join(" / ")}`;
       if (!added.length && removed.length) return `${cap}: ${removed.slice(0, 3).join(" / ")} removed`;
       return `${cap}: ${removed.slice(0, 3).join("/")} → ${added.slice(0, 3).join("/")}`;
-    });
+    }).filter((b) => b);
+    if (bits.length === 0) return null;
     return { summary: bits.join("; ").slice(0, 200), plan: changed.length === 1 ? changed[0].plan : null };
   }
   if (changed.length > 3) {

@@ -21,6 +21,7 @@ import { loadModalitySuppressions, loadTriageContext, loadDeferRechecks, normFac
 import { suggestUpgrades, suggestPracticeTransfer, coveredCapabilities } from "@/lib/keystone";
 import { computeLeaps, type Leap } from "@/graph/leaps";
 import { pricingPs, pricingUserTokens } from "@/pricing/surface";
+import { declaredToolTokens } from "@/lib/detect-tokens";
 import { announcementPs } from "@/announcements/surface";
 import { deadlinePs } from "@/announcements/deadlines";
 import { alternativesFor, type Alternative } from "@/lib/alternatives";
@@ -1522,7 +1523,17 @@ export async function GET(req: Request) {
     }
     return [...stake, ...picked];
   };
-  const candidatesOut = mmrReorder(candidatesPreMmr).slice(0, limit);
+  // First-run calm cap. The first-run window is wide (months) so a brand-new
+  // project's very first match has backlog to pull from, but that same width
+  // means a broad repo can clear dozens of candidates at once — a firehose that
+  // breaks the "1-3 matches/month, silence beats a weak match" contract on the
+  // exact surface (the first impression) where calm matters most. Cap the FIRST
+  // surfacing to a small count regardless of window width; the steady (~month)
+  // window is already calm and keeps the full limit. Env-tunable.
+  const FIRSTRUN_SURFACE_LIMIT = Math.min(50, Math.max(1, parseInt(process.env.REPLEN_FIRSTRUN_SURFACE_LIMIT ?? "5", 10) || 5));
+  const isFirstRunSurface = windowReason === "first-run-project" || windowReason === "first-run";
+  const effectiveLimit = isFirstRunSurface ? Math.min(limit, FIRSTRUN_SURFACE_LIMIT) : limit;
+  const candidatesOut = mmrReorder(candidatesPreMmr).slice(0, effectiveLimit);
 
   // Phase 7 — capability adjacency. When the direct results are sparse, append
   // exploratory suggestions: the best library from a capability the project
@@ -1861,9 +1872,10 @@ export async function GET(req: Request) {
   if (scopedProject) {
     try {
       const userTokens = pricingUserTokens(productDeps, userTagSet);
+      const declaredTokens = declaredToolTokens(productDeps, userTagSet);
       const [pricing, announcement, deadline] = await Promise.all([
         pricingPs(auth.userId, userTokens),
-        announcementPs(auth.userId, userTokens),
+        announcementPs(auth.userId, userTokens, declaredTokens),
         deadlinePs(auth.userId, userTokens),
       ]);
       // Keystone upgrade — a solution this project uses has a better_than edge.

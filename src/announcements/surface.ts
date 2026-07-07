@@ -42,7 +42,7 @@ const TITLE_MATCH_BLOCKLIST = new Set([
 // is vendor-anchored; null for aggregator title-matches (no single tool).
 export type AnnouncementPs = { eventId: number; line: string; severity: Severity; critical: boolean; token: string | null };
 
-export async function announcementPs(userId: number, userTokens: Set<string>): Promise<AnnouncementPs | null> {
+export async function announcementPs(userId: number, userTokens: Set<string>, declaredTokens: Set<string>): Promise<AnnouncementPs | null> {
   if (userTokens.size === 0) return null;
   const since = new Date(Date.now() - SURFACE_WINDOW_DAYS * 24 * 3600 * 1000);
   const events = await db
@@ -83,7 +83,15 @@ export async function announcementPs(userId: number, userTokens: Set<string>): P
       if (AGGREGATOR_CATEGORY.test(e.category ?? "")) {
         if (SEVERITY_ORDER[e.severity as Severity] < SEVERITY_ORDER.High) return false;
         const title = ` ${e.title.toLowerCase()} `;
-        return titleTokens.some((t) => new RegExp(`\\b${t.replace(/[^a-z0-9]/g, "\\$&")}\\b`, "i").test(title));
+        // Aggregator security news is gated to EXACT declared identities: the
+        // matched title word must be a dependency or tag the user actually
+        // declares, not a loose word-part. This kills generic-headline collisions
+        // (a "csrf" fragment matching "CSRF in Dropzone") while still surfacing an
+        // advisory that names a real dep/tag. Version-confirmed matches (inRepos)
+        // and vendor-anchored events (the else branch below) are unaffected.
+        return titleTokens.some((t) =>
+          declaredTokens.has(t) &&
+          new RegExp(`\\b${t.replace(/[^a-z0-9]/g, "\\$&")}\\b`, "i").test(title));
       }
       let toks: string[] = [];
       try { toks = JSON.parse(e.detectTokens ?? "[]"); } catch { /* */ }

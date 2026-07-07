@@ -66,3 +66,25 @@ export function userToolTokens(deps: Iterable<string>, tags: Iterable<string>): 
   }
   return tokens;
 }
+
+// Stricter counterpart to userToolTokens: EXACT declared identities only — full
+// dep names, scoped-package owners (@supabase/x → supabase), and tags — with NO
+// hyphen/word-part splitting. Used to gate aggregator SECURITY headlines so a
+// generic word-part ("csrf" split out of "csrf-request-validator") can't match a
+// "CSRF in Dropzone" headline; only a dependency or tag the user ACTUALLY
+// declares surfaces an advisory. Version-confirmed dep matches are unaffected.
+export function declaredToolTokens(deps: Iterable<string>, tags: Iterable<string>): Set<string> {
+  const tokens = new Set<string>();
+  for (const t of tags) {
+    const tl = String(t).toLowerCase();
+    if (tl) tokens.add(tl);
+  }
+  for (const d of deps) {
+    const dl = String(d).toLowerCase();
+    if (!dl) continue;
+    tokens.add(dl);
+    const scoped = dl.match(/^@([^/]+)\//);
+    if (scoped) tokens.add(scoped[1]);
+  }
+  return tokens;
+}
