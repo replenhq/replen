@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "11";
+export const INTEGRATION_VERSION = "12";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -50,8 +50,10 @@ ground/re-ground this turn, don't start another (both \`replen_onboard_state\` a
 - **No entry for this repo (not in the \`projects\` list):** it isn't registered
   with Replen. Stay SILENT — Replen deliberately doesn't nag in unregistered or
   throwaway directories, so \`replen_match\` will also return an empty footnote
-  here. (The user registers real repos with \`npx replen sync-projects\`; on Claude
-  Code, new repos self-register at session start.)
+  here. (Real repos self-register on session start on every host — the MCP
+  registers the repo's identity in the background the first time you open it, so
+  matching works from the next session; the user can also force it now with
+  \`npx replen sync-projects\`.)
 - **\`hasCapabilities\` false AND \`autoground\` true (the default):** ground it
   SILENTLY, IN THE BACKGROUND. Spawn a background subagent (the Task tool on
   Claude Code; an equivalent background/parallel agent on Cursor / Codex / other

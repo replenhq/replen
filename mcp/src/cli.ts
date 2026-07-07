@@ -9,6 +9,7 @@ import { registerTools } from "./server.js";
 import { runSetup } from "./setup.js";
 import { detectCurrentRepo } from "./repo-detect.js";
 import { refreshAtlasVaultInBackground } from "./atlas-sync.js";
+import { autoRegisterCwdRepoInBackground } from "./auto-register.js";
 
 async function main() {
   if (process.argv[2] === "setup") {
@@ -93,6 +94,12 @@ Commands:
   // Keep the local Atlas tiles (~/.replen/atlas/) fresh in the background —
   // fire-and-forget, debounced (twice a day max), never blocks the transport.
   refreshAtlasVaultInBackground(cfg);
+
+  // Self-register the spawn repo's identity if Replen hasn't seen it yet. The
+  // CC SessionStart hook already does this on Claude Code; doing it here makes
+  // it host-agnostic (Codex / Cursor / Gemini), so a brand-new repo no longer
+  // needs a manual `npx replen sync-projects`. Silent, bounded, cache-gated.
+  autoRegisterCwdRepoInBackground(cfg);
 }
 
 main().catch((e) => {
