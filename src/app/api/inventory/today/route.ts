@@ -115,6 +115,10 @@ export async function GET(req: Request) {
   // auto-reground. Validated as a hex SHA; ignored otherwise.
   const localHead = (() => { const h = url.searchParams.get("head")?.trim().toLowerCase(); return h && /^[0-9a-f]{7,64}$/.test(h) ? h : null; })();
   const REGROUND_THROTTLE_HOURS = Math.max(0, parseInt(process.env.REPLEN_REGROUND_THROTTLE_HOURS ?? "24", 10) || 24);
+  // Silently upgrade doc-inferred profiles (README-derived, never code-grounded)
+  // to grounded, treating a shallow profile like drift. Default ON; env-kill
+  // without a redeploy if the background grounding ever churns.
+  const UPGRADE_DOC_INFERRED = process.env.REPLEN_UPGRADE_DOC_INFERRED !== "0";
   // Account-level auto-ground switch. When ON (default), an unprofiled repo is
   // grounded SILENTLY in a background subagent (driven by the injected
   // instruction off replen_onboard_state), so the needsOnboarding offer below
@@ -2157,8 +2161,12 @@ export async function GET(req: Request) {
   // needsOnboarding instead (handled far above). Gated by the account opt-out
   // (`autoground`, computed at the top) — when off, we never emit needsReground
   // and the client reverts to the consent offer for onboarding.
+  // At this point a set scopedProject is PROFILED — the facetEmbeddings==null
+  // (truly-unprofiled) case returned needsOnboarding far above — so passing
+  // upgradeDocInferred only ever upgrades a doc-inferred (weak-facet) repo, never
+  // a brand-new one. localHead gates it to repos actually checked out locally.
   const regroundDecision = scopedProject && autoground
-    ? needsReground({ summaryJson: scopedProject.summaryJson ?? null, localHead, throttleHours: REGROUND_THROTTLE_HOURS })
+    ? needsReground({ summaryJson: scopedProject.summaryJson ?? null, localHead, throttleHours: REGROUND_THROTTLE_HOURS, upgradeDocInferred: UPGRADE_DOC_INFERRED })
     : { reground: false, reason: !scopedProject ? "no-scope" : "opted-out" };
 
   return NextResponse.json(

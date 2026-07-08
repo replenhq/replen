@@ -99,6 +99,22 @@ describe("needsReground", () => {
     expect(needsReground({ summaryJson: doc }).reason).toBe("not-grounded");
   });
 
+  it("upgrades a doc-inferred row to grounded when opted in and checked out locally", () => {
+    const doc = JSON.stringify({ capabilities: [{ tag: "x", descriptor: "readme guess", modality: [], provenance: "inferred" }] });
+    const d = needsReground({ summaryJson: doc, localHead: "abcdef1234567890", upgradeDocInferred: true });
+    expect(d.reground).toBe(true);
+    expect(d.reason).toBe("doc-inferred");
+  });
+
+  it("does NOT upgrade a doc-inferred row without a local checkout (nothing to read)", () => {
+    const doc = JSON.stringify({ capabilities: [{ tag: "x", descriptor: "readme guess", modality: [], provenance: "inferred" }] });
+    expect(needsReground({ summaryJson: doc, upgradeDocInferred: true }).reason).toBe("not-grounded");
+  });
+
+  it("does NOT upgrade a truly-unprofiled row (no summary) even when opted in", () => {
+    expect(needsReground({ summaryJson: null, localHead: "abcdef1234567890", upgradeDocInferred: true }).reason).toBe("not-grounded");
+  });
+
   it("schema-stale + not throttled for a legacy grounded row (no fingerprint)", () => {
     const legacy = JSON.stringify({ capabilities: [GROUNDED_CAP] });
     const d = needsReground({ summaryJson: legacy });

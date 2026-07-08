@@ -583,8 +583,24 @@ export function needsReground(args: {
   localHead?: string | null;
   now?: number;
   throttleHours?: number;
+  upgradeDocInferred?: boolean;
 }): { reground: boolean; reason: string } {
-  if (!summaryIsGrounded(args.summaryJson)) return { reground: false, reason: "not-grounded" };
+  if (!summaryIsGrounded(args.summaryJson)) {
+    // Doc-inferred (profiled but shallow): the row has capabilities from the
+    // README/doc summarizer, never a code read, so its descriptors + mechanism
+    // + maturity are weak and matching runs on the low-signal path with nothing
+    // ever nudging an upgrade. Treat that as a ONE-TIME upgrade to grounded,
+    // gated on the repo being checked out locally (`localHead` present) so the
+    // agent can actually read the source. The client does a FULL replace-
+    // grounding on this reason (merge would keep the weak descriptors — see the
+    // capabilities route's merge branch). Once the upgrade lands the row is
+    // grounded and the normal schema/drift path below takes over. A truly-
+    // unprofiled row (no summaryJson) is needsOnboarding's job, not this.
+    if (args.upgradeDocInferred && args.localHead && args.summaryJson) {
+      return { reground: true, reason: "doc-inferred" };
+    }
+    return { reground: false, reason: "not-grounded" };
+  }
   let g: ProjectSummary["grounding"] | undefined;
   try { g = (JSON.parse(args.summaryJson as string) as ProjectSummary).grounding; } catch { /* legacy grounded row, no fingerprint */ }
   const now = args.now ?? Date.now();

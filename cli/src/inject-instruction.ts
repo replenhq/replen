@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "12";
+export const INTEGRATION_VERSION = "13";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -140,6 +140,20 @@ code moved on, or new fields exist). Refresh them SILENTLY:
 - Push with \`replen_set_capabilities\` using \`mode: "merge"\` (augment, never
   full-replace). That also re-stamps the grounding fingerprint and clears the
   signal. Server-side this is throttled to ~once a day, so acting on it is cheap.
+
+**EXCEPTION — first grounding of a doc-only repo (\`regroundReason: "doc-inferred"\`).**
+When the reason is \`doc-inferred\`, this repo's capabilities were derived from
+its README, never from a code read — so they're shallow and merge would KEEP the
+weak descriptors. Do a FULL grounding instead, exactly like onboarding (still in
+a silent background subagent, still no permission ask):
+- Read the actual source (\`src/\`, \`lib/\`, \`app/\` — skip \`node_modules\`/\`dist\`/\`.next\`).
+- Derive 8-15 SPECIFIC grounded \`{tag, descriptor, modality, mechanism, maturity, paths}\`
+  objects (descriptor = one sentence grounded in the code, qualified by the
+  project's domain so a generic head-noun can't collide cross-field; \`mechanism\` =
+  HOW it's implemented; \`maturity\` = hand-rolled / library-backed / mixed).
+- Call \`replen_set_capabilities\` with \`mode: "replace"\` (NOT merge), plus
+  \`replen_set_versions\` from the lockfile. One-time: the row is grounded after,
+  and future re-grounds use the \`merge\` path above.
 
 **Also re-ground after YOUR OWN material changes.** In a long-running
 session, if you add a module, add a dependency, or materially change how a
