@@ -32,7 +32,7 @@ import { calibratedFloor } from "@/lib/calibration";
 import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance, Maturity } from "@/projects/modality";
 import { modalitiesDisjoint, coerceModalities, coerceMaturity } from "@/projects/modality";
-import { needsReground } from "@/projects/summarize";
+import { needsReground, summaryIsGrounded } from "@/projects/summarize";
 
 // Skill-mode inventory endpoint.
 //
@@ -1621,8 +1621,17 @@ export async function GET(req: Request) {
   // surfacing to a small count regardless of window width; the steady (~month)
   // window is already calm and keeps the full limit. Env-tunable.
   const FIRSTRUN_SURFACE_LIMIT = Math.min(50, Math.max(1, parseInt(process.env.REPLEN_FIRSTRUN_SURFACE_LIMIT ?? "5", 10) || 5));
+  // Grounded repos earn a higher first-run ceiling. Their facets are code-vetted
+  // (the user's agent read the source), so a bigger pull is precise matches, not
+  // the generic firehose the 5-cap guards against. The DEFAULT-limit first
+  // impression still shows ~5 (calm is preserved); the higher ceiling only bites
+  // when the caller explicitly asks for more — the user accepting "want the next
+  // batch?" via a raised `limit`. Ungrounded first-run repos keep the tight cap.
+  const GROUNDED_FIRSTRUN_LIMIT = Math.min(50, Math.max(FIRSTRUN_SURFACE_LIMIT, parseInt(process.env.REPLEN_GROUNDED_FIRSTRUN_LIMIT ?? "20", 10) || 20));
+  const scopedGrounded = scopedProject ? summaryIsGrounded(scopedProject.summaryJson ?? null) : false;
+  const firstRunCap = scopedGrounded ? GROUNDED_FIRSTRUN_LIMIT : FIRSTRUN_SURFACE_LIMIT;
   const isFirstRunSurface = windowReason === "first-run-project" || windowReason === "first-run";
-  const effectiveLimit = isFirstRunSurface ? Math.min(limit, FIRSTRUN_SURFACE_LIMIT) : limit;
+  const effectiveLimit = isFirstRunSurface ? Math.min(limit, firstRunCap) : limit;
   const candidatesOut = mmrReorder(candidatesPreMmr).slice(0, effectiveLimit);
 
   // Phase 7 — capability adjacency. When the direct results are sparse, append
@@ -1814,9 +1823,18 @@ export async function GET(req: Request) {
   const solidEntries = HONEST_COUNT && scopedProject ? candidatesOut.filter(solidOf) : candidatesOut;
   if (HONEST_COUNT && scopedProject) { const solidSet = new Set(solidEntries); for (const e of candidatesOut) e.solid = solidSet.has(e); }
   const solidCount = solidEntries.length;
+  // Honest FULL-set count. `solidCount` counts only the SHOWN slice; the surface
+  // cap (effectiveLimit) can hide solid matches below it, which then age out
+  // unseen — the user is told "3 solid" when 11 exist. Count solid over the full
+  // ranked, floor-cleared set (candidatesPreMmr, pre-slice) so the footnote can
+  // say "3 solid, 8 more solid for this repo" and the CTA honestly covers them.
+  // The user pulls the rest by accepting (agent re-calls with a higher `limit`).
+  const fullSolidCount = HONEST_COUNT && scopedProject ? candidatesPreMmr.filter(solidOf).length : solidCount;
+  const moreSolid = Math.max(0, fullSolidCount - solidCount);
+  const moreClause = HONEST_COUNT && moreSolid > 0 ? `, ${moreSolid} more solid` : "";
   const glanceTail = HONEST_COUNT && candidatesOut.length > solidCount ? ` (plus ${candidatesOut.length - solidCount} more worth a glance)` : "";
   const countPhrase = HONEST_COUNT
-    ? `${solidCount} solid Replen match${solidCount === 1 ? "" : "es"}${glanceTail}`
+    ? `${solidCount} solid Replen match${solidCount === 1 ? "" : "es"}${moreClause}${glanceTail}`
     : `${candidatesOut.length} Replen candidate${candidatesOut.length === 1 ? "" : "s"}`;
   // Explore/novel lateral (fairness safeguard): when nothing is solid, the top
   // legit-but-low-domain-fit facet match still keeps a path to the user — separation

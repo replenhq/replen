@@ -33,8 +33,14 @@ Call:
 
 ```bash
 curl -sS -H "x-digest-token: $TOKEN" \
-  "$BASE/api/inventory/today?repo=<owner/name>&limit=10"
+  "$BASE/api/inventory/today?repo=<owner/name>&limit=5"
 ```
+
+Keep the first pull small (`limit=5`) — the footnote's count is honest about
+the FULL solid set even when only ~5 are returned (it will say e.g. "5 solid,
+3 more solid"), so a small first pull stays calm without hiding anything. The
+"next batch" is an explicit higher-limit re-call (see Step 3), not a bigger
+first pull.
 
 Do NOT pass `days`. Omitting it lets the server pick the window adaptively:
 a wide first-run window for a repo that's never surfaced a match, then a
@@ -59,11 +65,21 @@ If 1+ candidates, continue.
 
 ### Step 3: Per-candidate analysis
 
-**Triage the `solid` candidates first** (cap at 5). If there are more than 5
+**Triage the `solid` candidates first** (cap at 5 per pass). If there are more than 5
 solid, take the top 5 by `whyShortlisted` strength + stars + recency. The
 non-`solid` "worth a glance" entries are optional, skim them only if the solid
 set is thin or the user asks. A low-domain-fit lateral there can still be a real
 port/cherry-pick, so don't dismiss them blindly, but they're not the headline.
+
+**The next batch (paging).** The footnote counts solid matches over the FULL set,
+not just the shown slice, so it may say e.g. "3 solid, 8 more solid for this repo".
+The default pull only returns the top few (calm first impression). When the user
+accepts and wants the rest, re-call the same endpoint with a higher `limit` (up to
+20): `?repo=<owner/name>&limit=20`. That returns the fuller solid set in one list;
+triage the ones you haven't shown yet, still 5 at a time, offering the next 5 after
+each pass. Don't re-relay the footnote on the follow-up call: you already surfaced
+it, this call is just to fetch more candidates. Grounded repos return their full
+solid set on a raised `limit`; ungrounded ones stay capped tighter by design.
 
 For each candidate, do this loop:
 
