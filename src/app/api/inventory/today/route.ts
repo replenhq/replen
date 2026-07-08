@@ -27,6 +27,7 @@ import { deadlinePs } from "@/announcements/deadlines";
 import { alternativesFor, type Alternative } from "@/lib/alternatives";
 import { loadTasteVector, tasteBoost } from "@/lib/taste";
 import { loadOutcomePriors, priorBoost, sourcePrefix } from "@/lib/outcome-priors";
+import { learnedRankEnabled, loadActiveRankerModel, learnedRankScore } from "@/lib/learned-ranker";
 import { calibratedFloor } from "@/lib/calibration";
 import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance, Maturity } from "@/projects/modality";
@@ -481,6 +482,14 @@ export async function GET(req: Request) {
     : { waypointLabels: new Set<string>(), unfilledLabels: new Set<string>(), relatedSlugs: [] };
   const taste = scopedProject ? await loadTasteVector(auth.userId, scopedProjectId, hints.relatedSlugs) : null;
   const outcomePriors = await loadOutcomePriors(auth.userId);
+  // Learned ranker (workstream A, slice 2). Flag-gated + cold-start-safe: only
+  // loaded when REPLEN_LEARNED_RANK is on AND an active model exists for this
+  // user (personal, else global pooled). Null ⇒ the hand-tuned rank below is
+  // untouched. When present it re-scores every cosine-bearing entry just before
+  // the merged sort (see below), replacing the additive rank as the sort key;
+  // the eligibility floor, competitor suppression, isSolid gate, diversity/MMR
+  // cap and first-run cap are all upstream/independent and stay identical.
+  const learnedModel = learnedRankEnabled() ? await loadActiveRankerModel(auth.userId) : null;
   const WAYPOINT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_WAYPOINT_BOOST ?? "0.02"));
   const BLINDSPOT_BOOST = Math.max(0, parseFloat(process.env.REPLEN_BLINDSPOT_BOOST ?? "0.02"));
   const GOAL_BOOST = Math.max(0, parseFloat(process.env.REPLEN_GOAL_BOOST ?? "0.04"));
@@ -1513,6 +1522,27 @@ export async function GET(req: Request) {
     if (notes.length) e.priorContext = notes.join("; ");
   };
   for (const e of [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]) annotatePrior(e);
+
+  // Learned re-rank (workstream A, slice 2). When an active model is loaded,
+  // overwrite entryRank for EVERY cosine-bearing entry across all streams with
+  // the model's [0,1] score, so the merged sort + MMR relevance term below run
+  // on one consistent scale (sigmoid), not a mix of sigmoid own-pool and cosine
+  // catalogue. Entries without a cosine keep sinking to -1 as before. `covered`
+  // uses the same coveredCaps membership the trainer logged; stars come from the
+  // repos join now attached to each entry. Displayed cosine is untouched — only
+  // ordering shifts. No model (flag off / cold start) ⇒ this loop is skipped and
+  // the hand-tuned ranks set above stand.
+  if (learnedModel) {
+    for (const e of [...ownOut, ...feedOut, ...promotedOut, ...catalogueOut]) {
+      if (e.cosine == null) continue;
+      entryRank.set(e, learnedRankScore(learnedModel, {
+        cosine: e.cosine,
+        facet: e.matchedFacet,
+        covered: isCovered(e.matchedFacet),
+        stars: e.stars,
+      }));
+    }
+  }
 
   // Merge own + feed (Pattern A/B) + promoted + catalogue, rank: dependency /
   // standard stake matches first ("a thing you depend on / a standard you

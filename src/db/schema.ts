@@ -1618,3 +1618,26 @@ export const matchFeatures = sqliteTable(
   },
   (t) => ({ byUserName: index("idx_match_features_user_name").on(t.userId, t.fullName) }),
 );
+
+// Learned ranker weights (workstream A). A logistic model over the
+// match_features feature vector, persisted so the serving path scores candidates
+// with a cheap dot-product (no LLM). userId null = the cross-user pooled GLOBAL
+// model (k-anon, phase 2); a non-null userId is that user's personal model. At
+// most one row per userId is `active`; the trainer flips it after a
+// promote-if-better check. Ships with the engine — a self-host trains its own.
+export const rankerWeights = sqliteTable(
+  "ranker_weights",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }), // null = global pooled model
+    featureNames: text("feature_names").notNull(),        // JSON string[] — feature order
+    weights: text("weights").notNull(),                   // JSON number[] — logistic weights, bias last
+    standardization: text("standardization").notNull(),   // JSON {mean:number[], sd:number[]}
+    auc: real("auc"),                                     // holdout (LOO) AUC at train time
+    nPos: integer("n_pos"),
+    nNeg: integer("n_neg"),
+    trainedAt: integer("trained_at", { mode: "timestamp" }).notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({ byUserActive: index("idx_ranker_weights_user_active").on(t.userId, t.active) }),
+);
