@@ -886,7 +886,7 @@ export async function GET(req: Request) {
   // on just shipped"): it bypasses the relevance floor and sorts above semantic
   // matches. We intersect each stack-watch candidate's tagged package names
   // (carried in its topics) with this project's parsed dependencies.
-  const scopedProjectDeps = parseTechSummaryDeps(scopedProject?.techSummary ?? null);
+  const scopedProjectDeps = new Set<string>([...parseTechSummaryDeps(scopedProject?.techSummary ?? null), ...parseDepVersionNames(scopedProject?.depVersions ?? null)]);
 
   type ScoredRow = CandidateRow & {
     whyShortlisted: string;

@@ -23,6 +23,14 @@ import { auth } from "@/lib/firebase/client";
 
 const EMAIL_STORAGE_KEY = "replen:emailForSignIn";
 
+// GitHub OAuth is DISABLED for now. GitHub doesn't set Firebase's
+// email_verified claim, so self-serve GitHub signup is refused server-side
+// (see isOAuthVerified in src/lib/auth/current-user.ts) and dead-ends at an
+// error. Google + email-link stay fully self-serve. The button + oauthSignIn
+// path are kept intact below, just not rendered. Re-enable ONLY after adding a
+// server-side GitHub-API email-verification check (then flip this to true).
+const GITHUB_OAUTH_ENABLED = false;
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -125,6 +133,7 @@ export default function LoginPage() {
             >
               <GoogleIcon /> {busy === "google" ? "Opening…" : "Continue with Google"}
             </button>
+            {GITHUB_OAUTH_ENABLED && (
             <button
               type="button"
               onClick={() => oauthSignIn("github")}
@@ -134,6 +143,7 @@ export default function LoginPage() {
             >
               <GithubIcon /> {busy === "github" ? "Opening…" : "Continue with GitHub"}
             </button>
+            )}
           </div>
           <div style={{ textAlign: "center", margin: "18px 0 12px", color: "var(--faint, #888)", fontSize: 12 }}>
             or
@@ -171,7 +181,7 @@ export default function LoginPage() {
               onClick={() => setMode("oauth")}
               style={{ background: "none", border: "none", color: "#06f", cursor: "pointer", padding: 0, fontSize: 13 }}
             >
-              ← back to Google / GitHub
+              ← back to Google
             </button>
           </p>
         </>
