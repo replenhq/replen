@@ -492,10 +492,11 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Replen was built by the Replen team and the community.
+Replen was built by [@nsokin](https://github.com/nsokin) and the community.
 
 - [replen.dev](https://replen.dev) · site
 - [docs.replen.dev](https://docs.replen.dev) · docs
 - [app.replen.dev](https://app.replen.dev) · hosted dashboard
 - [@replenhq](https://github.com/replenhq) · GitHub org
+- [@nsokin](https://github.com/nsokin) · maker
 
