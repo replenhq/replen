@@ -6,6 +6,7 @@ import { allowAction, WRITE_LIMIT, WRITE_WINDOW_MS } from "@/lib/rate-limit";
 import { capabilitiesFromDeps, mergeCapabilityTags } from "@/projects/capabilities";
 import { parseTechSummaryDeps } from "@/fetchers/stack-watch/registry";
 import { facetInputsFor, embedFacets } from "@/projects/facets";
+import { buildUserGraph } from "@/graph/build";
 import { serialiseFacetEmbeddings } from "@/lib/embeddings";
 import { PROMPT_VERSION, GROUNDING_SCHEMA_VERSION, reconcileCapabilities, summaryIsGrounded, type ProjectSummary, type VaultConcept } from "@/projects/summarize";
 import { coerceModalities, coerceMaturity, inferCapabilityModality, type CapabilitySpec } from "@/projects/modality";
@@ -312,6 +313,18 @@ export async function POST(req: Request) {
     facetEmbeddings: facets.length > 0 ? serialiseFacetEmbeddings({ hash, facets }) : project.facetEmbeddings,
     updatedAt: new Date(),
   }).where(eq(schema.projectProfiles.id, project.id));
+
+  // Refresh the Atlas graph now so the just-grounded capabilities appear in the
+  // knowledge graph (webapp + `replen atlas` vault) immediately, instead of only
+  // after the next pipeline run. renderAtlas reads capability nodes from
+  // graphNodes/graphEdges, which the capabilities write above does NOT touch —
+  // only buildUserGraph does. Fire-and-forget + force (mirrors atlas/actions.ts):
+  // the rebuild is mechanical (cosine over already-built facets, no LLM), the
+  // persist is transactional (concurrency-safe), and it's non-fatal — matching
+  // still works without the graph, and the next run-once rebuilds regardless.
+  void buildUserGraph(auth.userId, { force: true }).catch((e) =>
+    console.warn(`[capabilities] graph rebuild after grounding failed (user=${auth.userId}):`, e),
+  );
 
   return NextResponse.json(
     { ok: true, project: project.slug, capabilities: merged, facetsBuilt: facets.length },
