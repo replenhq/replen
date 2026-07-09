@@ -1509,6 +1509,42 @@ export const adminAudit = sqliteTable(
   }),
 );
 
+// Admin 2FA — TOTP factor (Google Authenticator fallback). One row per admin
+// user. `confirmedAt` is null until the admin verifies a code during
+// enrollment, so a half-set-up secret can't gate access. Admin-only: regular
+// hosted users never get a row here.
+export const adminTotp = sqliteTable(
+  "admin_totp",
+  {
+    userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(), // base32 RFC 4648
+    confirmedAt: integer("confirmed_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+);
+
+// Admin 2FA — WebAuthn passkey factor (primary; Face/Touch ID). Multiple
+// credentials per admin (e.g. laptop + phone). publicKey + counter are the
+// verification material; counter is bumped on each successful assertion to
+// detect cloned authenticators.
+export const adminPasskeys = sqliteTable(
+  "admin_passkeys",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull().unique(), // base64url
+    publicKey: text("public_key").notNull(), // base64url COSE public key
+    counter: integer("counter").notNull().default(0),
+    transports: text("transports"), // JSON array of AuthenticatorTransport
+    label: text("label"), // human label (device nickname)
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+  },
+  (t) => ({
+    idxUser: index("idx_admin_passkeys_user").on(t.userId),
+  }),
+);
+
 // Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
 // so the calm cadence holds: at most one leap per project per
 // REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.

@@ -1,6 +1,6 @@
 import { db, schema } from "@/db/client";
 import { desc, gte, sql } from "drizzle-orm";
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // and this week?" straight off brief_log + alert_log.
 
 export default async function DeliveryAdmin() {
-  await requireAdmin();
+  await requireAdmin2fa();
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 

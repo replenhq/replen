@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/current-user";
+import { admin2faVerified } from "@/lib/admin/2fa";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,10 @@ const NAV: Array<[string, string]> = [
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const admin = await requireAdmin();
+  // Nav only appears once 2FA has been passed this session, so the challenge
+  // and enrolment pages (reached before verification) don't show links that
+  // would just bounce back to /admin/verify.
+  const verified = await admin2faVerified(admin.id);
   return (
     <div style={{ maxWidth: 1120, margin: "0 auto", padding: "0 16px 48px" }}>
       <header
@@ -34,13 +39,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         }}
       >
         <strong style={{ fontSize: 15 }}>Replen admin</strong>
-        <nav style={{ display: "flex", gap: 14, fontSize: 14 }}>
-          {NAV.map(([href, label]) => (
-            <Link key={href} href={href}>
-              {label}
-            </Link>
-          ))}
-        </nav>
+        {verified && (
+          <nav style={{ display: "flex", gap: 14, fontSize: 14 }}>
+            {NAV.map(([href, label]) => (
+              <Link key={href} href={href}>
+                {label}
+              </Link>
+            ))}
+            <Link href="/admin/security" style={{ color: "var(--faint,#888)" }}>2FA</Link>
+          </nav>
+        )}
         <span className="meta" style={{ marginLeft: "auto", fontSize: 12 }}>
           {admin.email}
         </span>

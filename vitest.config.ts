@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoSrc = process.env.REPLEN_SRC ?? path.resolve(here, "src");
 
 export default defineConfig({
-  resolve: { alias: { "@": repoSrc } },
+  resolve: { alias: { "@": repoSrc, "server-only": path.resolve(here, "tests/stubs/server-only.ts") } },
   test: {
     environment: "node",
     include: ["**/*.property.test.ts", "tests/**/*.test.ts"],

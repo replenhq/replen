@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 
@@ -85,7 +85,7 @@ function parseLines(text: string): Entry[] {
 }
 
 export default async function AdminErrorsPage() {
-  await requireAdmin();
+  await requireAdmin2fa();
   if (!LOG_FILE) {
     return (
       <main style={{ maxWidth: 960, margin: "32px auto", padding: "0 16px" }}>

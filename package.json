@@ -20,6 +20,8 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.2",
     "cheerio": "^1.0.0",
     "drizzle-orm": "^0.45.1",
     "firebase": "^12.10.0",

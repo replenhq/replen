@@ -1,7 +1,7 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 import { sendInviteEmail } from "@/email/invite";
 import { recordAdminAction } from "@/lib/admin/audit";
 import { deleteUserAndAllData } from "@/lib/account-delete";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const count = async (q: Promise<{ c: number } | undefined>) => Number((await q)?.c ?? 0);
 
 export default async function AdminPage() {
-  await requireAdmin();
+  await requireAdmin2fa();
   const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
 
   // Signup tracker: rolling counts + daily cap state. The cap matters
@@ -39,7 +39,7 @@ export default async function AdminPage() {
 
   async function addUser(form: FormData) {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     const rawEmail = (form.get("email") as string || "").trim();
     if (!rawEmail) return;
     const email = rawEmail.toLowerCase();
@@ -60,14 +60,14 @@ export default async function AdminPage() {
 
   async function resendInvite(email: string) {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
     await sendInviteEmail(email, adminUser.email);
   }
 
   async function setRole(userId: number, role: "admin" | "user") {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     if (role !== "admin" && role !== "user") throw new Error("invalid role");
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
     const target = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
@@ -86,7 +86,7 @@ export default async function AdminPage() {
 
   async function setStatus(userId: number, status: "active" | "pending" | "suspended") {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     if (status !== "active" && status !== "pending" && status !== "suspended") throw new Error("invalid status");
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
     const target = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
@@ -103,7 +103,7 @@ export default async function AdminPage() {
 
   async function setSharedLlm(userId: number, value: boolean) {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
     const target = await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.id, userId)).get();
     await db.update(schema.users).set({ canUseSharedLlm: value }).where(eq(schema.users.id, userId));
@@ -116,7 +116,7 @@ export default async function AdminPage() {
   // active admin.
   async function deleteAccount(userId: number) {
     "use server";
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin2fa();
     if (!Number.isInteger(userId) || userId <= 0) throw new Error("invalid userId");
     const target = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
     if (!target) return;

@@ -262,6 +262,15 @@ export function linkSigningKey(): Buffer {
   return Buffer.from(hkdfSync("sha256", getMasterKey(), Buffer.alloc(0), Buffer.from("replen-link-sign-v1"), 32));
 }
 
+// Domain-separated HMAC key for admin 2FA cookies (the WebAuthn/TOTP challenge
+// cookie + the "2FA passed this session" cookie). Same HKDF pattern as
+// linkSigningKey with a distinct info tag, so admin-2FA cookie signing never
+// shares key material with link signing or at-rest encryption. Reuses the
+// master ENCRYPTION_KEY (already required in prod) — no separate secret to set.
+export function admin2faSigningKey(): Buffer {
+  return Buffer.from(hkdfSync("sha256", getMasterKey(), Buffer.alloc(0), Buffer.from("replen-admin-2fa-v1"), 32));
+}
+
 // The pre-domain-separation signing key (the raw master key string). Verifiers
 // accept it so email links signed before the switch keep working until those
 // emails age out. Safe: it is the same secret master, just the un-derived form.

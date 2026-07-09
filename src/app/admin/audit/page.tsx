@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 import { recentAdminActions } from "@/lib/admin/audit";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ function actionColor(action: string): string {
 }
 
 export default async function AuditAdmin() {
-  await requireAdmin();
+  await requireAdmin2fa();
   const rows = await recentAdminActions(300);
 
   return (

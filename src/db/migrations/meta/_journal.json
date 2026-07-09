@@ -575,6 +575,13 @@
       "when": 1783600150773,
       "tag": "0081_cold_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1783601869330,
+      "tag": "0082_tranquil_puck",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { db, schema } from "@/db/client";
 import { desc, gte, sql } from "drizzle-orm";
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ function runState(r: { finishedAt: Date | null; errorLog: string | null; pausedR
 }
 
 export default async function PipelineAdmin() {
-  await requireAdmin();
+  await requireAdmin2fa();
 
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const runs = await db.select().from(schema.digestRuns).orderBy(desc(schema.digestRuns.startedAt)).limit(40);

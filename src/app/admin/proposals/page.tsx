@@ -1,13 +1,13 @@
 import { db, schema } from "@/db/client";
 import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/current-user";
+import { requireAdmin2fa } from "@/lib/admin/2fa";
 import { recordAdminAction } from "@/lib/admin/audit";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProposalsAdmin() {
-  await requireAdmin();
+  await requireAdmin2fa();
 
   const pending = await db
     .select()
@@ -32,7 +32,7 @@ export default async function ProposalsAdmin() {
 
   async function approve(id: number, note: string | null) {
     "use server";
-    const admin = await requireAdmin();
+    const admin = await requireAdmin2fa();
     const prop = await db.select().from(schema.proposedSources).where(eq(schema.proposedSources.id, id)).get();
     if (!prop) return;
     // Promote to curated_sources (idempotent on uniq index).
@@ -57,7 +57,7 @@ export default async function ProposalsAdmin() {
 
   async function reject(id: number, note: string | null) {
     "use server";
-    const admin = await requireAdmin();
+    const admin = await requireAdmin2fa();
     const prop = await db.select().from(schema.proposedSources).where(eq(schema.proposedSources.id, id)).get();
     await db
       .update(schema.proposedSources)
