@@ -969,7 +969,7 @@ async function refreshCatalogueStep(runId: number, userId: number): Promise<void
   // to this user is shared by nobody else, never reaches K, and stays private —
   // which is the property that matters. Excluding the requester would require
   // K OTHER users, starving the shared catalogue in the low-user regime (the
-  // open-core "degrade gracefully to single-user" rule) for only a marginal,
+  // "degrade gracefully to single-user" rule) for only a marginal,
   // self-limiting privacy gain (you'd merely learn that generic capability
   // vocabulary you already share is also used elsewhere). Everything below K
   // stays private to this user's own matching (their facets) and is NOT searched.

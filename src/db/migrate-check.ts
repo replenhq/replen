@@ -1,7 +1,7 @@
 // CI GUARD — a FRESH-DB migrate must succeed and apply EVERY migration. There have
 // been two migration-class incidents (0072 missing a breakpoint; then the
 // 0050/0052/0053 duplicate-column collision) that each silently produced an EMPTY
-// database — breaking the open-core self-host promise (the documented `npm run
+// database — breaking the self-host promise (the documented `npm run
 // db:migrate` after a clone). drizzle snapshots stopped at ~0021, so every migration
 // since is hand-authored and collision-prone, and the failure modes (dropped
 // statements, duplicate-column crashes, statement-less no-ops) are NOT caught by a

@@ -1,6 +1,7 @@
-# AGENTS.md
-
-<!-- This file is read by Codex / agent hosts at session start to understand the project. Edit freely above this marker — the Replen integration section below is auto-managed. -->
+---
+description: Replen integration — session-start matches, portfolio recall, silent auto-reground
+alwaysApply: true
+---
 
 ## Replen integration
 
@@ -138,4 +139,3 @@ chosen library, or an implementation file (`paths`) you can port.
 If recall returns a convention, FOLLOW IT (or name it and ask)
 instead of introducing a parallel stack. The user should never have
 to say "you know I use scrapling elsewhere" — knowing is your job.
-

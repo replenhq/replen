@@ -68,7 +68,7 @@ If you run replen for yourself on a public domain, set every flag below. Local-o
 ### Cloudflare configuration
 
 1. **Tunnel.** Use `cloudflared` so the server has no public ports beyond SSH (and even SSH should be IP-allowlisted to your fixed-IP egress).
-2. **Transform Rule** that injects `x-replen-edge-secret` on every request to `app.replen.dev`. The origin's middleware refuses any request lacking both this header (with the matching `CF_ORIGIN_SECRET` value) AND `cf-connecting-ip`. See `docs/security/operator-runbook.md` for the API call.
+2. **Transform Rule** that injects `x-replen-edge-secret` on every request to `app.replen.dev`. The origin's middleware refuses any request lacking both this header (with the matching `CF_ORIGIN_SECRET` value) AND `cf-connecting-ip`.
 3. **Authenticated Origin Pulls.** Not applicable when using cloudflared tunnel: the tunnel is outbound-only and there's no inbound TLS handshake on origin where AOP could attach. The Transform Rule + `REQUIRE_CLOUDFLARE=1` provides equivalent protection. Enable AOP only if you ever expose nginx on port 443 directly (i.e. abandon the tunnel architecture).
 4. **WAF rules.** Block requests to `/api/cli-auth/exchange` from anywhere except known CDN-edge IPs (the exchange is server-to-server from the CLI's localhost, then through Cloudflare).
 5. **Rate limiting.** A 50/min cap on `/login`, `/api/login`, `/api/cli-auth/exchange`, `/api/ingest`.
