@@ -33,7 +33,7 @@
 
 Claude Code, Codex and Cursor already help inside the repo you are working on. Replen gives them a local intelligence layer across every repo you build.
 
-It maps each project to what it actually does, building an ontology and knowledge graph of your portfolio: computer vision, geospatial analysis, market-making, scraping, workflow automation, or whatever else you build. It then watches the OSS ecosystem and continuously scores relevant projects against your real capabilities, using semantic matching and a self-tuning learning loop shaped by what you adopt, skip and review.
+It maps each project to what it actually does, building an ontology and knowledge graph of your portfolio: computer vision, geospatial analysis, market-making, scraping, workflow automation, or whatever else you build. It then watches the OSS frontier and continuously scores relevant projects against your real capabilities, using semantic matching and a self-tuning learning loop shaped by what you adopt, skip and review.
 
 The result is not a trending list, a keyword search, or a static repo graph. Replen autonomously surfaces a small number of high-signal suggestions your AI coding tools can actually use.
 
