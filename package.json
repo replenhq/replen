@@ -42,7 +42,7 @@
     "drizzle-kit": "^0.31.10",
     "fast-check": "^3.23.2",
     "tsx": "^4.19.0",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "^3.2.7"
   },
   "engines": {
