@@ -38,19 +38,30 @@ function isPublic(pathname: string) {
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.gstatic.com https://apis.google.com https://*.firebaseapp.com`,
+    // www.google.com/recaptcha + gstatic: Firebase Auth's Email Enumeration
+    // Protection (on by default for Identity Platform) runs an invisible
+    // reCAPTCHA Enterprise check during sendSignInLinkToEmail. Under
+    // 'strict-dynamic' the host allowlist is ignored for scripts (the reCAPTCHA
+    // script loads via nonce propagation), but this line is the fallback for
+    // browsers that don't support strict-dynamic. The load-bearing reCAPTCHA
+    // grants are in frame-src + connect-src below.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.gstatic.com https://apis.google.com https://*.firebaseapp.com https://www.google.com/recaptcha/`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     // Firebase Auth XHRs go through identitytoolkit + securetoken + the
     // hosted auth handler on *.firebaseapp.com. The OAuth popup also relays
     // state back to the parent via that same origin.
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.firebaseapp.com",
+    // www.google.com/recaptcha: the invisible reCAPTCHA (email enumeration
+    // protection) XHRs its token exchange here. Without it, sendSignInLinkToEmail
+    // fails client-side with a cryptic reCAPTCHA error (auth/error-code:-26).
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.firebaseapp.com https://www.google.com/recaptcha/",
     // *.firebaseapp.com is the hosted Firebase Auth iframe used to sync
     // popup state with the parent page during signInWithPopup. Without it,
     // GitHub / Google / magic-link sign-ins all fail silently with
     // "popup-closed-by-user" because the iframe load is blocked by CSP.
-    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.threads.com https://www.tiktok.com",
+    // www.google.com/recaptcha: the invisible reCAPTCHA anchor/challenge frame.
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.threads.com https://www.tiktok.com https://www.google.com/recaptcha/",
     "frame-ancestors 'none'",
     "form-action 'self'",
     "base-uri 'self'",
