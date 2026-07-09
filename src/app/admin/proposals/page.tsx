@@ -2,6 +2,7 @@ import { db, schema } from "@/db/client";
 import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/current-user";
+import { recordAdminAction } from "@/lib/admin/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -51,17 +52,20 @@ export default async function ProposalsAdmin() {
       .where(eq(schema.proposedSources.id, id));
     revalidatePath("/admin/proposals");
     revalidatePath("/sources");
+    await recordAdminAction({ actorId: admin.id, actorEmail: admin.email, action: "source.approve", targetType: "source", targetId: prop.id, targetLabel: `${prop.kind}:${prop.value}`, meta: note ? { note } : null });
   }
 
   async function reject(id: number, note: string | null) {
     "use server";
     const admin = await requireAdmin();
+    const prop = await db.select().from(schema.proposedSources).where(eq(schema.proposedSources.id, id)).get();
     await db
       .update(schema.proposedSources)
       .set({ status: "rejected", reviewedByUserId: admin.id, reviewedAt: new Date(), adminNote: note })
       .where(eq(schema.proposedSources.id, id));
     revalidatePath("/admin/proposals");
     revalidatePath("/sources");
+    await recordAdminAction({ actorId: admin.id, actorEmail: admin.email, action: "source.reject", targetType: "source", targetId: id, targetLabel: prop ? `${prop.kind}:${prop.value}` : String(id), meta: note ? { note } : null });
   }
 
   return (

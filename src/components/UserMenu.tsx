@@ -53,6 +53,11 @@ export function UserMenu({ email, isAdmin }: { email: string; isAdmin: boolean }
           <a className="dropdown-item" href="/starred" role="menuitem">
             <Icon name="star-fill" size={16} /> Starred
           </a>
+          {isAdmin && (
+            <a className="dropdown-item" href="/admin" role="menuitem">
+              <Icon name="shield" size={16} /> Admin
+            </a>
+          )}
           <hr className="dropdown-divider" />
           <a className="dropdown-item" href="/api/logout" role="menuitem">
             <Icon name="logout" size={16} /> Sign out

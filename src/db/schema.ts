@@ -1485,6 +1485,30 @@ export const alertLog = sqliteTable(
   }),
 );
 
+// Admin action audit trail. Admin mutations are the one surface the
+// tenant-isolation model doesn't cover — they're role-gated and cross-user by
+// design (an admin legitimately reads/writes across users), so each one is
+// recorded here with actor + target + timestamp. Append-only; also the
+// substrate for the enterprise audit-log feature. Written non-fatally after the
+// mutation (see src/lib/admin/audit.ts).
+export const adminAudit = sqliteTable(
+  "admin_audit",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    actorUserId: integer("actor_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    actorEmail: text("actor_email").notNull(),
+    action: text("action").notNull(), // 'user.role.set' | 'user.status.set' | 'user.shared_llm.set' | 'user.invite' | 'source.approve' | 'source.reject' | 'account.delete'
+    targetType: text("target_type"), // 'user' | 'source' | 'account' | null
+    targetId: integer("target_id"),
+    targetLabel: text("target_label"), // human-readable (email / source value) so the view needs no join
+    meta: text("meta"), // JSON: before/after values or extra context
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => ({
+    idxTime: index("idx_admin_audit_time").on(t.createdAt),
+  }),
+);
+
 // Quiet-day leap budget. One row per leap surfaced in the inventory footnote,
 // so the calm cadence holds: at most one leap per project per
 // REPLEN_LEAP_QUIET_DAYS, and a leap already shown isn't shown again.
