@@ -206,6 +206,11 @@ export const candidates = sqliteTable(
     author: text("author"),
     score: integer("score"),
     postedAt: integer("posted_at", { mode: "timestamp" }),
+    // TRUE repo birth date (GitHub created_at), when a fetcher can supply it —
+    // unlike posted_at, which is overloaded (pushed_at / story date / now) across
+    // fetchers. Nullable: trending/social sources don't know it, and null means
+    // "don't tilt / don't gate" (graceful, mirrors the modality-unknown rule).
+    createdAt: integer("created_at", { mode: "timestamp" }),
     fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
     rawJson: text("raw_json"),
     // Pipeline v2 / Sprint 1: inventory-level metadata so Stage 2 can

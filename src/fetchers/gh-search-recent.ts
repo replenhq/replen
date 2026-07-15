@@ -117,6 +117,7 @@ export const ghSearchRecentFetcher: Fetcher = {
           // Surface created_at as the "posted at" timestamp so the recency
           // sort in pipeline.ts treats post-cutoff births correctly.
           postedAt: createdAt ?? pushedAt,
+          createdAt, // true repo birth date (drives the frontier prior)
           raw: {
             owner,
             name,

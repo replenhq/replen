@@ -179,6 +179,7 @@ export const historicalSearchFetcher: Fetcher = {
             author: owner,
             score: stars,
             postedAt: createdAt ?? pushedAt,
+            createdAt, // true repo birth date (drives the frontier prior)
             raw: {
               owner,
               name,

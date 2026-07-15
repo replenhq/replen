@@ -139,6 +139,7 @@ export const ghTargetedSearchFetcher: Fetcher = {
 
             const description = String(item.description ?? "").trim();
             const pushedAt = item.pushed_at ? new Date(String(item.pushed_at)) : null;
+            const createdAt = item.created_at ? new Date(String(item.created_at)) : null;
             const primaryLanguage = typeof item.language === "string" ? item.language : null;
 
             out.push({
@@ -150,6 +151,7 @@ export const ghTargetedSearchFetcher: Fetcher = {
               author: owner,
               score: stars,
               postedAt: pushedAt,
+              createdAt, // true repo birth date (drives the frontier prior)
               // Attribution carried into raw for Stage 4 + UI:
               //   - which project surfaced this
               //   - which outcome statement (verbatim, lifted from summary)
@@ -216,6 +218,7 @@ export const ghTargetedSearchFetcher: Fetcher = {
             author: owner,
             score: stars,
             postedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
+            createdAt: item.created_at ? new Date(String(item.created_at)) : null, // true birth date → frontier prior
             raw: {
               owner, name,
               description: String(item.description ?? "").trim(),
@@ -281,6 +284,7 @@ export const ghTargetedSearchFetcher: Fetcher = {
             author: owner,
             score: stars,
             postedAt: item.pushed_at ? new Date(String(item.pushed_at)) : null,
+            createdAt: item.created_at ? new Date(String(item.created_at)) : null, // true birth date → frontier prior
             raw: {
               owner, name,
               description: String(item.description ?? "").trim(),

@@ -11,6 +11,7 @@ import { sanitizeForMarkdown } from "@/lib/handoff-template";
 import { domainPriorPenalty } from "@/lib/domain-prior";
 import { isSolid, coveredByDeps, normOwnedDep } from "@/lib/solid-match";
 import { catalogueMatches, adjacentMatches } from "@/catalogue/reader";
+import { frontierBoost } from "@/catalogue/frontier";
 import { deriveProductKey } from "@/projects/product-key";
 import { isGenericProbeFacetLabel, isNoiseFacetLabel } from "@/projects/doc-sections";
 import { globalDemoteThresholds, isGloballyDemoted } from "@/lib/repo-quality";
@@ -529,6 +530,7 @@ export async function GET(req: Request) {
         primaryLanguage: c.primaryLanguage,
         repoShape: (c.repoShape as RepoShape | null) ?? null,
         postedAt: c.postedAt,
+        createdAt: c.createdAt, // true birth date → exact freshness floor
         score: c.score,
         source: c.source,
         owner,
@@ -1115,6 +1117,10 @@ export async function GET(req: Request) {
     // blind-spot graph hints). All zero with no history. The base is the
     // top-k-mean aggregate when REPLEN_FACET_AGG=topk-mean (= cosine otherwise).
     let rank = (rankCosine ?? cosine) ?? -1;
+    // Frontier prior — same curve as the catalogue path, so the own-pool
+    // candidate stream tilts toward newer repos too. c.createdAt is the TRUE
+    // birth date (Phase 1b); null (trending/social) → no tilt (graceful).
+    if (c.createdAt) rank += frontierBoost(Math.floor((Date.now() - c.createdAt.getTime()) / 86_400_000));
     rank += tasteBoost(candVec, taste);
     rank += priorBoost(outcomePriors.source, sourcePrefix(c.source));
     if (isCovered(matchedFacet)) rank -= COVERED_PENALTY; // already filled by a dep
@@ -1485,7 +1491,10 @@ export async function GET(req: Request) {
       // not raw cosine — otherwise a commodity/infra catalogue match leapfrogs
       // the own-pool entries and headlines. The reader's rankPenalty excludes
       // covered + taste, which we apply here, so nothing is double-counted.
-      let cRank = ((m.rankCosine ?? m.cosine) - (m.rankPenalty ?? 0)) + (m.tasteAdj ?? 0) + priorBoost(outcomePriors.source, "catalogue");
+      // frontierBoost = the age prior (same curve as the reader): tilts the
+      // merged slate toward newer repos. Own-pool candidate matches have no
+      // created_at yet, so they get no tilt until Phase 1b threads it through.
+      let cRank = ((m.rankCosine ?? m.cosine) - (m.rankPenalty ?? 0)) + (m.tasteAdj ?? 0) + frontierBoost(m.ageDays) + priorBoost(outcomePriors.source, "catalogue");
       if (isCovered(m.matchedFacet)) cRank -= COVERED_PENALTY; // already filled by a dep
       if (m.matchedFacet) {
         cRank += priorBoost(outcomePriors.facet, m.matchedFacet);

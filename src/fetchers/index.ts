@@ -151,6 +151,7 @@ async function runFetchersInner(userId: number, cfg: UserConfig, fetchers: Fetch
     author: it.author,
     score: it.score,
     postedAt: it.postedAt,
+    createdAt: it.createdAt ?? null, // true repo birth date when the fetcher has it
     fetchedAt: now,
     rawJson: JSON.stringify(it.raw),
     // Pipeline v2 / Sprint 1 inventory fields. Null is fine — Stage 2

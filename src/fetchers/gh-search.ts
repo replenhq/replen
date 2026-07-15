@@ -119,6 +119,10 @@ export const ghSearchFetcher: Fetcher = {
         if (verdict.skip) continue;
         const description = String(item.description ?? "").trim();
         const pushedAt = item.pushed_at ? new Date(String(item.pushed_at)) : null;
+        // Search /repositories returns created_at too — capture the TRUE birth
+        // date for the frontier prior (postedAt below stays pushed_at for the
+        // existing recency/staleness signals).
+        const createdAt = item.created_at ? new Date(String(item.created_at)) : null;
         // GitHub search /repositories endpoint includes language + topics
         // per item. Cheap to capture once + reuse across the eligibility
         // + scoring stages.
@@ -133,7 +137,8 @@ export const ghSearchFetcher: Fetcher = {
           author: owner,
           score: stars,
           postedAt: pushedAt,
-          raw: { owner, name, description, stars, query: q, projectSlug: project.slug, language, topics: topicsRaw },
+          createdAt, // true repo birth date (drives the frontier prior)
+          raw: { owner, name, description, stars, query: q, projectSlug: project.slug, language, topics: topicsRaw, createdAt: createdAt?.toISOString() ?? null },
           primaryLanguage: language,
           topics: topicsRaw,
           repoShape: inferRepoShape({ name, description, topics: topicsRaw }),

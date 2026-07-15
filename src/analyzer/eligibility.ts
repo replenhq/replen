@@ -24,7 +24,8 @@ import type { RepoShape } from "../fetchers/repo-shape";
 export type EligibilityInput = {
   primaryLanguage: string | null;
   repoShape: RepoShape | null;
-  postedAt: Date | null;     // candidate's created/pushed date as fetched
+  postedAt: Date | null;     // candidate's created/pushed date as fetched (overloaded)
+  createdAt?: Date | null;   // TRUE repo birth date when known — preferred for the freshness floor
   score: number | null;       // star count (or proxy)
   source: string;             // for tracing rules to specific fetchers
   // Github owner + repo name for the user-known dedup probe. Derived
@@ -58,8 +59,14 @@ export type EligibilityVerdict =
   // that approach rather than e.g. "depend-on-it" or "cherry-pick".
   | { eligible: true; forceApproach: "cleanroom-rebuild"; reason: string };
 
-const FRESHNESS_FLOOR_DAYS = 30;
-const FRESHNESS_FLOOR_STARS = 50;
+// Freshness floor (young edge of the frontier window). Kept deliberately LOW:
+// the whole product is about NEW things, so we don't make good repos wait a
+// month to qualify. 5 days is just enough to let empty scaffolds / spam repos
+// shake out. Note the star count is already an escape hatch (see the rule
+// below): a repo with >=50★ passes regardless of age, so a viral new repo that
+// jumps thousands of stars in a day is never held back by this.
+const FRESHNESS_FLOOR_DAYS = Math.max(0, parseInt(process.env.REPLEN_FRESHNESS_FLOOR_DAYS ?? "5", 10) || 5);
+const FRESHNESS_FLOOR_STARS = Math.max(0, parseInt(process.env.REPLEN_FRESHNESS_FLOOR_STARS ?? "50", 10) || 50);
 
 // "TypeScript" and "JavaScript" are runtime-compatible — TS compiles to
 // JS, JS can be imported into TS projects, and most popular JS libs ship
@@ -127,11 +134,15 @@ export function checkEligibility(
     return { eligible: false, reason: "starter template / boilerplate" };
   }
 
-  // 3. Freshness floor — < 30 days old AND < 50 stars. Combined: too
-  //    fresh to grade, too few stars to vouch for itself. Either alone is
-  //    fine — a 60-day-old project with 20 stars is "small but real," a
-  //    20-day-old project with 200 stars is "spike but real". Both red
-  //    flags together is when we drop.
+  // 3. Freshness floor — < 5 days old AND < 50 stars. Combined: too
+  //    brand-new to have shaken out (possible empty scaffold / spam), too
+  //    few stars to vouch for itself. Either alone is fine — a 10-day-old
+  //    project with 20 stars is "small but real," a 2-day-old project with
+  //    200 stars is "spike but real". Both together is when we drop.
+  //    NOTE: age here is `postedAt`, which is only true created_at for some
+  //    fetchers — fine at a 5-day floor, but a real per-candidate created_at
+  //    would make this exact (tracked with the Phase 1b candidates.created_at
+  //    work).
   //
   //    EXEMPT feed candidates (Pattern A "stack-watch" releases, Pattern B
   //    "spec-watch" standard changes, Pattern C "health-watch" upstream-health
@@ -145,8 +156,12 @@ export function checkEligibility(
     c.source.startsWith("spec-watch:") ||
     c.source.startsWith("health-watch:") ||
     c.source.startsWith("security-watch:");
-  if (!isFeedCandidate && c.postedAt && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
-    const ageDays = (Date.now() - c.postedAt.getTime()) / (24 * 3600 * 1000);
+  // Prefer TRUE created_at over the overloaded postedAt: without it, a years-old
+  // repo that was merely pushed recently (postedAt = pushed_at for gh-search /
+  // gh-targeted) reads as ageDays≈0 and gets wrongly dropped as "too fresh".
+  const birth = c.createdAt ?? c.postedAt;
+  if (!isFeedCandidate && birth && (c.score ?? 0) < FRESHNESS_FLOOR_STARS) {
+    const ageDays = (Date.now() - birth.getTime()) / (24 * 3600 * 1000);
     if (ageDays < FRESHNESS_FLOOR_DAYS) {
       return { eligible: false, reason: `too fresh (${Math.round(ageDays)}d old, <${FRESHNESS_FLOOR_STARS}★)` };
     }

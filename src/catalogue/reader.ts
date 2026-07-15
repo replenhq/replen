@@ -9,6 +9,7 @@ import { db, schema } from "../db/client";
 import { desc, isNotNull } from "drizzle-orm";
 import { cosineSimilarity, topKmean, parseStoredEmbedding, type FacetEmbedding } from "../lib/embeddings";
 import { KEEP_KINDS, RISING_KINDS, type RepoKind } from "./classify";
+import { frontierBoost } from "./frontier";
 import { modalitiesDisjoint, coerceModalities, type Modality, type Provenance } from "../projects/modality";
 
 // Provenance confidence: a match on a GROUNDED capability (the agent read the
@@ -124,22 +125,11 @@ function languagePenalty(projectLangs: Set<string>, repoLang: string | null): nu
   return CROSS_LANG_PENALTY; // sidecar/port-able, but down-rank vs same-language
 }
 
-// Recency/trending boost. A recently-CREATED repo that's relevant is the
-// "rising gem" signal — the thing you'd catch on a creator's feed before it's
-// canonical. It gets a bonus added to its ranking score (not its cosine — the
-// relevance floor still applies), so a fresh newcomer ranks alongside/above the
-// all-time star leader instead of being buried under it. Linear decay over the
-// window. "rising" flags repos young enough to call out as discoveries.
-const RECENCY_MONTHS = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_RECENCY_MONTHS ?? "12", 10) || 12);
-const RECENCY_MAX_BOOST = Math.max(0, parseFloat(process.env.REPLEN_CATALOGUE_RECENCY_BOOST ?? "0.08"));
+// The frontier prior (age → ranking boost) lives in ./frontier as a pure module
+// so this reader and the inventory route's merged ranker share ONE curve. It's a
+// WEIGHT, never a gate — see frontier.ts for the full rationale.
+// Display-only "rising" flag: young enough to badge as a discovery in the line.
 const RISING_MONTHS = Math.max(1, parseInt(process.env.REPLEN_CATALOGUE_RISING_MONTHS ?? "9", 10) || 9);
-
-function recencyBoost(ageDays: number | null): number {
-  if (ageDays == null || ageDays < 0) return 0;
-  const windowDays = RECENCY_MONTHS * 30;
-  if (ageDays >= windowDays) return 0;
-  return RECENCY_MAX_BOOST * (1 - ageDays / windowDays);
-}
 
 // Upper bound on how many catalogue rows we cosine per request. The catalogue
 // starts small; ordering by stars means the cap keeps the canonical libraries
@@ -304,15 +294,17 @@ export async function catalogueMatches(opts: {
     });
   }
 
-  // Rank by: relevance + recency − cross-language − commodity − covered − infra.
-  // A fresh, non-obvious, DOMAIN gap-filler ranks above a commodity library, an
-  // alternative to something you already have, or more plumbing for existing
-  // infra. Stars are NOT a penalty — a great high-star niche tool the agent
-  // ignores is exactly what we want to surface.
+  // Rank by: relevance + frontier + taste − cross-language − commodity − covered
+  // − infra. A fresh, non-obvious, DOMAIN gap-filler ranks above a commodity
+  // library, an alternative to something you already have, or more plumbing for
+  // existing infra. Stars are NOT a penalty — a great high-star niche tool the
+  // agent ignores is exactly what we want to surface. The frontier prior applies
+  // to EVERY kept match (decaying over 24mo), not just the ≤9mo "rising" badge —
+  // so age tilts the whole slate toward what's new without dropping anything.
   const score = (m: CatalogueMatch) =>
     (m.rankCosine ?? m.cosine)
     + (m.tasteAdj ?? 0)
-    + (m.rising ? recencyBoost(m.ageDays) : 0)
+    + frontierBoost(m.ageDays)
     - languagePenalty(projectLanguages, m.language)
     - commodityPenalty(m.name, m.description, m.topics)
     - (m.matchedFacet && isCommodityText(m.matchedFacet) && coveredFacets.has(normLabel(m.matchedFacet)) ? COVERED_PENALTY : 0)

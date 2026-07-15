@@ -7,6 +7,11 @@ export type FetchedCandidate = {
   author: string | null;
   score: number | null;
   postedAt: Date | null;
+  // TRUE repo birth date (GitHub created_at), when the fetcher can get it cheaply
+  // — distinct from postedAt, which several fetchers overload with pushed_at /
+  // story date / now. Drives the frontier prior (age → ranking tilt) and the
+  // eligibility freshness floor. Null when unknown (trending/social) → no tilt.
+  createdAt?: Date | null;
   raw: unknown;
   // Pipeline v2 / Sprint 1 — inventory-level metadata. Optional because
   // not every fetcher can populate it cheaply (HN/Reddit/Threads/TikTok
