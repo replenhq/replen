@@ -398,6 +398,10 @@ export const projectProfiles = sqliteTable(
     // burn GH API quota.
     depHealthJson: text("dep_health_json"),
     depHealthGeneratedAt: integer("dep_health_generated_at", { mode: "timestamp" }),
+    // When Replen surfaced the one-time "activate this repo" nudge for this repo
+    // (the fallback when silent grounding cannot run). Once set, never nudge
+    // again. Null = never nudged.
+    nudgedAt: integer("nudged_at", { mode: "timestamp" }),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     included: integer("included", { mode: "boolean" }).notNull().default(true),
     sensitivity: text("sensitivity").notNull().default("low"),

@@ -40,6 +40,7 @@ export async function GET(req: Request) {
       agentReport: schema.projectProfiles.agentReport,
       depVersions: schema.projectProfiles.depVersions,
       summaryJson: schema.projectProfiles.summaryJson,
+      nudgedAt: schema.projectProfiles.nudgedAt,
     })
     .from(schema.projectProfiles)
     .where(eq(schema.projectProfiles.userId, auth.userId));
@@ -63,10 +64,65 @@ export async function GET(req: Request) {
       grounded,
       needsReground: rg.reground,
       regroundReason: rg.reason,
+      nudgedAt: r.nudgedAt ? r.nudgedAt.toISOString() : null,
     };
   });
 
-  return NextResponse.json({ projects, autoground }, { headers: corsHeaders });
+  // Owner-matched auto-register (ACTIVATION). If the cwd repo the MCP is scoped
+  // to is a REAL repo (owner/name), not already registered, and its owner matches
+  // one the user already has projects under, register its identity NOW. That turns
+  // "no entry, stay silent" into "registered, hasCapabilities:false" so the agent
+  // grounds it silently this session and matching works next session. The
+  // owner-match guard is what stops a repo the user is merely BROWSING (a clone of
+  // someone else's project) from silently joining their portfolio.
+  let justRegistered: string | null = null;
+  const isRealRepo = scopeRepo != null && /^[^/\s]+\/[^/\s]+$/.test(scopeRepo);
+  const alreadyRegistered = scopeRepo != null && rows.some((r) => (r.githubFullName ?? "").toLowerCase() === scopeRepo);
+  if (isRealRepo && !alreadyRegistered && autoground) {
+    const owner = scopeRepo!.split("/")[0];
+    const allowedOwners = new Set(rows.map((r) => (r.githubFullName ?? "").toLowerCase().split("/")[0]).filter(Boolean));
+    if (allowedOwners.has(owner)) {
+      const name = scopeRepo!.split("/")[1];
+      const existingSlugs = new Set(rows.map((r) => r.slug));
+      const base = name.replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || owner;
+      const slug = existingSlugs.has(base) ? `${base}-${owner}`.replace(/[^a-z0-9_-]/g, "-").slice(0, 80) : base;
+      try {
+        await db.insert(schema.projectProfiles).values({
+          userId: auth.userId,
+          slug,
+          path: `github:${scopeRepo}`,
+          name,
+          githubFullName: scopeRepo!,
+          profileHash: "pending-loader",
+          active: true,
+          included: true,
+          sensitivity: "low",
+          llmProvider: "auto",
+          updatedAt: new Date(),
+        });
+        justRegistered = scopeRepo;
+        projects.push({
+          slug,
+          repo: scopeRepo,
+          active: true,
+          included: true,
+          profileHash: "pending-loader",
+          hasCapabilities: false,
+          hasReport: false,
+          hasVersions: false,
+          grounded: false,
+          needsReground: false,
+          regroundReason: "not-grounded",
+          nudgedAt: null,
+        });
+      } catch {
+        // Unique-constraint race (a concurrent session registered it) or slug
+        // collision: treat as already registered, nothing to do.
+      }
+    }
+  }
+
+  return NextResponse.json({ projects, autoground, justRegistered }, { headers: corsHeaders });
 }
 
 export async function OPTIONS() {

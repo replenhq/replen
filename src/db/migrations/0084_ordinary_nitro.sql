@@ -1,0 +1,1 @@
+ALTER TABLE `project_profiles` ADD `nudged_at` integer;

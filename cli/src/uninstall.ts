@@ -48,6 +48,14 @@ const GEMINI_CONFIG = join(homedir(), ".gemini", "settings.json");
 const CLAUDE_SKILLS = join(homedir(), ".claude", "skills");
 const REPLEN_DIR = join(homedir(), ".replen");
 
+// User-level (global) instruction files written by inject-instruction.ts so
+// activation reaches every repo. CC rule file is Replen-owned (delete whole);
+// Codex/Gemini are shared (strip the section, or delete if we created the file).
+const GLOBAL_CC_RULE = join(homedir(), ".claude", "rules", "replen.md");
+const GLOBAL_CODEX = join(homedir(), ".codex", "AGENTS.md");
+const GLOBAL_CODEX_OVERRIDE = join(homedir(), ".codex", "AGENTS.override.md");
+const GLOBAL_GEMINI = join(homedir(), ".gemini", "GEMINI.md");
+
 // Must match mcp-setup.ts: the tools it adds to permissions.allow and the
 // substring marker on the SessionStart hook command.
 const REPLEN_AUTO_ALLOW_PREFIX = "mcp__replen__";
@@ -86,6 +94,7 @@ export async function runUninstall(argv: string[]): Promise<void> {
   await removeMcpWiring(opts);
   await removeSkills(opts);
   await removeDocBlocks(opts);
+  await removeGlobalInstructions(opts);
   await removeLocalConfig(opts);
 
   console.log("");
@@ -254,12 +263,61 @@ async function removeDocBlocks(opts: Opts): Promise<void> {
 }
 
 // ============================================================================
-// Category 4 — ~/.replen (auth token + saved roots + Atlas vault export)
+// Category 4. The user-level (global) instruction files
+// ============================================================================
+
+async function removeGlobalInstructions(opts: Opts): Promise<void> {
+  type Hit = { file: string; deleteWhole: boolean };
+  const hits: Hit[] = [];
+  // CC rule file is Replen-owned (we create the whole file): delete it entirely.
+  if (existsSync(GLOBAL_CC_RULE)) {
+    try {
+      if (hasReplenSection(readFileSync(GLOBAL_CC_RULE, "utf8"))) hits.push({ file: GLOBAL_CC_RULE, deleteWhole: true });
+    } catch { /* ignore unreadable */ }
+  }
+  // Codex + Gemini are shared files: strip our section, or delete if we created it.
+  for (const file of [GLOBAL_CODEX, GLOBAL_CODEX_OVERRIDE, GLOBAL_GEMINI]) {
+    if (!existsSync(file)) continue;
+    let text: string;
+    try { text = readFileSync(file, "utf8"); } catch { continue; }
+    if (!hasReplenSection(text)) continue;
+    hits.push({ file, deleteWhole: isStubOnly(text) });
+  }
+  if (hits.length === 0) {
+    console.log("\n  ④ Global instruction files (~/.claude/rules, ~/.codex, ~/.gemini): none found, skipping.");
+    return;
+  }
+  console.log(`\n  ④ Global Replen instruction files (${hits.length}):`);
+  for (const h of hits) {
+    console.log(`       • ${h.file}${h.deleteWhole ? "   (Replen-created, will delete)" : "   (strip section, keep your content)"}`);
+  }
+  if (!(await gate(opts, "Remove the global Replen instruction from these files?"))) {
+    console.log("       · kept.");
+    return;
+  }
+  if (opts.dryRun) return;
+  for (const h of hits) {
+    try {
+      if (h.deleteWhole) {
+        rmSync(h.file, { force: true });
+        console.log(`       ✓ deleted: ${h.file}`);
+      } else {
+        writeFileSync(h.file, stripReplenSection(readFileSync(h.file, "utf8")));
+        console.log(`       ✓ stripped section: ${h.file}`);
+      }
+    } catch (e) {
+      console.warn(`       ⚠ ${h.file}: ${(e as Error).message}`);
+    }
+  }
+}
+
+// ============================================================================
+// Category 5. ~/.replen (auth token + saved roots + Atlas vault export)
 // ============================================================================
 
 async function removeLocalConfig(opts: Opts): Promise<void> {
   if (!existsSync(REPLEN_DIR)) {
-    console.log("\n  ④ Local config (~/.replen) — none found, skipping.");
+    console.log("\n  ⑤ Local config (~/.replen): none found, skipping.");
     return;
   }
   const cfg = existsSync(configPath());
@@ -495,8 +553,8 @@ function banner(opts: Opts): void {
   console.log("  You'll be asked before each category; nothing is removed without a yes.");
   if (opts.dryRun) console.log("  (--dry-run: previewing only, no changes)");
   console.log("");
-  console.log("  In scope:  MCP wiring (Claude/Codex/Gemini), the /replen skills,");
-  console.log("             the per-repo \"## Replen integration\" doc blocks, and ~/.replen.");
+  console.log("  In scope:  MCP wiring (Claude/Codex/Gemini), the /replen skills, the");
+  console.log("             per-repo AND user-level \"## Replen integration\" blocks, and ~/.replen.");
   console.log("  NOT in scope: server-side profiles & match history (see note at the end).");
 }
 

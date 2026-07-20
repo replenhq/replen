@@ -32,10 +32,11 @@
 // (e.g. when invoked from a hook).
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "13";
+export const INTEGRATION_VERSION = "14";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -47,13 +48,23 @@ flag. Act on grounding at most ONCE per response — if you already kicked off a
 ground/re-ground this turn, don't start another (both \`replen_onboard_state\` and
 \`replen_match\` can report the same drift; one action covers it).
 
-- **No entry for this repo (not in the \`projects\` list):** it isn't registered
-  with Replen. Stay SILENT — Replen deliberately doesn't nag in unregistered or
-  throwaway directories, so \`replen_match\` will also return an empty footnote
-  here. (Real repos self-register on session start on every host — the MCP
-  registers the repo's identity in the background the first time you open it, so
-  matching works from the next session; the user can also force it now with
-  \`npx replen sync-projects\`.)
+- **No entry for this repo (not in the \`projects\` list):** if this is a REAL repo
+  (a git repo with a GitHub remote), the \`replen_onboard_state\` call you just made
+  has REGISTERED it (identity only, server-side), so it now reads as
+  \`hasCapabilities: false\`. ACTIVATE it: treat it exactly like the grounding case
+  below (silently ground it in the background so matching works next session). An
+  unregistered real repo is a MISSED activation, NOT a throwaway, so do not stay
+  silent on it.
+  - **Throwaway / non-repo directory** (no \`.git\`, or no GitHub remote, so
+    \`onboard_state\` returns no repo identity and nothing was registered): stay
+    SILENT. Never activate scratch or temp directories.
+  - **Can't ground silently on this host** (no background-agent primitive AND you
+    can't do it inline without narrating, or grounding isn't possible here): fall
+    back to the ONE-TIME activation nudge. Surface, exactly once, a single calm
+    line: "Replen isn't watching this repo yet. Run \`npx replen\` once to activate
+    matching (about ten seconds, no API key)." ONLY when \`onboard_state\` reports
+    \`nudgedAt: null\` for this repo; if it has already been nudged, stay silent.
+    Never nudge the same repo twice.
 - **\`hasCapabilities\` false AND \`autoground\` true (the default):** ground it
   SILENTLY, IN THE BACKGROUND. Spawn a background subagent (the Task tool on
   Claude Code; an equivalent background/parallel agent on Cursor / Codex / other
@@ -367,6 +378,90 @@ function replaceSection(claudeMd: string): string {
   return before + "\n\n" + SECTION_HEADER + "\n\n" + SECTION_BODY + after;
 }
 
+// -- GLOBAL (user-level) inject ---------------------------------------
+//
+// Per-repo docs only cover repos that existed at setup time. To activate BRAND-
+// NEW repos (and non-Claude-Code hosts with no SessionStart hook), we also write
+// ONE user-level instruction file per host, loaded in EVERY repo the user opens.
+// CC: ~/.claude/rules/replen.md (Replen-owned, no `paths` frontmatter so it loads
+// unconditionally). Codex: ~/.codex/AGENTS.md. Gemini: ~/.gemini/GEMINI.md.
+// Cursor has no CLI-writable global rule (User Rules are cloud-synced app state),
+// so it relies on the per-repo .mdc + the one-time activation nudge.
+
+// CC user rule is Replen-owned → overwrite on version mismatch (no append, so it
+// never co-mingles with the user's personal ~/.claude/CLAUDE.md).
+const GLOBAL_CLAUDE_RULE = `# Replen (user-level rule)
+
+<!-- Auto-managed by Replen so matching + activation work in every repo, including new ones. Do not edit; run \`npx replen uninstall\` to remove. -->
+
+${SECTION_HEADER}
+
+${SECTION_BODY}`;
+
+function applyOwnedRuleFile(path: string, content: string): FileAction {
+  if (existsSync(path)) {
+    const m = readFileSync(path, "utf8").match(MARKER_RE);
+    if (m && m[1] === INTEGRATION_VERSION) return "alreadyCurrent";
+    writeFileSync(path, content);
+    return "versionUpdated";
+  }
+  writeFileSync(path, content);
+  return "created";
+}
+
+// Codex loads only the FIRST non-empty of ~/.codex/AGENTS.override.md then
+// ~/.codex/AGENTS.md. Inject into whichever it will actually read, or a block in
+// AGENTS.md is silently dead when a non-empty override exists.
+function codexGlobalFile(): string {
+  const override = join(homedir(), ".codex", "AGENTS.override.md");
+  try {
+    if (existsSync(override) && readFileSync(override, "utf8").trim().length > 0) return override;
+  } catch { /* fall through to AGENTS.md */ }
+  return join(homedir(), ".codex", "AGENTS.md");
+}
+
+// Write the three host global files. Runs ONCE per setup, independent of repo
+// discovery (so it fires even when no local repos are found).
+export function injectGlobalInstructions(): InjectOutcome {
+  const outcome: InjectOutcome = {
+    scanned: 0, created: 0, appended: 0, alreadyCurrent: 0, versionUpdated: 0, skipped: [], declined: false,
+  };
+  const targets: Array<{ label: string; run: () => FileAction }> = [
+    {
+      label: "~/.claude/rules/replen.md",
+      run: () => {
+        const dir = join(homedir(), ".claude", "rules");
+        mkdirSync(dir, { recursive: true });
+        return applyOwnedRuleFile(join(dir, "replen.md"), GLOBAL_CLAUDE_RULE);
+      },
+    },
+    {
+      label: "~/.codex/AGENTS.md",
+      run: () => {
+        const f = codexGlobalFile();
+        mkdirSync(dirname(f), { recursive: true });
+        return applyToClaudeMd(f); // shared file → append/replace the marked section
+      },
+    },
+    {
+      label: "~/.gemini/GEMINI.md",
+      run: () => {
+        const f = join(homedir(), ".gemini", "GEMINI.md");
+        mkdirSync(dirname(f), { recursive: true });
+        return applyToClaudeMd(f);
+      },
+    },
+  ];
+  for (const t of targets) {
+    try {
+      outcome[t.run()]++;
+    } catch (e) {
+      outcome.skipped.push({ path: t.label, reason: (e as Error).message ?? String(e) });
+    }
+  }
+  return outcome;
+}
+
 async function promptYes(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive + no --yes ⇒ refuse (mirrors uninstall)
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -391,8 +486,7 @@ export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: 
     declined: false,
   };
   if (repos.length === 0) {
-    console.log("  · no git repos with GitHub remotes found — skipping CLAUDE.md inject. Pass --root <path> if your code lives somewhere non-conventional.");
-    return outcome;
+    console.log("  · no local git repos with GitHub remotes found; still writing the user-level activation files so new repos work everywhere. Pass --root <path> if your code lives somewhere non-conventional.");
   }
   // First-run consent. Shows the count + an example path so the user knows the
   // blast radius, and names every file we touch (three per repo, created if
@@ -400,15 +494,16 @@ export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: 
   if (!opts.yes) {
     if (!process.stdin.isTTY) {
       outcome.declined = true;
-      console.log(`\n  · non-interactive shell — skipping CLAUDE.md/AGENTS.md/GEMINI.md inject.`);
+      console.log(`\n  · non-interactive shell; skipping the Replen instruction inject (global + per-repo).`);
       console.log(`    Re-run with \`npx replen inject -y\` to apply without a prompt.`);
       return outcome;
     }
     console.log(`\n  Found ${repos.length} git repo(s) with GitHub remotes.`);
-    console.log(`  Add a "## Replen integration" section to CLAUDE.md, AGENTS.md, GEMINI.md`);
-    console.log(`  and .cursor/rules/replen.mdc in each (creating any that don't exist) so`);
-    console.log(`  Claude Code / Codex / Gemini CLI / Cursor surface today's matches at session`);
-    console.log(`  start. Idempotent; edit freely above the section. First 3:`);
+    console.log(`  Replen will add a "## Replen integration" section in two places:`);
+    console.log(`    1. user-level files (~/.claude/rules/replen.md, ~/.codex/AGENTS.md,`);
+    console.log(`       ~/.gemini/GEMINI.md) so EVERY repo, including brand-new ones, activates;`);
+    console.log(`    2. per-repo CLAUDE.md / AGENTS.md / GEMINI.md / .cursor/rules/replen.mdc.`);
+    console.log(`  Idempotent; edit freely above the section.${repos.length ? " First 3:" : ""}`);
     for (const r of repos.slice(0, 3)) console.log(`    • ${r}`);
     if (repos.length > 3) console.log(`    … and ${repos.length - 3} more`);
     const ok = await promptYes(`  Proceed? [Y/n] `);
@@ -419,8 +514,18 @@ export async function injectInstructions(opts: { yes?: boolean; explicitRoots?: 
     }
   }
 
-  // We write to CLAUDE.md (Claude Code convention), AGENTS.md (Codex
-  // convention), and GEMINI.md (Gemini CLI convention). Same section
+  // GLOBAL user-level inject FIRST: runs once, always (even with zero repos),
+  // so brand-new repos and non-Claude-Code hosts activate without waiting for a
+  // per-repo file. Merge its counts into the outcome.
+  const g = injectGlobalInstructions();
+  outcome.created += g.created;
+  outcome.appended += g.appended;
+  outcome.alreadyCurrent += g.alreadyCurrent;
+  outcome.versionUpdated += g.versionUpdated;
+  outcome.skipped.push(...g.skipped);
+
+  // Then per-repo docs. We write to CLAUDE.md (Claude Code convention), AGENTS.md
+  // (Codex convention), and GEMINI.md (Gemini CLI convention). Same section
   // content; each tool reads its own native file at session start so
   // the proactive replen_match instruction lands wherever the user
   // happens to open. Idempotent + collapsing applies to all three.
