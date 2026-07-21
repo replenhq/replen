@@ -296,10 +296,14 @@ export async function GET(req: Request) {
               afterFilter: 0,
               candidates: [],
               displayText: withUpgradeNudge(
-                `P.s. I just added \`${repoFilter}\` to Replen. Run \`npx replen\` once so it can read the code and match it properly, and so new repos activate automatically from now on.`,
+                `P.s. I just added \`${repoFilter}\` to Replen. Run \`npx replen@latest\` once so it can read the code and match it properly, and so new repos activate automatically from now on.`,
                 upgradeNudge,
               ),
-              note: "Just auto-registered this owner-matched repo (identity only, no capabilities). Relay the displayText line verbatim. Running `npx replen` installs the user-level instruction so future new repos activate silently. Do NOT triage the global firehose here.",
+              // `@latest` (not bare `npx replen`) is deliberate: a stale globally
+              // installed replen, or npx's per-spec cache, otherwise shadows the
+              // bare command and freezes the user on an old version. An explicit
+              // version spec forces the registry resolution.
+              note: "Just auto-registered this owner-matched repo (identity only, no capabilities). Relay the displayText line verbatim. Running `npx replen@latest` installs the user-level instruction so future new repos activate silently. Do NOT triage the global firehose here.",
             },
             { headers: corsHeaders },
           );

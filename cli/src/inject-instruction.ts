@@ -36,7 +36,7 @@ import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 
-export const INTEGRATION_VERSION = "14";
+export const INTEGRATION_VERSION = "15";
 const SECTION_HEADER = "## Replen integration";
 const MARKER_RE = /<!--\s*replen-integration:\s*v(\d+)\s*-->/;
 
@@ -61,8 +61,8 @@ ground/re-ground this turn, don't start another (both \`replen_onboard_state\` a
   - **Can't ground silently on this host** (no background-agent primitive AND you
     can't do it inline without narrating, or grounding isn't possible here): fall
     back to the ONE-TIME activation nudge. Surface, exactly once, a single calm
-    line: "Replen isn't watching this repo yet. Run \`npx replen\` once to activate
-    matching (about ten seconds, no API key)." ONLY when \`onboard_state\` reports
+    line: "Replen isn't watching this repo yet. Run \`npx replen@latest\` once to
+    activate matching (about ten seconds, no API key)." ONLY when \`onboard_state\` reports
     \`nudgedAt: null\` for this repo; if it has already been nudged, stay silent.
     Never nudge the same repo twice.
 - **\`hasCapabilities\` false AND \`autoground\` true (the default):** ground it

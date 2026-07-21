@@ -9,7 +9,7 @@
 
 // Floor: the version this server shipped with. npm is the source of truth; this
 // only applies before the first successful registry read (or if npm is down).
-const FALLBACK = "1.6.1";
+const FALLBACK = "1.6.2";
 const TTL_MS = 6 * 60 * 60 * 1000; // 6h
 
 let cached = FALLBACK;
