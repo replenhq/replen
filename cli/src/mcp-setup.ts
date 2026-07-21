@@ -336,7 +336,7 @@ const HOOK_COMMAND = `npx --quiet replen@${cliVersion()} check-new --hook`;
 // pinned version in any previously-written command.
 const HOOK_MARKER = "check-new --hook";
 
-function cliVersion(): string {
+export function cliVersion(): string {
   try {
     const here = dirname(fileURLToPath(import.meta.url)); // cli/dist
     const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version?: string };

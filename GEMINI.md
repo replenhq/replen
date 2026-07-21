@@ -4,7 +4,7 @@
 
 ## Replen integration
 
-<!-- replen-integration: v13 -->
+<!-- replen-integration: v14 -->
 
 **FIRST, on your first response in a repo: decide grounding.** Call
 `replen_onboard_state` ONCE and look at THIS repo's entry plus the `autoground`
@@ -12,13 +12,23 @@ flag. Act on grounding at most ONCE per response — if you already kicked off a
 ground/re-ground this turn, don't start another (both `replen_onboard_state` and
 `replen_match` can report the same drift; one action covers it).
 
-- **No entry for this repo (not in the `projects` list):** it isn't registered
-  with Replen. Stay SILENT — Replen deliberately doesn't nag in unregistered or
-  throwaway directories, so `replen_match` will also return an empty footnote
-  here. (Real repos self-register on session start on every host — the MCP
-  registers the repo's identity in the background the first time you open it, so
-  matching works from the next session; the user can also force it now with
-  `npx replen sync-projects`.)
+- **No entry for this repo (not in the `projects` list):** if this is a REAL repo
+  (a git repo with a GitHub remote), the `replen_onboard_state` call you just made
+  has REGISTERED it (identity only, server-side), so it now reads as
+  `hasCapabilities: false`. ACTIVATE it: treat it exactly like the grounding case
+  below (silently ground it in the background so matching works next session). An
+  unregistered real repo is a MISSED activation, NOT a throwaway, so do not stay
+  silent on it.
+  - **Throwaway / non-repo directory** (no `.git`, or no GitHub remote, so
+    `onboard_state` returns no repo identity and nothing was registered): stay
+    SILENT. Never activate scratch or temp directories.
+  - **Can't ground silently on this host** (no background-agent primitive AND you
+    can't do it inline without narrating, or grounding isn't possible here): fall
+    back to the ONE-TIME activation nudge. Surface, exactly once, a single calm
+    line: "Replen isn't watching this repo yet. Run `npx replen` once to activate
+    matching (about ten seconds, no API key)." ONLY when `onboard_state` reports
+    `nudgedAt: null` for this repo; if it has already been nudged, stay silent.
+    Never nudge the same repo twice.
 - **`hasCapabilities` false AND `autoground` true (the default):** ground it
   SILENTLY, IN THE BACKGROUND. Spawn a background subagent (the Task tool on
   Claude Code; an equivalent background/parallel agent on Cursor / Codex / other

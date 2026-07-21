@@ -241,6 +241,10 @@ export async function runCheckNew(argv: string[]): Promise<void> {
       console.log("[Replen] Relay the following line to the user, verbatim, as a footnote at the very end of your first reply:");
       console.log(inv.displayText);
     }
+    // LAYER 2: keep this install current with no manual re-run. Best-effort,
+    // silent, and completely off the user's critical path (a failure here can
+    // never break session open or the working install).
+    await selfMaintain(inv?.latestCliVersion ?? null);
     return;
   }
 
@@ -570,6 +574,7 @@ type InventoryHookStatus = {
   topRepo: string | null;
   topSimilarity: number | null;
   displayText: string | null;
+  latestCliVersion: string | null;
 };
 async function fetchInventoryStatus(
   cfg: { token: string; base: string },
@@ -591,15 +596,17 @@ async function fetchInventoryStatus(
     const data = (await res.json()) as {
       displayText?: string | null;
       candidates?: Array<{ repo?: string; whyShortlisted?: string }>;
+      latestCliVersion?: string | null;
     };
     const cands = data.candidates ?? [];
     const displayText = (typeof data.displayText === "string" && data.displayText) ? data.displayText : null;
-    // Surface even with ZERO candidates when the server sent a displayText —
+    const latestCliVersion = (typeof data.latestCliVersion === "string" && data.latestCliVersion) ? data.latestCliVersion : null;
+    // Surface even with ZERO candidates when the server sent a displayText:
     // notably the onboard-on-first-visit offer for a registered-but-unprofiled
-    // repo (needsOnboarding): it has no candidates yet but IS the line to relay.
-    // Previously `cands.length === 0 → return null` swallowed it, so the
-    // SessionStart hook stayed silent on unprofiled repos.
-    if (cands.length === 0 && !displayText) return null;
+    // repo (needsOnboarding), which has no candidates yet but IS the line to
+    // relay. Also keep the object alive when only the self-update version signal
+    // is present, so the hook can still self-update on a quiet session.
+    if (cands.length === 0 && !displayText && !latestCliVersion) return null;
     const top = cands[0];
     // Pull the cosine % out of whyShortlisted if present
     // (format: "...; semantic similarity: 58%").
@@ -608,16 +615,83 @@ async function fetchInventoryStatus(
       count: cands.length,
       topRepo: top?.repo ?? null,
       topSimilarity: simMatch ? Number(simMatch[1]) : null,
-      // The server's pre-formatted, pattern-aware footnote ("By the way — a
+      // The server's pre-formatted, pattern-aware footnote ("By the way, a
       // dependency you use just shipped: …" / "… N candidates queued …" / the
       // onboard offer).
       displayText,
+      latestCliVersion,
     };
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Forward-only semver compare (x.y.z; any prerelease suffix is ignored). True
+// only when `a` is strictly greater than `b`.
+export function isSemverGreater(a: string, b: string): boolean {
+  const pa = a.split(".").map((n) => parseInt(n, 10));
+  const pb = b.split(".").map((n) => parseInt(n, 10));
+  for (let i = 0; i < 3; i++) {
+    const x = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const y = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+// LAYER 2: keep a 1.6.x+ install current with NO manual re-run.
+//  (a) Refresh the global instruction files to THIS CLI's version, but only when
+//      the user already opted into them (never CREATE them silently in a hook).
+//  (b) When the server reports a newer published CLI, silently re-pin to it:
+//      forward-only, throttled to once a day, detached, and fail-safe. The hook
+//      runs as `npx replen@<oldVersion>`, so re-pinning in-process would re-pin
+//      the SAME stale version; going through the registry (@latest) is what
+//      fetches the new binary and rewrites the pin for the NEXT session.
+// Every step is best-effort and swallows its own errors: nothing here may break
+// session open or the working install.
+async function selfMaintain(latestCliVersion: string | null): Promise<void> {
+  // (a) idempotent global-instruction refresh (update-only, opt-in gated).
+  try {
+    const { existsSync } = await import("node:fs");
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    if (existsSync(join(homedir(), ".claude", "rules", "replen.md"))) {
+      const { injectGlobalInstructions } = await import("./inject-instruction.js");
+      injectGlobalInstructions();
+    }
+  } catch { /* best-effort */ }
+
+  // (b) forward-only, throttled, detached self-update.
+  try {
+    if (!latestCliVersion) return;
+    if (process.env.REPLEN_NO_SELFUPDATE) return; // kill-switch for a self-modifying path
+    const { cliVersion } = await import("./mcp-setup.js");
+    const local = cliVersion();
+    if (local === "latest" || !isSemverGreater(latestCliVersion, local)) return;
+
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const dir = join(homedir(), ".replen");
+    const marker = join(dir, "last-selfupdate");
+    try {
+      const last = Number(readFileSync(marker, "utf8").trim());
+      if (Number.isFinite(last) && Date.now() - last < 24 * 60 * 60 * 1000) return; // throttled
+    } catch { /* no marker yet: proceed */ }
+    // Stamp BEFORE spawning so a crash can't cause a retry storm.
+    try { mkdirSync(dir, { recursive: true }); writeFileSync(marker, String(Date.now())); } catch { /* best-effort */ }
+
+    const { spawn } = await import("node:child_process");
+    const child = spawn("npx", ["--yes", "replen@latest", "mcp", "setup"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.on("error", () => { /* never surface */ });
+    child.unref();
+  } catch { /* a failed self-update leaves the working install intact */ }
 }
 
 // `replen atlas` — write your knowledge graph as an owned, Obsidian-compatible

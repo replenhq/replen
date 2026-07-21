@@ -34,6 +34,7 @@ import { loadRankHints, type RankHints } from "@/graph/coverage";
 import type { Modality, Provenance, Maturity } from "@/projects/modality";
 import { modalitiesDisjoint, coerceModalities, coerceMaturity } from "@/projects/modality";
 import { needsReground, summaryIsGrounded } from "@/projects/summarize";
+import { getLatestCliVersion } from "@/lib/cli-version";
 
 // Skill-mode inventory endpoint.
 //
@@ -249,6 +250,78 @@ export async function GET(req: Request) {
           { headers: corsHeaders },
         );
       }
+    } else if (!p && repoFilter && /^[^/\s]+\/[^/\s]+$/.test(repoFilter)) {
+      // LAYER 1 (migrate the frozen base). The cwd repo is UNREGISTERED but its
+      // OWNER matches one the user already has projects under, so it is almost
+      // certainly THEIR new repo. Register its identity now and surface a ONE-TIME
+      // nudge to run `npx replen` (which installs the global instruction so future
+      // repos activate silently). This reaches EXISTING users with no client
+      // update: the SessionStart hook already sends ?repo and relays displayText
+      // verbatim. Owner guard = never touch a repo they are only browsing. Once
+      // registered, the next session takes the needsOnboarding path above instead,
+      // so the nudge fires at most once per repo.
+      const owner = repoFilter.split("/")[0];
+      const mine = await db
+        .select({ gfn: schema.projectProfiles.githubFullName, slug: schema.projectProfiles.slug })
+        .from(schema.projectProfiles)
+        .where(eq(schema.projectProfiles.userId, auth.userId));
+      const allowedOwners = new Set(mine.map((r) => (r.gfn ?? "").toLowerCase().split("/")[0]).filter(Boolean));
+      if (allowedOwners.has(owner)) {
+        const name = repoFilter.split("/")[1];
+        const slugs = new Set(mine.map((r) => r.slug));
+        const base = name.replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || owner;
+        const slug = slugs.has(base) ? `${base}-${owner}`.replace(/[^a-z0-9_-]/g, "-").slice(0, 80) : base;
+        try {
+          await db.insert(schema.projectProfiles).values({
+            userId: auth.userId,
+            slug,
+            path: `github:${repoFilter}`,
+            name,
+            githubFullName: repoFilter,
+            profileHash: "pending-loader",
+            active: true,
+            included: true,
+            sensitivity: "low",
+            llmProvider: "auto",
+            nudgedAt: new Date(),
+            updatedAt: new Date(),
+          });
+          return NextResponse.json(
+            {
+              filterMode,
+              scopedTo: repoFilter,
+              days,
+              totalConsidered: 0,
+              afterEligibility: 0,
+              afterFilter: 0,
+              candidates: [],
+              displayText: withUpgradeNudge(
+                `P.s. I just added \`${repoFilter}\` to Replen. Run \`npx replen\` once so it can read the code and match it properly, and so new repos activate automatically from now on.`,
+                upgradeNudge,
+              ),
+              note: "Just auto-registered this owner-matched repo (identity only, no capabilities). Relay the displayText line verbatim. Running `npx replen` installs the user-level instruction so future new repos activate silently. Do NOT triage the global firehose here.",
+            },
+            { headers: corsHeaders },
+          );
+        } catch {
+          // Unique-constraint race (a concurrent session registered it) or slug
+          // collision: fall through to the silent response below.
+        }
+      }
+      return NextResponse.json(
+        {
+          filterMode,
+          scopedTo: repoFilter,
+          days,
+          totalConsidered: 0,
+          afterEligibility: 0,
+          afterFilter: 0,
+          candidates: [],
+          displayText: withUpgradeNudge(null, upgradeNudge),
+          note: "repo not in your project list and owner not matched (likely a repo you are browsing), so this project isn't set up with Replen. Do NOT triage the global firehose (it's noise for this codebase). If the user wants it watched, offer to onboard it: git init + create the repo, write a README + Replen-optimised CLAUDE.md, register + tag at app.replen.dev/projects.",
+        },
+        { headers: corsHeaders },
+      );
     } else {
       // Stay silent on the inventory in two cases:
       //   - the cwd's repo isn't a known project (surfacing matches for
@@ -2181,6 +2254,10 @@ export async function GET(req: Request) {
   return NextResponse.json(
     {
       filterMode,
+      // Latest published CLI version, for the client's silent self-update (layer
+      // 2): the SessionStart hook compares it to its own version and, when behind,
+      // re-pins to latest so 1.6.x installs never need a manual re-run again.
+      latestCliVersion: getLatestCliVersion(),
       scopedTo: scopedProject ? `${scopedProject.slug} (${scopedProject.githubFullName})` : null,
       // Silent-reground hint for the cwd repo (see needsReground). When
       // `reground` is true the injected instruction re-grounds in the background.
